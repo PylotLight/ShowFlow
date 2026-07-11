@@ -1,0 +1,40 @@
+@import "./globals.css";
+
+@layer base {
+  :root {
+    @apply font-sans;
+  }
+
+  body {
+    @apply relative m-0 min-h-screen bg-background text-foreground;
+  }
+}
+
+/* Ambient control-room glow behind the app shell */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, oklch(0.72 0.19 25 / 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 90% 10%, oklch(0.8 0.15 80 / 0.08), transparent);
+  pointer-events: none;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+  }
+}
