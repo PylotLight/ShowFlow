@@ -421,6 +421,7 @@ export class DatabaseManager {
       { id: 'f_hdr', name: 'HDR', regex: 'HDR', score: 50 },
       { id: 'f_x265', name: 'x265', regex: 'x265', score: 10 },
       { id: 'f_hevc', name: 'HEVC', regex: 'HEVC', score: 10 },
+      { id: 'f_h265', name: 'H265', regex: 'H265', score: 10 },
     ];
     for (const f of formats) {
       this.db.run(
@@ -430,18 +431,18 @@ export class DatabaseManager {
     }
 
     // Seed default quality profiles
-    // Standard — HDR bonus, x265 bonus
+    // Standard — HDR bonus, x265 bonus, H265 bonus
     this.db.run(`INSERT OR IGNORE INTO quality_profiles (id, name) VALUES ('standard', 'Standard')`);
-    for (const f of ['f_hdr', 'f_x265']) {
+    for (const f of ['f_hdr', 'f_x265', 'f_h265']) {
       this.db.run(
         'INSERT OR IGNORE INTO profile_formats (profile_id, format_id, type) VALUES (?, ?, ?)',
         ['standard', f, 'bonus']
       );
     }
 
-    // Anime — x265 and HEVC bonuses (common for anime encodes)
+    // Anime — x265, HEVC, and H265 bonuses (common for anime encodes)
     this.db.run(`INSERT OR IGNORE INTO quality_profiles (id, name) VALUES ('anime', 'Anime')`);
-    for (const f of ['f_x265', 'f_hevc']) {
+    for (const f of ['f_x265', 'f_hevc', 'f_h265']) {
       this.db.run(
         'INSERT OR IGNORE INTO profile_formats (profile_id, format_id, type) VALUES (?, ?, ?)',
         ['anime', f, 'bonus']
@@ -1173,6 +1174,33 @@ export class DatabaseManager {
     })) as any[];
   }
 
+  /**
+   * Episodes that are tracked, have already aired, and have no file on
+   * disk yet - the "you're missing these" list. Ordered most-recently-aired
+   * first so the freshest gaps surface at the top.
+   */
+  listMissingEpisodes() {
+    const result = this.drizz.select({
+      episode: schema.episodes,
+      show_title: schema.shows.title,
+    })
+      .from(schema.episodes)
+      .leftJoin(schema.shows, eq(schema.episodes.show_id, schema.shows.id))
+      .where(and(
+        eq(schema.episodes.is_tracked, 1),
+        sql`${schema.episodes.air_date} IS NOT NULL`,
+        sql`${schema.episodes.air_date} <= datetime('now')`,
+        sql`(${schema.episodes.file_path} IS NULL OR ${schema.episodes.file_path} = '')`,
+      ))
+      .orderBy(sql`${schema.episodes.air_date} DESC`)
+      .all();
+
+    return result.map(r => ({
+      ...r.episode,
+      show_title: r.show_title,
+    })) as any[];
+  }
+
   setTracked(showId: string, seasonNumber: number, episodeNumber: number, tracked: boolean) {
     this.drizz.update(schema.episodes).set({ is_tracked: tracked ? 1 : 0 })
       .where(and(
@@ -1379,6 +1407,16 @@ export class DatabaseManager {
 
   listRecentEvents(limit = 20) {
     return this.db.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?').all(limit) as any[];
+  }
+
+  cleanupOldLogs(beforeDate: string) {
+    const result = this.db.run('DELETE FROM audit_logs WHERE timestamp < ?', [beforeDate]);
+    return result.changes;
+  }
+
+  cleanupExpiredCache() {
+    const result = this.db.run('DELETE FROM metadata_cache WHERE expires_at < CURRENT_TIMESTAMP');
+    return result.changes;
   }
 
   // ---- Show Profiles -----------------------------------------------------

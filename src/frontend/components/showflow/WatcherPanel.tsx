@@ -55,7 +55,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
   }
 
   return (
-    <GlassPanel className={cn("flex flex-col gap-4 p-5 min-h-0", className)}>
+    <GlassPanel className={cn("flex flex-col gap-4 p-5 min-h-0 overflow-hidden", className)}>
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="relative flex items-center justify-center">

@@ -8,9 +8,13 @@ import { ShowDetailDialog } from "@frontend/components/showflow/ShowDetailDialog
 import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { SettingsPage } from "@frontend/components/showflow/SettingsPage";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
+import { QueuePage } from "@frontend/components/showflow/QueuePage";
+import { MissingPage } from "@frontend/components/showflow/MissingPage";
+import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { SearchIcon } from "lucide-react";
+import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import "./styles/index.css";
 
@@ -19,6 +23,7 @@ export function App() {
   const [query, setQuery] = React.useState("");
   const [selected, setSelected] = React.useState<ShowSummary | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
 
   React.useEffect(() => {
     loadTheme().then((theme) => {
@@ -35,7 +40,7 @@ export function App() {
   }
 
   return (
-    <div className="app-background flex min-h-screen text-foreground pb-14 md:pb-0">
+    <div className="app-background flex h-screen text-foreground pb-14 md:pb-0">
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
@@ -51,10 +56,14 @@ export function App() {
       )}
 
       {/* Navigation Sidebar */}
-      <Sidebar activeItem={activeNav} onChange={(item) => { setActiveNav(item); setSelected(null); }} />
+      <Sidebar 
+        activeItem={activeNav} 
+        onChange={(item) => { setActiveNav(item); setSelected(null); }}
+        onSettingsTab={(tab) => { setSettingsInitialTab(tab); setActiveNav("settings"); setSelected(null); }}
+      />
 
       {/* Main Viewport Workspace */}
-      <div className="flex-1 flex flex-col min-w-0 relative z-10">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 relative z-10">
         {/* Main Content Header — hidden when view has its own header */}
         {activeNav !== "settings" && activeNav !== "agenda" && (
           <header className="flex h-16 items-center justify-between border-b border-white/5 px-6 py-4">
@@ -85,7 +94,7 @@ export function App() {
         )}
 
         {/* Dynamic Content Views */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeNav === "dashboard" ? (
             <div className="h-full flex flex-col overflow-hidden">
               <Dashboard
@@ -107,7 +116,22 @@ export function App() {
               onBackdropChange={setBackdropUrl}
             />
           ) : activeNav === "settings" ? (
-            <SettingsPage onDone={() => setActiveNav("dashboard")} />
+            <SettingsPage
+              key={settingsInitialTab}
+              onDone={() => setActiveNav("dashboard")}
+              initialTab={settingsInitialTab}
+            />
+          ) : activeNav === "queue" ? (
+            <QueuePage key={refreshKey} />
+          ) : activeNav === "missing" ? (
+            <MissingPage key={refreshKey} onSelectShow={selectShow} />
+          ) : activeNav === "sources" ? (
+            <SourcesPage
+              onOpenSettings={() => {
+                setSettingsInitialTab("indexers");
+                setActiveNav("settings");
+              }}
+            />
           ) : (
             <div className="glass-plane rounded-xl p-8 text-center text-muted-foreground">
               <h3 className="font-display text-lg font-bold text-white mb-2 uppercase">
@@ -120,6 +144,9 @@ export function App() {
           )}
         </div>
       </div>
+
+      {/* Feedback button — floating bottom-right */}
+      <FeedbackButton />
 
       {/* Show Detail Modal — renders on top of any page */}
       {selected && (

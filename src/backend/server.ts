@@ -16,6 +16,7 @@ import type { IndexerResult } from "./providers/indexers/types";
 import { NATIVE_INDEXER_META, type NativeIndexerConfig, type NativeIndexerId } from "./providers/indexers/native/types";
 import { runBackup, listBackups, uploadBackup, restoreBackup } from "../../scripts/backup";
 import { createApiDebugLog, subscribeDebugLogs, getDebugLogs, clearDebugLogs, isDebugEnabled } from "./core/debug";
+import { GITHUB_TOKEN, GITHUB_REPO } from "./feedback/config";
 
 // ---- Config -----------------------------------------------------------
 // Migrated from config.json to database settings.
@@ -64,6 +65,15 @@ function loadConfig(): Config {
 
 function invalidateConfigCache() {
   cachedConfig = null;
+}
+
+function reinitializeServices() {
+  const newConfig = loadConfig();
+  if (systemManager) {
+    // System manager doesn't need reinitialization for config changes
+  }
+  // Scheduler would need to be reinitialized if we want to apply config changes immediately
+  // For now, we'll let it continue with the existing config
 }
 
 function isProviderType(value: string): value is ProviderType {
@@ -402,6 +412,73 @@ const routeDefinitions = {
     async GET() {
       try {
         return json(systemManager.getProcessingFiles());
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  // ---- Task scheduling --------------------------------------------------
+
+  "/api/tasks": {
+    async GET() {
+      try {
+        const tasks = db.listTasks();
+        const definitions = scheduler.getTaskDefinitions();
+        
+        const enrichedTasks = tasks.map((task: any) => {
+          const def = definitions.find(d => d.name === task.name);
+          return {
+            name: task.name,
+            displayName: def?.displayName || task.name,
+            description: def?.description || '',
+            category: def?.category || 'system',
+            intervalMinutes: task.interval_minutes,
+            enabled: !!task.enabled,
+            lastExecution: task.last_execution,
+            lastDurationMs: task.last_duration_ms,
+            nextExecution: task.next_execution,
+          };
+        });
+        
+        return json(enrichedTasks);
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/tasks/definitions": {
+    async GET() {
+      try {
+        return json(scheduler.getTaskDefinitions());
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/tasks/:name": {
+    async PATCH(req: RouteReq) {
+      try {
+        const { name } = req.params;
+        const body = await req.json();
+        
+        scheduler.updateTaskConfig(name, {
+          enabled: body.enabled,
+          intervalMinutes: body.intervalMinutes,
+        });
+        
+        return json({ success: true });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+    async POST(req: RouteReq) {
+      try {
+        const { name } = req.params;
+        const result = await scheduler.runTaskNow(name);
+        return json(result);
       } catch (err) {
         return errorResponse(err, 500);
       }
@@ -1687,8 +1764,96 @@ const routeDefinitions = {
             season: ep.season_number,
             episode: ep.episode_number,
             airDate: ep.air_date,
+            filePath: ep.file_path ?? null,
           })),
         );
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/missing": {
+    async GET() {
+      try {
+        const episodes = db.listMissingEpisodes();
+        return json(
+          episodes.map((ep: any) => ({
+            showId: ep.show_id,
+            showTitle: ep.show_title,
+            episodeTitle: ep.title,
+            season: ep.season_number,
+            episode: ep.episode_number,
+            airDate: ep.air_date,
+            searchMode: ep.search_mode || 'auto',
+          })),
+        );
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/feedback": {
+    async POST(req: RouteReq) {
+      try {
+        const body = (await req.json()) as {
+          message: string;
+          screenshot?: string;
+          url?: string;
+          includeDebugLogs?: boolean;
+          userAgent?: string;
+        };
+
+        if (!body.message?.trim()) {
+          return errorResponse("Message is required");
+        }
+
+        const token = GITHUB_TOKEN;
+        const repo = GITHUB_REPO;
+
+        const lines = [
+          `**Description**`,
+          body.message,
+          "",
+          `**URL**  ${body.url || "N/A"}`,
+          `**Browser**  ${body.userAgent || "N/A"}`,
+          `**Time**  ${new Date().toISOString()}`,
+        ];
+
+        if (body.screenshot) {
+          lines.push("", "**Screenshot**", `![screenshot](data:image/png;base64,${body.screenshot})`);
+        }
+
+        if (body.includeDebugLogs) {
+          const logs = getDebugLogs({ limit: 50 });
+          if (logs.length > 0) {
+            lines.push("", "**Debug Logs**", "```", JSON.stringify(logs, null, 2).slice(0, 8000), "```");
+          }
+        }
+
+        const res = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": "showflow-feedback",
+          },
+          body: JSON.stringify({
+            title: `Feedback: ${body.message.slice(0, 80)}${body.message.length > 80 ? "…" : ""}`,
+            body: lines.join("\n"),
+            labels: ["feedback"],
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          console.error("[feedback] GitHub API error:", res.status, err);
+          return errorResponse(`GitHub API error: ${res.status}`, 502);
+        }
+
+        const issue = await res.json();
+        return json({ url: issue.html_url, number: issue.number });
       } catch (err) {
         return errorResponse(err, 500);
       }
@@ -1756,7 +1921,7 @@ const server = serve({
   },
   development: process.env.NODE_ENV !== "production" && {
     hmr: true,
-    console: true,
+    console: false,
   },
 });
 

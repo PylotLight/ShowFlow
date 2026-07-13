@@ -9,7 +9,8 @@
     "build": "bun run build.ts",
     "test": "bun test",
     "cli": "bun src/cli/index.ts",
-    "backup": "bun scripts/backup.ts"
+    "backup": "bun scripts/backup.ts",
+    "setup-feedback": "bun scripts/setup-feedback.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

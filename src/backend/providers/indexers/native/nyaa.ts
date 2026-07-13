@@ -34,29 +34,29 @@ export class NyaaSiIndexer extends BaseNativeIndexer {
       const item = itemMatch[1];
       if (!item) continue;
 
-      const title = this.extractHtmlValue(item, /<title>([^<]*)<\/title>/);
+      const rawTitle = this.extractHtmlValue(item, /<title>([^<]*)<\/title>/);
+      const title = this.decodeXmlEntities(rawTitle);
       const guid = this.extractHtmlValue(item, /<guid[^>]*>([^<]*)<\/guid>/);
       const link = this.extractHtmlValue(item, /<link>([^<]*)<\/link>/);
       const pubDate = this.extractHtmlValue(item, /<pubDate>([^<]*)<\/pubDate>/);
-      const description = this.extractHtmlValue(item, /<description>([^<]*)<\/description>/);
 
       if (!title || !guid) continue;
 
-      const infoHash = guid.replace(/https?:\/\/[^\/]+\/view\//, '').replace(/^.*[\/\\]/, '');
+      // Nyaa's RSS namespace carries the real structured data - description
+      // text is not a reliable source anymore (Nyaa dropped the old
+      // "Seeders: X, Leechers: Y" description format some time ago).
+      const infoHash = this.extractHtmlValue(item, /<nyaa:infoHash>([^<]*)<\/nyaa:infoHash>/);
+      const seeders = this.extractHtmlValue(item, /<nyaa:seeders>([^<]*)<\/nyaa:seeders>/);
+      const leechers = this.extractHtmlValue(item, /<nyaa:leechers>([^<]*)<\/nyaa:leechers>/);
+      const sizeStr = this.extractHtmlValue(item, /<nyaa:size>([^<]*)<\/nyaa:size>/);
+      const categoryName = this.decodeXmlEntities(
+        this.extractHtmlValue(item, /<nyaa:category>([^<]*)<\/nyaa:category>/)
+      );
+
+      if (!infoHash) continue; // no valid infoHash means we can't build a usable magnet
+
       const magnetUrl = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}`;
-
-      const sizeMatch = description.match(/([\d.]+)\s*(KiB|MiB|GiB|TiB)/i);
-      let size = 0;
-      if (sizeMatch) {
-        const num = parseFloat(sizeMatch[1]!);
-        const unit = sizeMatch[2]!.toUpperCase();
-        const multipliers: Record<string, number> = { KIB: 1024, MIB: 1024 ** 2, GIB: 1024 ** 3, TIB: 1024 ** 4 };
-        size = Math.round(num * (multipliers[unit] ?? 1));
-      }
-
-      const seedersMatch = description.match(/Seeders:\s*(\d+)/i);
-      const leechersMatch = description.match(/Leechers:\s*(\d+)/i);
-
+      const size = this.parseSize(sizeStr);
       const ageHours = this.ageFromIso(pubDate);
 
       results.push({
@@ -64,8 +64,8 @@ export class NyaaSiIndexer extends BaseNativeIndexer {
         indexerId: 1,
         indexerName: this.name,
         title,
-        seeders: seedersMatch ? parseInt(seedersMatch[1]!, 10) : 0,
-        leechers: leechersMatch ? parseInt(leechersMatch[1]!, 10) : 0,
+        seeders: seeders ? parseInt(seeders, 10) : 0,
+        leechers: leechers ? parseInt(leechers, 10) : 0,
         grabs: 0,
         size,
         publishDate: pubDate,
@@ -75,12 +75,26 @@ export class NyaaSiIndexer extends BaseNativeIndexer {
         magnetUrl,
         infoHash,
         protocol: 'torrent',
-        categories: [{ id: 5070, name: 'Anime' }],
+        categories: [{ id: 5070, name: categoryName || 'Anime' }],
         indexerFlags: [],
         isPack: this.isPack(title),
       });
     }
 
     return results;
+  }
+
+  /**
+   * Decode the handful of XML entities Nyaa titles commonly contain
+   * (e.g. "SweetSub&amp;LoliHouse" -> "SweetSub&LoliHouse").
+   */
+  private decodeXmlEntities(str: string): string {
+    if (!str) return str;
+    return str
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0*39;|&apos;/g, "'");
   }
 }

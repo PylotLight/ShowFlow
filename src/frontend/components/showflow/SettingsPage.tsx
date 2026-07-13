@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { BugIcon, CheckIcon, ChevronRightIcon, DownloadIcon, EyeIcon, EyeOffIcon, FolderOpenIcon, Loader2Icon, PlusIcon, RefreshCwIcon, Trash2Icon, XIcon, ExternalLinkIcon } from "lucide-react";
+import { BugIcon, CheckIcon, ChevronRightIcon, DownloadIcon, EyeIcon, EyeOffIcon, FolderOpenIcon, Loader2Icon, PlusIcon, RefreshCwIcon, Trash2Icon, XIcon, ExternalLinkIcon, ClockIcon, PlayIcon, CalendarIcon } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -8,6 +8,7 @@ import { Input } from "@frontend/components/ui/input";
 import { Label } from "@frontend/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
+import { cn } from "@frontend/lib/utils";
 import { THEME_PRESETS, loadAccent, saveAccent, applyAccent, loadTheme, saveTheme, applyTheme, type ThemeConfig } from "@frontend/lib/theme";
 import { QualityProfilesTab } from "@frontend/components/showflow/QualityProfiles";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
@@ -19,12 +20,13 @@ const SETTINGS_TABS = [
   { id: "indexers", label: "Indexers" },
   { id: "quality", label: "Quality" },
   { id: "downloads", label: "Downloads" },
+  { id: "tasks", label: "Tasks" },
   { id: "backup", label: "Backup" },
   { id: "debug", label: "Debug" },
 ];
 
-export function SettingsPage({ onDone: _onDone }: { onDone: () => void }) {
-  const [tab, setTab] = React.useState("general");
+export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => void; initialTab?: string }) {
+  const [tab, setTab] = React.useState(initialTab || "general");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
   const [saveMsg, setSaveMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -52,16 +54,22 @@ export function SettingsPage({ onDone: _onDone }: { onDone: () => void }) {
   const [nativeTesting, setNativeTesting] = React.useState<Record<string, boolean>>({});
   const [nativeStatuses, setNativeStatuses] = React.useState<Record<string, { ok: boolean; message?: string }>>({});
 
+  const [tasks, setTasks] = React.useState<any[]>([]);
+  const [tasksLoading, setTasksLoading] = React.useState(false);
+  const [taskRunning, setTaskRunning] = React.useState<Record<string, boolean>>({});
+
   React.useEffect(() => {
     Promise.all([
       fetch("/api/config").then(r => r.json()),
       fetch("/api/settings").then(r => r.json()),
       fetch("/api/indexers/native/meta").then(r => r.json()),
+      fetch("/api/tasks").then(r => r.json()),
       loadTheme(),
-    ]).then(([cfg, settings, nativeMetaData, loadedTheme]) => {
+    ]).then(([cfg, settings, nativeMetaData, tasksData, loadedTheme]) => {
       setConfig(cfg);
       setTheme(loadedTheme);
       setNativeMeta(Array.isArray(nativeMetaData) ? nativeMetaData : []);
+      setTasks(Array.isArray(tasksData) ? tasksData : []);
       const prowlarrRaw = settings.find((s: any) => s.key === "prowlarr");
       if (prowlarrRaw) {
         try {
@@ -78,6 +86,14 @@ export function SettingsPage({ onDone: _onDone }: { onDone: () => void }) {
       setLoading(false);
     });
   }, []);
+
+  function loadTasks() {
+    setTasksLoading(true);
+    fetch("/api/tasks").then(r => r.json()).then(data => {
+      setTasks(Array.isArray(data) ? data : []);
+    }).catch(() => setTasks([]))
+    .finally(() => setTasksLoading(false));
+  }
 
   function updateTheme(updates: Partial<ThemeConfig>) {
     if (!theme) return;
@@ -187,6 +203,36 @@ export function SettingsPage({ onDone: _onDone }: { onDone: () => void }) {
     const newKeys = { ...(config.apiKeys || {}), [provider]: value || undefined };
     const clean = Object.fromEntries(Object.entries(newKeys).filter(([_, v]) => v));
     saveConfig({ apiKeys: clean });
+  }
+
+  function updateTaskConfig(name: string, updates: { enabled?: boolean; intervalMinutes?: number }) {
+    setSaving(`task-${name}`);
+    setSaveMsg(null);
+    fetch(`/api/tasks/${name}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    }).then(r => {
+      if (r.ok) {
+        setSaveMsg({ ok: true, text: "Task updated" });
+        loadTasks();
+      } else {
+        setSaveMsg({ ok: false, text: "Failed to update task" });
+      }
+    }).catch(() => setSaveMsg({ ok: false, text: "Network error" }))
+    .finally(() => setSaving(null));
+  }
+
+  function runTaskNow(name: string) {
+    setTaskRunning(prev => ({ ...prev, [name]: true }));
+    setSaveMsg(null);
+    fetch(`/api/tasks/${name}`, {
+      method: "POST",
+    }).then(r => r.json()).then(res => {
+      setSaveMsg({ ok: res.success, text: res.message || "Task completed" });
+      loadTasks();
+    }).catch(() => setSaveMsg({ ok: false, text: "Failed to run task" }))
+    .finally(() => setTaskRunning(prev => ({ ...prev, [name]: false })));
   }
 
   if (loading) {
@@ -731,6 +777,7 @@ export function SettingsPage({ onDone: _onDone }: { onDone: () => void }) {
             )}
           </GlassPanel>
         )}
+        {tab === "tasks" && <TasksPanel tasks={tasks} loading={tasksLoading} onRunTask={runTaskNow} onUpdateTask={updateTaskConfig} taskRunning={taskRunning} saving={saving} />}
         {tab === "backup" && <BackupPanel />}
         {tab === "debug" && <DebugSettings />}
       </div>
@@ -1096,6 +1143,198 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (v: string
         </div>,
         document.body
       )}
+    </div>
+  );
+}
+
+function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunning, saving }: {
+  tasks: any[];
+  loading: boolean;
+  onRunTask: (name: string) => void;
+  onUpdateTask: (name: string, updates: any) => void;
+  taskRunning: Record<string, boolean>;
+  saving: string | null;
+}) {
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [editInterval, setEditInterval] = React.useState<number>(60);
+
+  const groupedTasks = React.useMemo(() => {
+    const groups: Record<string, any[]> = {
+      sync: [],
+      maintenance: [],
+      downloading: [],
+      system: [],
+    };
+    tasks.forEach(task => {
+      if (groups[task.category]) {
+        groups[task.category].push(task);
+      } else {
+        groups.system.push(task);
+      }
+    });
+    return groups;
+  }, [tasks]);
+
+  const categoryLabels: Record<string, { label: string; icon: any }> = {
+    sync: { label: "Sync Tasks", icon: RefreshCwIcon },
+    maintenance: { label: "Maintenance", icon: CalendarIcon },
+    downloading: { label: "Downloading", icon: DownloadIcon },
+    system: { label: "System", icon: ClockIcon },
+  };
+
+  function formatInterval(minutes: number): string {
+    if (minutes < 60) return `${minutes}m`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+    return `${Math.floor(minutes / 1440)}d`;
+  }
+
+  function formatLastExecution(task: any): string {
+    if (!task.lastExecution) return "Never";
+    const date = new Date(task.lastExecution);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+    return `${Math.floor(diffMins / 1440)}d ago`;
+  }
+
+  function formatNextExecution(task: any): string {
+    if (!task.nextExecution) return "Not scheduled";
+    const date = new Date(task.nextExecution);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins <= 0) return "Due now";
+    if (diffMins < 60) return `In ${diffMins}m`;
+    if (diffMins < 1440) return `In ${Math.floor(diffMins / 60)}h`;
+    return `In ${Math.floor(diffMins / 1440)}d`;
+  }
+
+  function startEdit(task: any) {
+    setEditing(task.name);
+    setEditInterval(task.intervalMinutes);
+  }
+
+  function saveEdit(task: any) {
+    onUpdateTask(task.name, { intervalMinutes: editInterval });
+    setEditing(null);
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {Object.entries(groupedTasks).map(([category, categoryTasks]) => {
+        if (categoryTasks.length === 0) return null;
+        const { label, icon: Icon } = categoryLabels[category] || { label: category, icon: ClockIcon };
+        
+        return (
+          <GlassPanel key={category} className="overflow-hidden">
+            <div className="px-6 py-4 border-b border-white/5">
+              <div className="flex items-center gap-2">
+                <Icon className="size-4 text-signal" />
+                <h3 className="font-display text-lg font-bold text-white">{label}</h3>
+              </div>
+            </div>
+            <div className="divide-y divide-white/5">
+              {categoryTasks.map(task => (
+                <div key={task.name} className="px-6 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-mono text-sm font-medium text-white">{task.displayName}</h4>
+                        {!task.enabled && (
+                          <span className="px-2 py-0.5 rounded-full bg-white/5 text-muted-foreground text-[10px] font-mono uppercase">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground text-xs mt-1">{task.description}</p>
+                      <div className="flex items-center gap-4 mt-3 text-xs font-mono text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <ClockIcon className="size-3" />
+                          Interval: {editing === task.name ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                value={editInterval}
+                                onChange={e => setEditInterval(parseInt(e.target.value) || 1)}
+                                className="w-16 bg-white/5 border border-white/10 rounded px-2 py-0.5 text-foreground"
+                                min="1"
+                              />
+                              <span>minutes</span>
+                              <button
+                                onClick={() => saveEdit(task)}
+                                disabled={saving === `task-${task.name}`}
+                                className="text-emerald-400 hover:text-emerald-300"
+                              >
+                                <CheckIcon className="size-3" />
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <XIcon className="size-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => startEdit(task)}
+                              className="hover:text-foreground transition-colors"
+                            >
+                              {formatInterval(task.intervalMinutes)}
+                            </button>
+                          )}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          Last run: {formatLastExecution(task)}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          Next run: {formatNextExecution(task)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Switch
+                        checked={task.enabled}
+                        onCheckedChange={(checked) => onUpdateTask(task.name, { enabled: checked })}
+                        disabled={saving === `task-${task.name}`}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRunTask(task.name)}
+                        disabled={taskRunning[task.name] || !task.enabled}
+                        className="h-8 px-2"
+                      >
+                        {taskRunning[task.name] ? (
+                          <Loader2Icon className="size-4 animate-spin" />
+                        ) : (
+                          <PlayIcon className="size-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassPanel>
+        );
+      })}
     </div>
   );
 }

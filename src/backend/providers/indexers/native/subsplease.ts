@@ -3,20 +3,29 @@ import { BaseNativeIndexer } from './base';
 
 /**
  * SubsPlease indexer - uses RSS feed for latest releases.
- * RSS endpoint: https://subsplease.org/rss/
+ * RSS endpoint: https://subsplease.org/rss/?r=<resolution>
+ *   resolution: 'sd' | '720' | '1080' | '' (all resolutions, mixed)
  *
- * SubsPlease has no built-in search, so we fetch the main RSS feed
- * and filter by title match client-side.
+ * Note: SubsPlease also has an undocumented JSON search API
+ * (https://subsplease.org/api/?f=search&tz=<tz>&s=<query>) that returns
+ * structured per-resolution magnet links without needing RSS + title
+ * substring matching. Worth migrating to if this feed proves flaky.
+ *
+ * SubsPlease has no built-in search on the RSS feed itself, so we fetch
+ * a single resolution's feed and filter by title match client-side.
  */
 export class SubsPleaseIndexer extends BaseNativeIndexer {
   name = 'SubsPlease';
+
+  /** Default resolution for the RSS feed - matches the site's own default. */
+  private readonly resolution = '1080';
 
   constructor(baseUrl?: string) {
     super('subsplease', baseUrl, 1500);
   }
 
   protected override async doSearch(query: string, options?: SearchOptions): Promise<IndexerResult[]> {
-    const rssUrl = `${this.baseUrl}/rss/`;
+    const rssUrl = `${this.baseUrl}/rss/?r=${this.resolution}`;
     const rss = await this.fetchRss(rssUrl);
     const allResults = this.parseRss(rss);
 

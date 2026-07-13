@@ -10,6 +10,9 @@ dist
 coverage
 *.lcov
 
+# feedback token config (contains GitHub PAT)
+src/backend/feedback/config.ts
+
 # logs
 logs
 _.log

@@ -1,5 +1,5 @@
 import {
-  Scan, Activity, ChevronRight, RotateCcw, RefreshCw,
+  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw,
 } from "lucide-react";
 import * as React from "react";
 
@@ -17,6 +17,7 @@ interface UpcomingEpisode {
   season: number;
   episode: number;
   airDate: string;
+  filePath: string | null;
 }
 
 function isDateOnly(airDate: string): boolean {
@@ -60,6 +61,14 @@ function getCompactDate(airDate: string): string {
   const label = target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   if (time) return `${label}${timeStr}`;
   return label;
+}
+
+function isPast(airDate: string): boolean {
+  return new Date(airDate).getTime() <= Date.now();
+}
+
+function formatNowTime(): string {
+  return new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 function getRowProximity(airDate: string): { color: string; dot: string } {
@@ -322,13 +331,29 @@ function Dashboard({
                     <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/30 border-b border-white/5 pb-1 mb-1">
                       {group.label}
                     </h3>
-                    {group.items.map((ep, i) => {
+                    {(() => {
+                      const isToday = group.label === "Today";
+                      const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(ep.airDate)) : -1;
+                      const hasNowLine = nowLineIdx > 0;
+                      return group.items.map((ep, i) => {
                       const showObj = getMatchingShow(ep.showTitle);
                       const prox = getRowProximity(ep.airDate);
                       const time = formatAirTime(ep.airDate);
                       return (
+                        <React.Fragment key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}>
+                          {hasNowLine && i === nowLineIdx && (
+                            <div className="relative flex items-center py-1">
+                              <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-signal/40" />
+                              </div>
+                              <div className="relative flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/10 px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-signal border border-signal/20">
+                                  NOW — {formatNowTime()}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         <div
-                          key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
                           onClick={() => {
                             if (showObj) onSelectShow(showObj);
                           }}
@@ -364,12 +389,22 @@ function Dashboard({
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">
-                            {getCompactDate(ep.airDate)}
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {ep.filePath && (
+                              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
+                                <CheckIcon className="size-2.5" strokeWidth={3} />
+                                Grabbed
+                              </span>
+                            )}
+                            <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">
+                              {getCompactDate(ep.airDate)}
+                            </span>
+                          </div>
                         </div>
+                      </React.Fragment>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 ))}
               </div>

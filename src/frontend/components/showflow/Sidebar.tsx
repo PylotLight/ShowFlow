@@ -7,6 +7,7 @@ import {
   HardDrive,
   Settings,
   CheckCircle2,
+  ChevronDown,
 } from "lucide-react";
 import * as React from "react";
 
@@ -17,10 +18,12 @@ export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" |
 interface SidebarProps {
   activeItem: NavItem;
   onChange: (item: NavItem) => void;
+  onSettingsTab?: (tab: string) => void;
   className?: string;
 }
 
-export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
+export function Sidebar({ activeItem, onChange, onSettingsTab, className }: SidebarProps) {
+  const [settingsHovered, setSettingsHovered] = React.useState(false);
   const [missingCount, setMissingCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
   const [isHealthy, setIsHealthy] = React.useState<boolean | null>(null);
@@ -48,14 +51,23 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
         .then((shows: any[]) => setSeriesCount(shows.length))
         .catch(() => {});
 
+    // Poll missing (aired, tracked, no file) episode count
+    const pollMissing = () =>
+      fetch("/api/missing")
+        .then((r) => r.json())
+        .then((episodes: any[]) => setMissingCount(episodes.length))
+        .catch(() => {});
+
     pollQueue();
     pollHealth();
     pollLibrary();
+    pollMissing();
 
     const id = setInterval(() => {
       pollQueue();
       pollHealth();
       pollLibrary();
+      pollMissing();
     }, 15_000);
     return () => clearInterval(id);
   }, []);
@@ -74,6 +86,18 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
   const manageNavs = [
     { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
     { id: "settings" as NavItem, label: "Settings", icon: Settings },
+  ];
+
+  const settingsTabs = [
+    { id: "general", label: "General" },
+    { id: "appearance", label: "Appearance" },
+    { id: "providers", label: "Providers" },
+    { id: "indexers", label: "Indexers" },
+    { id: "quality", label: "Quality" },
+    { id: "downloads", label: "Downloads" },
+    { id: "tasks", label: "Tasks" },
+    { id: "backup", label: "Backup" },
+    { id: "debug", label: "Debug" },
   ];
 
   return (
@@ -163,19 +187,71 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
               Manage
             </span>
             {manageNavs.map((nav) => (
-              <button
-                key={nav.id}
-                onClick={() => onChange(nav.id)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
-                  activeItem === nav.id
-                    ? "bg-signal/15 text-signal font-semibold border border-signal/10"
-                    : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
-                )}
-              >
-                <nav.icon className="size-4 shrink-0" />
-                <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
-              </button>
+              nav.id === "settings" ? (
+                <div
+                  key={nav.id}
+                  className="relative"
+                  onMouseEnter={() => setSettingsHovered(true)}
+                  onMouseLeave={() => setSettingsHovered(false)}
+                >
+                  <button
+                    onClick={() => onChange(nav.id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                      activeItem === nav.id
+                        ? "bg-signal/15 text-signal font-semibold border border-signal/10"
+                        : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
+                    )}
+                  >
+                    <nav.icon className="size-4 shrink-0" />
+                    <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
+                    <ChevronDown className={cn("size-3 opacity-50 hidden lg:inline transition-transform duration-300", settingsHovered && "rotate-180")} />
+                  </button>
+                  
+                  {/* Settings Tabs Dropdown */}
+                  <div 
+                    className={cn(
+                      "ml-6 space-y-1 mt-1 hidden lg:block overflow-hidden transition-all duration-300 ease-out",
+                      settingsHovered ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+                    )}
+                  >
+                    {settingsTabs.map((tab, index) => (
+                      <button
+                        key={tab.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onChange("settings");
+                          onSettingsTab?.(tab.id);
+                          setSettingsHovered(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-white/[0.05] hover:text-white transition-all duration-200",
+                          settingsHovered ? "translate-x-0 opacity-100 blur-0" : "-translate-x-2 opacity-0 blur-sm"
+                        )}
+                        style={{
+                          transitionDelay: settingsHovered ? `${index * 30}ms` : '0ms'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  key={nav.id}
+                  onClick={() => onChange(nav.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                    activeItem === nav.id
+                      ? "bg-signal/15 text-signal font-semibold border border-signal/10"
+                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
+                  )}
+                >
+                  <nav.icon className="size-4 shrink-0" />
+                  <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
+                </button>
+              )
             ))}
           </div>
         </div>

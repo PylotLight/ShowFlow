@@ -1,5 +1,5 @@
 import {
-  ChevronLeft, ChevronRight, Loader2,
+  CheckIcon, ChevronLeft, ChevronRight, Loader2,
 } from "lucide-react";
 import * as React from "react";
 
@@ -15,6 +15,7 @@ interface UpcomingEpisode {
   episode: number;
   airDate: string;
   showId: string;
+  filePath: string | null;
 }
 
 function key(ep: UpcomingEpisode) {
@@ -298,6 +299,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                           <div className="space-y-1 max-h-64 overflow-y-auto">
                             {dayEps!.map((ep, i) => {
                               const showObj = getMatchingShow(ep.showId);
+                              const available = !!ep.filePath;
                               return (
                                 <button
                                   key={i}
@@ -322,13 +324,21 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                       <span className="text-xs font-semibold text-white truncate">
                                         {ep.showTitle}
                                       </span>
-                                      <EpisodeChip season={ep.season} episode={ep.episode} state="airing" className="shrink-0 text-[9px]" />
+                                      <EpisodeChip season={ep.season} episode={ep.episode} state={available ? "tracked" : "airing"} className="shrink-0 text-[9px]" />
                                     </div>
-                                    {ep.episodeTitle && (
-                                      <span className="text-[10px] text-muted-foreground truncate block mt-0.5">
-                                        {ep.episodeTitle}
-                                      </span>
-                                    )}
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      {ep.episodeTitle && (
+                                        <span className="text-[10px] text-muted-foreground truncate">
+                                          {ep.episodeTitle}
+                                        </span>
+                                      )}
+                                      {available && (
+                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal border border-signal/15">
+                                          <CheckIcon className="size-2" strokeWidth={3} />
+                                          Grabbed
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </button>
                               );
