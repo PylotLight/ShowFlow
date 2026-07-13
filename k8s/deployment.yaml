@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: showflow
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: showflow-data
+  namespace: showflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: showflow
+  namespace: showflow
+  labels:
+    app: showflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: showflow
+  template:
+    metadata:
+      labels:
+        app: showflow
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: showflow
+          image: showflow:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /api/config
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/config
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: showflow-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: showflow
+  namespace: showflow
+  labels:
+    app: showflow
+spec:
+  type: ClusterIP
+  selector:
+    app: showflow
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http

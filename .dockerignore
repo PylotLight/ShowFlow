@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.venv
+.DS_Store
+*.db
+backups/
+Media/
+docs/
