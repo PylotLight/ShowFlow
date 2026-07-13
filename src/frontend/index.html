@@ -8,6 +8,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      try {
+        var t = JSON.parse(localStorage.getItem('showflow-theme'));
+        if (t) {
+          var r = document.documentElement;
+          r.style.setProperty('--signal', t.signal || '#19b7a6');
+          r.style.setProperty('--signal-foreground', '#ffffff');
+          r.style.setProperty('--accent-amber', t.accentAmber || 'oklch(0.8 0.15 80)');
+          r.style.setProperty('--primary', t.signal || '#19b7a6');
+          r.style.setProperty('--primary-foreground', '#ffffff');
+          r.style.setProperty('--ring', t.signal || '#19b7a6');
+          r.style.setProperty('--sidebar-primary', t.signal || '#19b7a6');
+          r.style.setProperty('--sidebar-ring', t.signal || '#19b7a6');
+          r.style.setProperty('--font-display', t.fontDisplay || '"Barlow Condensed", "Archivo Expanded", ui-sans-serif, sans-serif');
+          r.style.setProperty('--font-mono', t.fontMono || '"JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace');
+          r.style.setProperty('--font-sans', t.fontSans || '"Inter", ui-sans-serif, sans-serif');
+          if (t.radius) r.style.setProperty('--radius', t.radius);
+        }
+      } catch(e) {}
+    </script>
     <script type="module" src="./main.tsx" async></script>
   </head>
   <body>

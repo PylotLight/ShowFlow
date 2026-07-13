@@ -1,13 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
-import { eq, and, like, sql, asc } from 'drizzle-orm';
+import { eq, and, like, sql, asc, inArray } from 'drizzle-orm';
 import * as schema from './schema';
 import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
+import { extractShowTitleCandidates } from '../core/show_titles';
 
 export const ConfigSchema = z.object({
-  libraryPath: z.string().nullish(),
   apiKeys: z.record(z.string(), z.string()).optional(),
   defaultProvider: z.enum(['tmdb', 'tvdb', 'anilist']),
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
@@ -15,6 +15,7 @@ export const ConfigSchema = z.object({
   downloadClient: z.object({
     type: z.enum(['blackhole', 'none']).default('blackhole'),
     blackhole: z.object({
+      outputFolder: z.string().optional(),
       watchFolder: z.string().optional(),
     }).optional(),
   }).default({ type: 'blackhole' }),
@@ -23,22 +24,50 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export const ProwlarrConfigSchema = z.object({
-  baseUrl: z.string().url({ message: "Prowlarr URL must be a valid URL (e.g. http://localhost:9696)" }),
-  apiKey: z.string().min(1, { message: "API Key is required" }),
+  enabled: z.boolean().default(true),
+  baseUrl: z.string().default('').refine(
+    v => v === '' || /^https?:\/\/.+/.test(v),
+    { message: "Prowlarr URL must be a valid URL (e.g. http://localhost:9696)" },
+  ),
+  apiKey: z.string().default(''),
   syncLevel: z.enum(['full', 'addRemoveOnly', 'disabled']).default('full'),
   tags: z.array(z.number()).default([]),
 });
 
 export type ProwlarrConfig = z.infer<typeof ProwlarrConfigSchema>;
 
+const NativeIndexerIdSchema = z.enum(['nyaa', 'subsplease', 'tpb', 'knaben', 'rarbg']);
+
+export const NativeIndexerConfigSchema = z.object({
+  id: NativeIndexerIdSchema,
+  enabled: z.boolean().default(true),
+  baseUrl: z.string().url().optional(),
+  apiKey: z.string().optional(),
+});
+
+export const NativeIndexersConfigSchema = z.array(NativeIndexerConfigSchema).default([]);
+
+export type NativeIndexerConfig = z.infer<typeof NativeIndexerConfigSchema>;
+
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export class DatabaseManager {
   public db: Database;
   public drizz: ReturnType<typeof drizzle>;
+  private dbPath: string;
 
   constructor(dbPath = 'showflow.db') {
-    this.db = new Database(dbPath);
+    this.dbPath = dbPath;
+    this.db = new Database(this.dbPath);
+    this.db.run('PRAGMA foreign_keys = ON');
+    this.drizz = drizzle(this.db, { schema });
+    this.init();
+  }
+
+  reload(altPath?: string) {
+    this.db.close();
+    this.dbPath = altPath ?? this.dbPath;
+    this.db = new Database(this.dbPath);
     this.db.run('PRAGMA foreign_keys = ON');
     this.drizz = drizzle(this.db, { schema });
     this.init();
@@ -54,33 +83,70 @@ export class DatabaseManager {
         original_title TEXT,
         year INTEGER,
         profile TEXT DEFAULT 'standard',
-        config_json TEXT,
+        series_type TEXT DEFAULT 'standard',
         root_folder_path TEXT,
         sort_title TEXT,
         added_at TEXT DEFAULT (datetime('now')),
         last_updated TEXT DEFAULT (datetime('now'))
       )
     `);
+    // Migrate existing databases
+    try { this.db.run(`ALTER TABLE shows ADD COLUMN series_type TEXT DEFAULT 'standard'`); } catch { }
+    try { this.db.run(`ALTER TABLE shows DROP COLUMN config_json`); } catch { }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS show_providers (
         show_id TEXT NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-        provider_type TEXT NOT NULL,
+        provider_type TEXT NOT NULL DEFAULT 'local',
         provider_id TEXT NOT NULL,
         title TEXT,
         original_title TEXT,
         year INTEGER,
         metadata_json TEXT,
         is_primary INTEGER DEFAULT 0,
+        is_metadata INTEGER DEFAULT 0,
+        is_airtime INTEGER DEFAULT 0,
         last_synced TEXT,
         PRIMARY KEY (show_id, provider_type)
       )
     `);
+    try { this.db.run(`ALTER TABLE show_providers ADD COLUMN is_metadata INTEGER DEFAULT 0`); } catch { }
+    try { this.db.run(`ALTER TABLE show_providers ADD COLUMN is_airtime INTEGER DEFAULT 0`); } catch { }
 
     this.db.run(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_show_providers_provider
       ON show_providers(provider_type, provider_id)
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS show_titles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        show_id TEXT NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        normalized_title TEXT NOT NULL,
+        language TEXT,
+        title_type TEXT NOT NULL,
+        provider_type TEXT NOT NULL DEFAULT 'local',
+        created_at TEXT DEFAULT (datetime('now')),
+        last_updated TEXT DEFAULT (datetime('now'))
+      )
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_show_titles_normalized_title
+      ON show_titles(normalized_title)
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_show_titles_show_id
+      ON show_titles(show_id)
+    `);
+
+    this.db.run(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_show_titles_show_normalized_type
+      ON show_titles(show_id, normalized_title, title_type, provider_type)
+    `);
+
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS seasons (
@@ -112,7 +178,7 @@ export class DatabaseManager {
       CREATE TABLE IF NOT EXISTS show_artworks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         show_id TEXT NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-        provider_type TEXT NOT NULL,
+        provider_type TEXT NOT NULL DEFAULT 'local',
         artwork_type TEXT NOT NULL,
         image_url TEXT NOT NULL,
         width INTEGER,
@@ -169,9 +235,12 @@ export class DatabaseManager {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         cutoff_quality_id TEXT,
+        indexers TEXT DEFAULT '{}',
         FOREIGN KEY (cutoff_quality_id) REFERENCES quality_definitions(id)
       )
     `);
+    // Add indexers column on existing databases (safe to re-run)
+    try { this.db.run(`ALTER TABLE quality_profiles ADD COLUMN indexers TEXT DEFAULT '{}'`); } catch { }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS custom_formats (
@@ -194,8 +263,20 @@ export class DatabaseManager {
     `);
 
     this.db.run(`
-      CREATE TABLE IF NOT EXISTS root_folders (
-        path TEXT PRIMARY KEY
+      CREATE TABLE IF NOT EXISTS profile_qualities (
+        profile_id TEXT,
+        quality_id TEXT,
+        PRIMARY KEY (profile_id, quality_id),
+        FOREIGN KEY (profile_id) REFERENCES quality_profiles(id) ON DELETE CASCADE,
+        FOREIGN KEY (quality_id) REFERENCES quality_definitions(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS show_profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        root_folder_path TEXT NOT NULL
       )
     `);
 
@@ -217,30 +298,387 @@ export class DatabaseManager {
         metadata_json TEXT
       )
     `);
+
+    // Seed default quality definitions on first run
+    this.seedDefaults();
+    // Migrate old quality IDs (q1/q2/q3) to the current schema
+    this.migrateQualityIds();
+    this.backfillShowTitles();
   }
+
+  private migrateQualityIds() {
+    // Remove old quality IDs that don't match the current naming scheme
+    this.db.run(`DELETE FROM quality_definitions WHERE id IN ('q1', 'q2', 'q3', 'q4')`);
+  }
+
+  private backfillShowTitles() {
+    const rows = this.drizz
+      .select({
+        showId: schema.shows.id,
+        showTitle: schema.shows.title,
+        showOriginalTitle: schema.shows.original_title,
+        providerType: schema.showProviders.provider_type,
+        providerTitle: schema.showProviders.title,
+        providerOriginalTitle: schema.showProviders.original_title,
+        providerMetadataJson: schema.showProviders.metadata_json,
+      })
+      .from(schema.shows)
+      .innerJoin(
+        schema.showProviders,
+        eq(schema.showProviders.show_id, schema.shows.id),
+      )
+      .all();
+
+    for (const row of rows) {
+      this.upsertShowTitle({
+        showId: row.showId,
+        title: row.showTitle,
+        titleType: 'canonical',
+        providerType: row.providerType,
+      });
+
+      if (row.showOriginalTitle) {
+        this.upsertShowTitle({
+          showId: row.showId,
+          title: row.showOriginalTitle,
+          titleType: 'original',
+          providerType: row.providerType,
+        });
+      }
+
+      if (row.providerTitle) {
+        this.upsertShowTitle({
+          showId: row.showId,
+          title: row.providerTitle,
+          titleType: 'provider',
+          providerType: row.providerType,
+        });
+      }
+
+      if (row.providerOriginalTitle) {
+        this.upsertShowTitle({
+          showId: row.showId,
+          title: row.providerOriginalTitle,
+          titleType: 'original',
+          providerType: row.providerType,
+        });
+      }
+
+      // Backfill aliases/translations from whatever provider metadata was
+      // already stored, so shows added before this indexing existed also
+      // get the fast exact-match path instead of always falling through to
+      // fuzzy matching.
+      if (row.providerMetadataJson) {
+        let metadata: Record<string, unknown> | undefined;
+        try {
+          metadata = JSON.parse(row.providerMetadataJson);
+        } catch {
+          metadata = undefined;
+        }
+
+        if (metadata) {
+          this.syncAllShowTitles(row.showId, row.providerType, { metadata });
+        }
+      }
+    }
+  }
+
+
+  private seedDefaults() {
+    const qualities: { id: string; name: string; rank: number }[] = [
+      { id: 'q_sdtv', name: 'SDTV', rank: 1 },
+      { id: 'q_dvd', name: 'DVD', rank: 2 },
+      { id: 'q_480p', name: '480p', rank: 10 },
+      { id: 'q_webrip_480p', name: 'WEBRip-480p', rank: 11 },
+      { id: 'q_webdl_480p', name: 'WEBDL-480p', rank: 12 },
+      { id: 'q_720p', name: '720p', rank: 20 },
+      { id: 'q_hdtv_720p', name: 'HDTV-720p', rank: 21 },
+      { id: 'q_webrip_720p', name: 'WEBRip-720p', rank: 22 },
+      { id: 'q_webdl_720p', name: 'WEBDL-720p', rank: 23 },
+      { id: 'q_bluray_720p', name: 'Bluray-720p', rank: 24 },
+      { id: 'q_1080p', name: '1080p', rank: 30 },
+      { id: 'q_hdtv_1080p', name: 'HDTV-1080p', rank: 31 },
+      { id: 'q_webrip_1080p', name: 'WEBRip-1080p', rank: 32 },
+      { id: 'q_webdl_1080p', name: 'WEBDL-1080p', rank: 33 },
+      { id: 'q_bluray_1080p', name: 'Bluray-1080p', rank: 34 },
+      { id: 'q_remux_1080p', name: 'Remux-1080p', rank: 35 },
+      { id: 'q_2160p', name: '2160p', rank: 40 },
+      { id: 'q_hdtv_2160p', name: 'HDTV-2160p', rank: 41 },
+      { id: 'q_webrip_2160p', name: 'WEBRip-2160p', rank: 42 },
+      { id: 'q_webdl_2160p', name: 'WEBDL-2160p', rank: 43 },
+      { id: 'q_bluray_2160p', name: 'Bluray-2160p', rank: 44 },
+      { id: 'q_remux_2160p', name: 'Remux-2160p', rank: 45 },
+    ];
+    for (const q of qualities) {
+      this.db.run(
+        'INSERT OR IGNORE INTO quality_definitions (id, name, rank) VALUES (?, ?, ?)',
+        [q.id, q.name, q.rank]
+      );
+    }
+
+    // Seed default custom formats
+    const formats: { id: string; name: string; regex: string; score: number }[] = [
+      { id: 'f_hdr', name: 'HDR', regex: 'HDR', score: 50 },
+      { id: 'f_x265', name: 'x265', regex: 'x265', score: 10 },
+      { id: 'f_hevc', name: 'HEVC', regex: 'HEVC', score: 10 },
+    ];
+    for (const f of formats) {
+      this.db.run(
+        'INSERT OR IGNORE INTO custom_formats (id, name, regex, score) VALUES (?, ?, ?, ?)',
+        [f.id, f.name, f.regex, f.score]
+      );
+    }
+
+    // Seed default quality profiles
+    // Standard — HDR bonus, x265 bonus
+    this.db.run(`INSERT OR IGNORE INTO quality_profiles (id, name) VALUES ('standard', 'Standard')`);
+    for (const f of ['f_hdr', 'f_x265']) {
+      this.db.run(
+        'INSERT OR IGNORE INTO profile_formats (profile_id, format_id, type) VALUES (?, ?, ?)',
+        ['standard', f, 'bonus']
+      );
+    }
+
+    // Anime — x265 and HEVC bonuses (common for anime encodes)
+    this.db.run(`INSERT OR IGNORE INTO quality_profiles (id, name) VALUES ('anime', 'Anime')`);
+    for (const f of ['f_x265', 'f_hevc']) {
+      this.db.run(
+        'INSERT OR IGNORE INTO profile_formats (profile_id, format_id, type) VALUES (?, ?, ?)',
+        ['anime', f, 'bonus']
+      );
+    }
+  }
+
+
 
   // ---- Shows -------------------------------------------------------------
 
-  saveShow(show: { uuid: string, providerId: string, type: string, title: string, profile?: string, config: any, year?: number, originalTitle?: string, metadata?: any, rootFolderPath?: string }) {
-    const configJson = typeof show.config === 'string' ? show.config : JSON.stringify(show.config);
+  /**
+ * Normalizes a title for deterministic database matching.
+ *
+ * Keep this algorithm aligned with Oracle's title normalization. It removes
+ * punctuation and release-style separators while preserving Unicode letters
+ * and numbers, allowing translated and romanized names to match reliably.
+ */
+  private normalizeShowTitle(title: string): string {
+    return title
+      .normalize('NFKC')
+      .replace(/[._]+/g, ' ')
+      .replace(/[‐‑‒–—]/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLocaleLowerCase();
+  }
+
+  /**
+   * Returns all provider-linked title candidates for an exact normalized
+   * title. Provider rows are included so the caller receives the external ID
+   * needed for getEpisode(), not only the local show UUID.
+   */
+  findShowsByNormalizedTitle(normalizedTitle: string) {
+    return this.drizz
+      .select({
+        showId: schema.shows.id,
+        showTitle: schema.shows.title,
+        showOriginalTitle: schema.shows.original_title,
+        showYear: schema.shows.year,
+        showSeriesType: schema.shows.series_type,
+
+        providerType: schema.showProviders.provider_type,
+        providerId: schema.showProviders.provider_id,
+        providerTitle: schema.showProviders.title,
+        providerOriginalTitle: schema.showProviders.original_title,
+        providerMetadataJson: schema.showProviders.metadata_json,
+        isPrimary: schema.showProviders.is_primary,
+
+        matchedTitle: schema.showTitles.title,
+        matchedTitleType: schema.showTitles.title_type,
+        matchedTitleLanguage: schema.showTitles.language,
+      })
+      .from(schema.showTitles)
+      .innerJoin(
+        schema.shows,
+        eq(schema.showTitles.show_id, schema.shows.id),
+      )
+      .innerJoin(
+        schema.showProviders,
+        eq(schema.showProviders.show_id, schema.shows.id),
+      )
+      .where(eq(schema.showTitles.normalized_title, normalizedTitle))
+      .orderBy(
+        asc(schema.showTitles.title_type),
+        asc(schema.showProviders.is_primary),
+      )
+      .all();
+  }
+
+  /**
+   * Returns all stored title candidates. This is used only as a fallback for
+   * fuzzy local matching after exact normalized-title lookup has failed.
+   *
+   * For very large libraries, replace this with a narrowed candidate query or
+   * SQLite FTS table. Exact matching remains indexed and cheap.
+   */
+  getLocalShowCandidates() {
+    return this.drizz
+      .select({
+        showId: schema.shows.id,
+        showTitle: schema.shows.title,
+        showOriginalTitle: schema.shows.original_title,
+        showYear: schema.shows.year,
+        showSeriesType: schema.shows.series_type,
+
+        providerType: schema.showProviders.provider_type,
+        providerId: schema.showProviders.provider_id,
+        providerTitle: schema.showProviders.title,
+        providerOriginalTitle: schema.showProviders.original_title,
+        providerMetadataJson: schema.showProviders.metadata_json,
+        isPrimary: schema.showProviders.is_primary,
+
+        knownTitle: schema.showTitles.title,
+        knownTitleType: schema.showTitles.title_type,
+        knownTitleLanguage: schema.showTitles.language,
+      })
+      .from(schema.shows)
+      .innerJoin(
+        schema.showProviders,
+        eq(schema.showProviders.show_id, schema.shows.id),
+      )
+      .leftJoin(
+        schema.showTitles,
+        eq(schema.showTitles.show_id, schema.shows.id),
+      )
+      .all();
+  }
+
+  /**
+   * Inserts a title without overwriting an existing source title. User titles
+   * should use `titleType: 'user'`; provider titles should use the originating
+   * provider type.
+   */
+  upsertShowTitle(input: {
+    showId: string;
+    title: string;
+    titleType:
+    | 'canonical'
+    | 'original'
+    | 'romanized'
+    | 'translation'
+    | 'alias'
+    | 'provider'
+    | 'user';
+    language?: string | null;
+    providerType?: string | null;
+  }) {
+    const title = input.title.trim();
+    const normalizedTitle = this.normalizeShowTitle(title);
+
+    if (!title || !normalizedTitle) {
+      return;
+    }
+
+    this.drizz
+      .insert(schema.showTitles)
+      .values({
+        show_id: input.showId,
+        title,
+        normalized_title: normalizedTitle,
+        language: input.language ?? null,
+        title_type: input.titleType,
+        provider_type: input.providerType ?? 'local',
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /**
+   * Seeds canonical and original titles whenever a show is saved. This makes
+   * existing and newly added shows available to the local-first resolver.
+   */
+  private syncCoreShowTitles(input: {
+    showId: string;
+    title: string;
+    originalTitle?: string;
+    providerType: string;
+  }) {
+    this.upsertShowTitle({
+      showId: input.showId,
+      title: input.title,
+      titleType: 'canonical',
+      providerType: input.providerType,
+    });
+
+    if (input.originalTitle?.trim()) {
+      this.upsertShowTitle({
+        showId: input.showId,
+        title: input.originalTitle,
+        titleType: 'original',
+        providerType: input.providerType,
+      });
+    }
+  }
+
+  /**
+   * Indexes every alias/translation/romanized-title variant a provider knows
+   * about into `show_titles`, so a future file for the same show hits the
+   * fast indexed exact-match SQL lookup (findShowsByNormalizedTitle) instead
+   * of always falling through to the slower fuzzy pass over every local show
+   * (getLocalShowCandidates). Safe to call redundantly - upsertShowTitle
+   * no-ops on an existing (show, normalized title, type, provider) row.
+   */
+  syncAllShowTitles(
+    showId: string,
+    providerType: string,
+    show: {
+      title?: string;
+      originalTitle?: string;
+      romanizedTitle?: string;
+      aliases?: string[];
+      alternateTitles?: string[];
+      translations?: Record<string, string>;
+      metadata?: Record<string, unknown>;
+    },
+  ) {
+    const titles = extractShowTitleCandidates(show as any);
+
+    for (const title of titles) {
+      this.upsertShowTitle({
+        showId,
+        title,
+        titleType: 'alias',
+        providerType,
+      });
+    }
+  }
+
+
+  saveShow(show: { uuid: string, providerId: string, type: string, title: string, profile?: string, showProfileId?: string, config: any, year?: number, originalTitle?: string, romanizedTitle?: string, metadata?: any, rootFolderPath?: string, seriesType?: string }) {
+    const profile = this.resolveProfileId(show.profile) ?? show.profile ?? undefined;
+    // The folder destination is resolved once at add-time from the chosen
+    // show_profiles preset (or an explicit rootFolderPath override) and
+    // stored directly on the show - we don't keep re-deriving it from an ID
+    // later, since show.profile no longer means "which folder preset".
+    const rootFolderPath = show.rootFolderPath ?? (show.showProfileId ? this.getShowProfileRootFolder(show.showProfileId) : null);
+    const seriesType = show.seriesType ?? 'standard';
 
     this.drizz.insert(schema.shows).values({
       id: show.uuid,
       title: show.title,
       original_title: show.originalTitle ?? null,
       year: show.year ?? null,
-      profile: show.profile || 'standard',
-      config_json: configJson,
-      root_folder_path: show.rootFolderPath ?? null,
+      profile,
+      series_type: seriesType,
+      root_folder_path: rootFolderPath,
     }).onConflictDoUpdate({
       target: schema.shows.id,
       set: {
         title: show.title,
         original_title: show.originalTitle ?? null,
         year: show.year ?? null,
-        profile: show.profile || 'standard',
-        config_json: configJson,
-        root_folder_path: show.rootFolderPath ?? null,
+        profile,
+        series_type: seriesType,
+        root_folder_path: rootFolderPath,
         last_updated: sql`(datetime('now'))`,
       },
     }).run();
@@ -279,11 +717,26 @@ export class DatabaseManager {
         year: show.year ?? null,
         metadata_json: show.metadata ? JSON.stringify(show.metadata) : null,
         is_primary: (providerCount?.c ?? 0) === 0 ? 1 : 0,
+        is_metadata: (providerCount?.c ?? 0) === 0 ? 1 : 0,
+        is_airtime: (providerCount?.c ?? 0) === 0 ? 1 : 0,
       }).run();
     }
+    this.syncCoreShowTitles({
+      showId: show.uuid,
+      title: show.title,
+      originalTitle: show.originalTitle,
+      providerType: show.type,
+    });
+
+    this.syncAllShowTitles(show.uuid, show.type, {
+      title: show.title,
+      originalTitle: show.originalTitle,
+      romanizedTitle: show.romanizedTitle,
+      metadata: show.metadata,
+    });
   }
 
-  updateShowSyncData(showId: string, providerType: string, data: { title?: string, year?: number, originalTitle?: string, metadata?: any }) {
+  updateShowSyncData(showId: string, providerType: string, data: { title?: string, year?: number, originalTitle?: string, romanizedTitle?: string, metadata?: any }) {
     const showSet: Record<string, any> = { last_updated: sql`(datetime('now'))` };
     if (data.title !== undefined) showSet.title = data.title;
     if (data.year !== undefined) showSet.year = data.year;
@@ -303,6 +756,37 @@ export class DatabaseManager {
         eq(schema.showProviders.show_id, showId),
         eq(schema.showProviders.provider_type, providerType),
       )).run();
+
+    if (data.title) {
+      this.syncCoreShowTitles({
+        showId,
+        title: data.title,
+        originalTitle: data.originalTitle,
+        providerType,
+      });
+    } else if (data.originalTitle) {
+      this.upsertShowTitle({
+        showId,
+        title: data.originalTitle,
+        titleType: 'original',
+        providerType,
+      });
+    }
+
+    // Keep the alias/translation/romanized-title index current so future
+    // files for this show hit the fast exact-match lookup rather than the
+    // fuzzy fallback pass. Only worth doing when there's actually new title
+    // material to index (title/originalTitle changed, or fresh metadata came
+    // back from a sync).
+    if (data.title || data.originalTitle || data.romanizedTitle || data.metadata) {
+      this.syncAllShowTitles(showId, providerType, {
+        title: data.title,
+        originalTitle: data.originalTitle,
+        romanizedTitle: data.romanizedTitle,
+        metadata: data.metadata,
+      });
+    }
+
   }
 
   getShow(showId: string) {
@@ -319,6 +803,7 @@ export class DatabaseManager {
 
     return {
       ...row,
+      series_type: row.series_type ?? 'standard',
       provider_id: primaryProvider?.provider_id || row.id,
       provider_type: primaryProvider?.provider_type || null,
       provider_metadata: primaryProvider?.metadata_json || null,
@@ -327,31 +812,30 @@ export class DatabaseManager {
   }
 
   getShowConfig(showId: string): Record<string, any> {
-    const row = this.drizz.select({ config_json: schema.shows.config_json })
-      .from(schema.shows)
-      .where(eq(schema.shows.id, showId)).get();
-    if (!row?.config_json) return {};
-    try {
-      return JSON.parse(row.config_json);
-    } catch {
-      return {};
+    const show = this.getShow(showId);
+    if (!show) return {};
+    const config: Record<string, any> = {
+      seriesType: show.series_type ?? 'standard',
+    };
+    const providers = this.drizz.select().from(schema.showProviders)
+      .where(eq(schema.showProviders.show_id, showId)).all() as any[];
+    for (const p of providers) {
+      if (p.is_metadata) config.metadataProvider = p.provider_type;
+      if (p.is_airtime) config.airtimeProvider = p.provider_type;
     }
+    return config;
   }
 
   getProviderForRole(showId: string, role: 'metadata' | 'airtime'): { providerType: string; providerId: string } | null {
-    const config = this.getShowConfig(showId);
-    const roleKey = role === 'metadata' ? 'metadataProvider' : 'airtimeProvider';
-    const providerType = config[roleKey] as string | undefined;
+    const flag = role === 'metadata' ? 'is_metadata' : 'is_airtime';
+    const provider = this.drizz.select().from(schema.showProviders)
+      .where(and(
+        eq(schema.showProviders.show_id, showId),
+        eq(schema.showProviders[flag as 'is_metadata'], 1),
+      )).get();
 
-    if (providerType) {
-      const provider = this.drizz.select().from(schema.showProviders)
-        .where(and(
-          eq(schema.showProviders.show_id, showId),
-          eq(schema.showProviders.provider_type, providerType),
-        )).get();
-      if (provider) {
-        return { providerType: provider.provider_type, providerId: provider.provider_id };
-      }
+    if (provider) {
+      return { providerType: provider.provider_type, providerId: provider.provider_id };
     }
 
     // Fall back to primary provider
@@ -368,34 +852,35 @@ export class DatabaseManager {
   }
 
   setProviderRole(showId: string, providerType: string, role: 'metadata' | 'airtime', active: boolean): void {
-    const config = this.getShowConfig(showId);
-    const roleKey = role === 'metadata' ? 'metadataProvider' : 'airtimeProvider';
+    const flag = role === 'metadata' ? 'is_metadata' : 'is_airtime';
 
+    // Clear the role from any provider that currently has it
+    this.drizz.update(schema.showProviders).set({ [flag]: 0 })
+      .where(and(
+        eq(schema.showProviders.show_id, showId),
+        eq(schema.showProviders[flag as 'is_metadata'], 1),
+      )).run();
+
+    // Set it on the target provider
     if (active) {
-      config[roleKey] = providerType;
-    } else {
-      // If clearing the current role holder, unset it
-      if (config[roleKey] === providerType) {
-        delete config[roleKey];
-      }
+      this.drizz.update(schema.showProviders).set({ [flag]: 1 })
+        .where(and(
+          eq(schema.showProviders.show_id, showId),
+          eq(schema.showProviders.provider_type, providerType),
+        )).run();
     }
-
-    this.drizz.update(schema.shows).set({
-      config_json: JSON.stringify(config),
-    }).where(eq(schema.shows.id, showId)).run();
   }
 
   listShowProvidersWithRoles(showId: string): any[] {
     const providers = this.drizz.select().from(schema.showProviders)
       .where(eq(schema.showProviders.show_id, showId))
       .all() as any[];
-    const config = this.getShowConfig(showId);
 
     return providers.map(p => ({
       ...p,
       roles: {
-        metadata: config.metadataProvider === p.provider_type || (!config.metadataProvider && !!p.is_primary),
-        airtime: config.airtimeProvider === p.provider_type || (!config.airtimeProvider && !!p.is_primary),
+        metadata: !!p.is_metadata,
+        airtime: !!p.is_airtime,
       },
     }));
   }
@@ -428,10 +913,10 @@ export class DatabaseManager {
     const showIds = rows.map(r => r.id);
     const providers = showIds.length > 0
       ? this.drizz.select().from(schema.showProviders)
-          .where(and(
-            sql`${schema.showProviders.show_id} IN ${showIds}`,
-            eq(schema.showProviders.is_primary, 1),
-          )).all()
+        .where(and(
+          sql`${schema.showProviders.show_id} IN ${showIds}`,
+          eq(schema.showProviders.is_primary, 1),
+        )).all()
       : [];
 
     const providerMap = new Map(providers.map(p => [p.show_id, p]));
@@ -524,7 +1009,7 @@ export class DatabaseManager {
       if (data?.year !== undefined) values.year = data.year;
       if (data?.metadata !== undefined) values.metadata_json = JSON.stringify(data.metadata);
 
-      this.drizz.insert(schema.showProviders).values(values).run();
+      this.drizz.insert(schema.showProviders).values(values as any).run();
     }
   }
 
@@ -706,6 +1191,16 @@ export class DatabaseManager {
       )).run();
   }
 
+  listShowEpisodes(showId: string): { season_number: number; episode_number: number; file_path: string | null }[] {
+    return this.drizz.select({
+      season_number: schema.episodes.season_number,
+      episode_number: schema.episodes.episode_number,
+      file_path: schema.episodes.file_path,
+    }).from(schema.episodes)
+      .where(eq(schema.episodes.show_id, showId))
+      .all() as any;
+  }
+
   updateEpisodeSearchMode(showId: string, seasonNumber: number, episodeNumber: number, mode: string) {
     this.drizz.update(schema.episodes).set({ search_mode: mode })
       .where(and(
@@ -723,16 +1218,12 @@ export class DatabaseManager {
     return row?.root_folder_path || null;
   }
 
-  updateShow(showId: string, updates: Partial<{ title: string, profile: string, config: any, rootFolderPath: string }>) {
+  updateShow(showId: string, updates: Partial<{ title: string, profile: string, seriesType: string, config: Record<string, any>, rootFolderPath: string }>) {
     const setData: Record<string, any> = { last_updated: sql`(datetime('now'))` };
     if (updates.title !== undefined) setData.title = updates.title;
     if (updates.profile !== undefined) setData.profile = updates.profile;
-    if (updates.config !== undefined) {
-      // Merge config with existing config
-      const existingConfig = this.getShowConfig(showId);
-      const merged = { ...existingConfig, ...updates.config };
-      setData.config_json = JSON.stringify(merged);
-    }
+    if (updates.seriesType !== undefined) setData.series_type = updates.seriesType;
+    if (updates.config?.seriesType !== undefined) setData.series_type = updates.config.seriesType;
     if (updates.rootFolderPath !== undefined) setData.root_folder_path = updates.rootFolderPath;
 
     this.drizz.update(schema.shows).set(setData)
@@ -742,6 +1233,12 @@ export class DatabaseManager {
   removeShow(showId: string) {
     this.drizz.delete(schema.shows)
       .where(eq(schema.shows.id, showId)).run();
+  }
+
+  removeShows(ids: string[]) {
+    if (ids.length === 0) return;
+    this.drizz.delete(schema.shows)
+      .where(inArray(schema.shows.id, ids)).run();
   }
 
   // ---- Show Artworks -----------------------------------------------------
@@ -884,38 +1381,23 @@ export class DatabaseManager {
     return this.db.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?').all(limit) as any[];
   }
 
-  // ---- Root Folders ------------------------------------------------------
+  // ---- Show Profiles -----------------------------------------------------
 
-  listRootFolders(): { path: string }[] {
-    return this.db.query('SELECT * FROM root_folders ORDER BY path ASC').all() as { path: string }[];
+  listShowProfiles(): { id: string; name: string; root_folder_path: string }[] {
+    return this.db.query('SELECT * FROM show_profiles ORDER BY name ASC').all() as { id: string; name: string; root_folder_path: string }[];
   }
 
-  addRootFolder(path: string) {
-    this.db.run('INSERT OR IGNORE INTO root_folders (path) VALUES (?)', [path]);
+  saveShowProfile(id: string, name: string, rootFolderPath: string) {
+    this.db.run('INSERT OR REPLACE INTO show_profiles (id, name, root_folder_path) VALUES (?, ?, ?)', [id, name, rootFolderPath]);
   }
 
-  removeRootFolder(path: string) {
-    this.db.run('DELETE FROM root_folders WHERE path = ?', [path]);
+  removeShowProfile(id: string) {
+    this.db.run('DELETE FROM show_profiles WHERE id = ?', [id]);
   }
 
-  getUnmappedFolders(): { path: string; subfolders: string[] }[] {
-    const roots = this.listRootFolders();
-    const shows = this.listShows();
-    return roots.map(root => {
-      const entries: string[] = [];
-      try {
-        const dir = fs.readdirSync(root.path);
-        for (const entry of dir) {
-          const fullPath = path.join(root.path, entry);
-          if (fs.statSync(fullPath).isDirectory()) {
-            entries.push(entry);
-          }
-        }
-      } catch {}
-      const mappedShowTitles = new Set(shows.map(s => s.title));
-      const unmapped = entries.filter(e => !mappedShowTitles.has(e));
-      return { path: root.path, subfolders: unmapped };
-    });
+  getShowProfileRootFolder(profileId: string): string | null {
+    const row = this.db.query('SELECT root_folder_path FROM show_profiles WHERE id = ?').get(profileId) as { root_folder_path: string } | undefined;
+    return row?.root_folder_path ?? null;
   }
 
   // ---- Settings ----------------------------------------------------------
@@ -951,23 +1433,65 @@ export class DatabaseManager {
     return this.db.query('SELECT * FROM quality_definitions WHERE id = ?').get(id) as any;
   }
 
+  removeQuality(id: string) {
+    this.db.run('DELETE FROM quality_definitions WHERE id = ?', [id]);
+  }
+
   listQualities() {
     return this.db.query('SELECT * FROM quality_definitions ORDER BY rank DESC').all() as any[];
   }
 
-  saveProfile(p: { id: string, name: string, cutoffId?: string }) {
+  saveProfile(p: { id: string, name: string, cutoffId?: string, indexers?: string }) {
+    const indexersStr = p.indexers ?? '{}';
     this.db.run(
-      'INSERT OR REPLACE INTO quality_profiles (id, name, cutoff_quality_id) VALUES (?, ?, ?)',
-      [p.id, p.name, p.cutoffId ?? null]
+      'INSERT OR REPLACE INTO quality_profiles (id, name, cutoff_quality_id, indexers) VALUES (?, ?, ?, ?)',
+      [p.id, p.name, p.cutoffId ?? null, indexersStr]
     );
   }
 
+  saveProfileIndexers(id: string, indexers: Record<string, string[]>) {
+    this.db.run(
+      'UPDATE quality_profiles SET indexers = ? WHERE id = ?',
+      [JSON.stringify(indexers), id]
+    );
+  }
+
+  getProfileIndexers(id: string): string[] {
+    const row = this.db.query('SELECT indexers FROM quality_profiles WHERE id = ?').get(id) as any;
+    if (!row?.indexers) return [];
+    try {
+      return normalizeIndexers(JSON.parse(row.indexers));
+    } catch {
+      return [];
+    }
+  }
+
+  resolveProfileId(id: string | null | undefined): string | undefined {
+    if (id && this.getProfile(id)) return id;
+    const profiles = this.listProfiles();
+    return profiles.length > 0 ? profiles[0].id : undefined;
+  }
+
   getProfile(id: string) {
-    return this.db.query('SELECT * FROM quality_profiles WHERE id = ?').get(id) as any;
+    const row = this.db.query('SELECT * FROM quality_profiles WHERE id = ?').get(id) as any;
+    if (row?.indexers) {
+      try { row.indexers = normalizeIndexers(JSON.parse(row.indexers)); } catch { row.indexers = []; }
+    }
+    return row;
+  }
+
+  removeProfile(id: string) {
+    this.db.run('DELETE FROM quality_profiles WHERE id = ?', [id]);
   }
 
   listProfiles() {
-    return this.db.query('SELECT * FROM quality_profiles').all() as any[];
+    const rows = this.db.query('SELECT * FROM quality_profiles').all() as any[];
+    for (const row of rows) {
+      if (row.indexers) {
+        try { row.indexers = normalizeIndexers(JSON.parse(row.indexers)); } catch { row.indexers = []; }
+      }
+    }
+    return rows;
   }
 
   saveCustomFormat(f: { id: string, name: string, regex: string, score: number }) {
@@ -979,6 +1503,10 @@ export class DatabaseManager {
 
   getCustomFormat(id: string) {
     return this.db.query('SELECT * FROM custom_formats WHERE id = ?').get(id) as any;
+  }
+
+  removeCustomFormat(id: string) {
+    this.db.run('DELETE FROM custom_formats WHERE id = ?', [id]);
   }
 
   listCustomFormats() {
@@ -994,16 +1522,42 @@ export class DatabaseManager {
   }
 
   getProfileFormats(profileId: string) {
-    console.log(`[db] getProfileFormats for ${profileId}`);
-    const results = this.db.query(`
+    return this.db.query(`
       SELECT cf.*, pf.type as profile_format_type
       FROM custom_formats cf
       JOIN profile_formats pf ON cf.id = pf.format_id
       WHERE pf.profile_id = ?
     `).all(profileId) as any[];
-    console.log(`[db] results:`, results);
-    return results;
   }
+
+  addProfileQuality(profileId: string, qualityId: string) {
+    this.db.run('INSERT OR IGNORE INTO profile_qualities (profile_id, quality_id) VALUES (?, ?)', [profileId, qualityId]);
+  }
+
+  removeProfileQuality(profileId: string, qualityId: string) {
+    this.db.run('DELETE FROM profile_qualities WHERE profile_id = ? AND quality_id = ?', [profileId, qualityId]);
+  }
+
+  /**
+   * Qualities this profile will accept. An empty result means "unrestricted"
+   * (no allow-list has been configured yet) rather than "nothing allowed" -
+   * QualityEngine treats those two cases differently.
+   */
+  getProfileQualities(profileId: string) {
+    return this.db.query(`
+      SELECT qd.*
+      FROM quality_definitions qd
+      JOIN profile_qualities pq ON qd.id = pq.quality_id
+      WHERE pq.profile_id = ?
+      ORDER BY qd.rank DESC
+    `).all(profileId) as any[];
+  }
+}
+
+function normalizeIndexers(v: unknown): string[] {
+  if (Array.isArray(v)) return v;
+  if (v && typeof v === 'object') return [...(Array.isArray((v as any).tv) ? (v as any).tv : []), ...(Array.isArray((v as any).anime) ? (v as any).anime : [])];
+  return [];
 }
 
 export const db = new DatabaseManager();

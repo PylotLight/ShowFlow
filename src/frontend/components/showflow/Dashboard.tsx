@@ -1,9 +1,9 @@
 import {
-  Loader2, Scan, RefreshCw, Activity, CheckCircle2, ChevronRight,
+  Scan, Activity, CheckCircle2, ChevronRight, RotateCcw, RefreshCw,
 } from "lucide-react";
 import * as React from "react";
 
-import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
+import { Skeleton } from "@frontend/components/ui/skeleton";
 import { EventTicker, type TickerItem } from "@frontend/components/showflow/EventTicker";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { WatcherPanel, type ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
@@ -24,30 +24,95 @@ function isDateOnly(airDate: string): boolean {
   return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
 }
 
-function getDateLabel(airDate: string): string {
-  if (isDateOnly(airDate)) {
-    const parts = airDate.slice(0, 10).split("-").map(Number);
-    const y = parts[0] ?? 0;
-    const m = (parts[1] ?? 1) - 1;
-    const d = parts[2] ?? 1;
-    return new Date(y, m, d).toLocaleDateString(undefined, {
-      weekday: "short", month: "short", day: "numeric",
-    });
-  }
-  return new Date(airDate).toLocaleDateString(undefined, {
-    weekday: "short", month: "short", day: "numeric",
-  });
+function formatAirTime(airDate: string) {
+  if (!airDate.includes("T")) return null;
+  const d = new Date(airDate);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-function getDateProximity(airDate: string): { color: string; bg: string } {
+function getRelativeDayLabel(airDate: string): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(airDate.slice(0, 10));
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === -1) return "Yesterday";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays < 0) return `${Math.abs(diffDays)} days ago`;
+  return target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function getCompactDate(airDate: string): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(airDate.slice(0, 10));
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  const time = formatAirTime(airDate);
+  const timeStr = time ? ` ${time}` : "";
+
+  if (diffDays === 0) return `Today${timeStr}`;
+  if (diffDays === -1) return `Yesterday${timeStr}`;
+  if (diffDays === 1) return `Tomorrow${timeStr}`;
+
+  const label = target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  if (time) return `${label}${timeStr}`;
+  return label;
+}
+
+function getRowProximity(airDate: string): { color: string; dot: string } {
   const now = new Date();
   const target = new Date(airDate);
   const diffTime = target.getTime() - now.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-  if (diffDays <= 1) return { color: "text-signal", bg: "bg-signal/15 border-signal/10" };
-  if (diffDays <= 3) return { color: "text-accent-amber", bg: "bg-accent-amber/15 border-accent-amber/10" };
-  return { color: "text-muted-foreground", bg: "bg-white/5 border-white/5" };
+  if (diffDays < 0) return { color: "text-white/30", dot: "bg-white/20" };
+  if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
+  if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
+  return { color: "text-white/50", dot: "bg-white/30" };
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="border-b border-white/5 px-5 py-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-5 w-32" />
+          </div>
+          <Skeleton className="h-4 w-28" />
+        </div>
+      </div>
+      <div className="border-b border-white/5 px-5 py-2.5">
+        <div className="flex gap-1">
+          {Array.from({ length: 11 }, (_, i) => (
+            <div key={i} className="flex flex-col items-center gap-1 px-2 py-1.5 min-w-[40px]">
+              <Skeleton className="h-2.5 w-6" />
+              <Skeleton className="h-3.5 w-4" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 p-5 space-y-4">
+        {Array.from({ length: 3 }, (_, g) => (
+          <div key={g} className="space-y-1">
+            <Skeleton className="h-3 w-20 mb-1.5" />
+            {Array.from({ length: g === 0 ? 4 : 2 }, (_, i) => (
+              <div key={i} className="flex items-center gap-2.5 px-2 py-1.5">
+                <Skeleton className="size-[18px] rounded-sm shrink-0" />
+                <Skeleton className="size-1.5 rounded-full shrink-0" />
+                <Skeleton className="h-3.5 flex-1 max-w-[200px]" />
+                <Skeleton className="h-3 w-16 shrink-0" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Dashboard({
@@ -68,7 +133,7 @@ function Dashboard({
       .then(setShows)
       .catch(() => setShows([]));
 
-    fetch("/api/calendar?days=7")
+    fetch("/api/calendar?days=7&past=3")
       .then((r) => (r.ok ? r.json() : []))
       .then(setUpcoming)
       .catch(() => setUpcoming([]));
@@ -87,18 +152,28 @@ function Dashboard({
   }, []);
 
   const tickerItems = React.useMemo<TickerItem[]>(() => {
-    const eventItems: TickerItem[] = recentEvents.map((e) => ({
-      key: `event-${e.id}`,
-      label: e.message,
-      tone: e.type === "grab" ? "signal" : e.type === "error" ? "amber" : "muted",
-    }));
-    const upcomingItems: TickerItem[] = (upcoming ?? []).slice(0, 8).map((ep, i) => ({
-      key: `up-${i}`,
-      label: `${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")} airs ${new Date(
-        ep.airDate,
-      ).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`,
-      tone: "amber",
-    }));
+    const eventItems: TickerItem[] = recentEvents.map((e) => {
+      let tone: "signal" | "amber" | "muted" = "muted";
+      if (e.type === "grab" || e.type === "import") tone = "signal";
+      else if (e.type === "error") tone = "amber";
+      else if (e.type === "scan" || e.type === "watcher") tone = "signal";
+      else if (e.type === "upgrade") tone = "signal";
+      
+      return {
+        key: `event-${e.id}`,
+        label: e.message,
+        tone,
+      };
+    });
+    const upcomingItems: TickerItem[] = (upcoming ?? []).slice(0, 8).map((ep, i) => {
+      const time = formatAirTime(ep.airDate);
+      const dateLabel = new Date(ep.airDate).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      return {
+        key: `up-${i}`,
+        label: `${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")} airs ${dateLabel}${time ? ` ${time}` : ""}`,
+        tone: "amber",
+      };
+    });
     return [...eventItems, ...upcomingItems];
   }, [recentEvents, upcoming]);
 
@@ -106,11 +181,14 @@ function Dashboard({
     if (!upcoming) return [];
     const groups: { [key: string]: UpcomingEpisode[] } = {};
     upcoming.forEach((ep) => {
-      const dateStr = getDateLabel(ep.airDate);
-      if (!groups[dateStr]) groups[dateStr] = [];
-      groups[dateStr].push(ep);
+      const dateKey = ep.airDate.slice(0, 10);
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(ep);
     });
-    return Object.entries(groups).map(([date, items]) => ({ date, items }));
+    return Object.entries(groups).map(([dateKey, items]) => {
+      const sample = items[0]?.airDate ?? dateKey;
+      return { dateKey, label: getRelativeDayLabel(sample), items };
+    });
   }, [upcoming]);
 
   const uniqueShowsCount = React.useMemo(() => {
@@ -123,9 +201,9 @@ function Dashboard({
 
   const calendarDays = React.useMemo(() => {
     const today = new Date();
-    return Array.from({ length: 7 }, (_, i) => {
+    return Array.from({ length: 11 }, (_, i) => {
       const date = new Date(today);
-      date.setDate(today.getDate() + i);
+      date.setDate(today.getDate() + i - 3);
       return date;
     });
   }, []);
@@ -141,10 +219,9 @@ function Dashboard({
   }, [upcoming]);
 
   return (
-    <div className="space-y-6">
-      {/* Now Processing Banner — shows when files are actively being imported */}
+    <div className="h-full flex flex-col gap-6">
       {processingFiles.length > 0 && (
-        <div className="glass-panel rounded-xl px-5 py-3 flex items-center gap-4 border-signal/15">
+        <div className="glass-panel rounded-xl px-5 py-3 flex items-center gap-4 border-signal/15 shrink-0">
           <span className="relative flex h-2.5 w-2.5 shrink-0">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-signal" />
@@ -160,18 +237,18 @@ function Dashboard({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px] items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px] items-stretch flex-1 min-h-0">
 
         {/* LEFT COLUMN: Primary Agenda */}
-        <GlassPanel className="flex flex-col overflow-hidden min-h-[500px]">
+        <GlassPanel className="flex flex-col overflow-hidden h-full min-h-[500px]">
           {/* Header */}
-          <div className="border-b border-white/5 px-6 py-4">
+          <div className="border-b border-white/5 px-5 py-3">
             <div className="flex items-center justify-between">
               <div>
                 <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">
                   // System Agenda
                 </span>
-                <h2 className="font-display text-2xl font-bold text-white mt-0.5">
+                <h2 className="font-display text-xl font-bold text-white mt-0.5 leading-tight">
                   Upcoming
                 </h2>
               </div>
@@ -179,7 +256,7 @@ function Dashboard({
                 <div className="text-right font-mono text-xs text-muted-foreground">
                   <span className="text-white font-semibold">{upcoming.length}</span>
                   {" "}episode{upcoming.length !== 1 && "s"}
-                  <span className="text-white/20 mx-2">|</span>
+                  <span className="text-white/20 mx-1.5">|</span>
                   <span className="text-white font-semibold">{uniqueShowsCount}</span>
                   {" "}series
                 </div>
@@ -187,21 +264,21 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Mini Calendar Strip */}
-          <div className="border-b border-white/5 px-6 py-3 overflow-x-auto">
-            <div className="flex gap-1.5 min-w-max">
-              {calendarDays.map((date, i) => {
+          {/* Compact Calendar Strip */}
+          <div className="border-b border-white/5 px-5 py-2.5 overflow-x-auto">
+            <div className="flex gap-1 min-w-max">
+              {calendarDays.map((date) => {
                 const dateStr = date.toISOString().slice(0, 10);
                 const count = episodesByDate.get(dateStr) || 0;
-                const isToday = i === 0;
+                const isToday = dateStr === new Date().toISOString().slice(0, 10);
                 return (
                   <div
                     key={dateStr}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-lg px-3 py-2 min-w-[56px] transition-all duration-150",
+                      "flex flex-col items-center rounded-md px-2 py-1.5 min-w-[40px] transition-all duration-150",
                       count > 0
-                        ? "bg-signal/10 border border-signal/15"
-                        : "bg-white/[0.02] border border-transparent",
+                        ? "bg-signal/8 border border-signal/12"
+                        : "bg-transparent border border-transparent",
                       isToday && "ring-1 ring-signal/30",
                     )}
                   >
@@ -210,7 +287,7 @@ function Dashboard({
                     </span>
                     <span
                       className={cn(
-                        "font-display text-sm font-bold",
+                        "font-display text-xs font-bold leading-tight",
                         count > 0 ? "text-white" : "text-white/40",
                         isToday && "text-signal",
                       )}
@@ -218,9 +295,7 @@ function Dashboard({
                       {date.getDate()}
                     </span>
                     {count > 0 && (
-                      <span className="font-mono text-[8px] font-bold text-signal uppercase">
-                        {count} ep
-                      </span>
+                      <span className="text-[8px] font-bold text-signal">{count}</span>
                     )}
                   </div>
                 );
@@ -228,81 +303,73 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Episode List */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Dense Episode List */}
+          <div className="flex-1 overflow-y-auto p-5">
             {upcoming === null ? (
-              <div className="flex justify-center items-center py-20 text-muted-foreground text-xs font-mono">
-                <Loader2 className="size-4 animate-spin mr-2" /> LOADING AGENDA...
-              </div>
+              <DashboardSkeleton />
             ) : upcoming.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground text-xs font-mono">
-                NO UPCOMING EPISODES DETECTED IN THE NEXT 7 DAYS.
+                NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.
               </div>
             ) : (
-              <div className="space-y-5">
-                {groupedEpisodes.map((group) => (
-                  <div key={group.date} className="space-y-2">
-                    <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/40 border-b border-white/5 pb-1.5">
-                      {group.date}
+              <div className="space-y-4">
+                {groupedEpisodes.map((group, gi) => (
+                  <div
+                    key={group.dateKey}
+                    className="space-y-0.5 animate-fade-in"
+                    style={{ animationDelay: `${gi * 60}ms` }}
+                  >
+                    <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/30 border-b border-white/5 pb-1 mb-1">
+                      {group.label}
                     </h3>
-                    <div className="space-y-2">
-                      {group.items.map((ep, i) => {
-                        const showObj = getMatchingShow(ep.showTitle);
-                        const proximity = getDateProximity(ep.airDate);
-                        return (
-                          <div
-                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
-                            onClick={() => {
-                              if (showObj) onSelectShow(showObj);
-                            }}
-                            className="group flex items-center gap-3 rounded-lg p-3 cursor-pointer transition-all duration-150 hover:bg-white/[0.03] border border-transparent hover:border-white/5"
-                          >
-                            {/* Thumbnail — always visible */}
-                            {showObj ? (
-                              <PosterImage
-                                showId={showObj.id}
-                                alt={ep.showTitle}
-                                className="w-12 h-[68px] shrink-0 rounded-lg bg-white/5 object-cover"
-                              />
-                            ) : (
-                              <div className="w-12 h-[68px] shrink-0 rounded-lg bg-white/[0.03] border border-white/5 flex items-center justify-center">
-                                <span className="font-mono text-[8px] text-white/20">N/A</span>
-                              </div>
-                            )}
-
-                            {/* Title + Episode */}
-                            <div className="flex-1 min-w-0 space-y-0.5">
-                              <h4 className="text-[15px] font-semibold text-white group-hover:text-signal truncate transition-colors">
-                                {ep.showTitle}
-                              </h4>
-                              {ep.episodeTitle && (
-                                <p className="text-[14px] text-muted-foreground/80 truncate">
-                                  {ep.episodeTitle}
-                                </p>
-                              )}
+                    {group.items.map((ep, i) => {
+                      const showObj = getMatchingShow(ep.showTitle);
+                      const prox = getRowProximity(ep.airDate);
+                      const time = formatAirTime(ep.airDate);
+                      return (
+                        <div
+                          key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
+                          onClick={() => {
+                            if (showObj) onSelectShow(showObj);
+                          }}
+                          className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                          style={{ animationDelay: `${gi * 60 + i * 30}ms` }}
+                        >
+                          {showObj ? (
+                            <PosterImage
+                              showId={showObj.id}
+                              alt={ep.showTitle}
+                              className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/5 object-cover"
+                            />
+                          ) : (
+                            <div className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center">
+                              <span className="font-mono text-[5px] text-white/20">N/A</span>
                             </div>
-
-                            {/* Date Badge + Episode Code */}
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span
-                                className={cn(
-                                  "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold font-mono border",
-                                  proximity.color,
-                                  proximity.bg,
-                                )}
-                              >
-                                {new Date(ep.airDate).toLocaleDateString(undefined, {
-                                  weekday: "short",
-                                  month: "short",
-                                  day: "numeric",
-                                })}
+                          )}
+                          <span className={cn("size-1.5 shrink-0 rounded-full", prox.dot)} />
+                          <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                            <span className={cn(
+                              "text-sm font-semibold truncate transition-colors",
+                              prox.color,
+                              "group-hover:text-white",
+                            )}>
+                              {ep.showTitle}
+                            </span>
+                            <span className="text-[11px] text-white/30 font-mono shrink-0">
+                              S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                            </span>
+                            {ep.episodeTitle && (
+                              <span className="text-[12px] text-white/40 truncate hidden sm:inline">
+                                · {ep.episodeTitle}
                               </span>
-                              <EpisodeChip season={ep.season} episode={ep.episode} state="airing" />
-                            </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                          <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">
+                            {getCompactDate(ep.airDate)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -311,7 +378,7 @@ function Dashboard({
 
           {/* Calendar View Footer */}
           {upcoming && upcoming.length > 0 && (
-            <div className="border-t border-white/5 px-6 py-3">
+            <div className="border-t border-white/5 px-5 py-2.5">
               <button
                 onClick={onShowCalendar}
                 className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground hover:text-white uppercase tracking-wider transition-colors"
@@ -324,9 +391,8 @@ function Dashboard({
         </GlassPanel>
 
         {/* RIGHT COLUMN: Context Rail */}
-        <div className="space-y-4 lg:sticky lg:top-6">
-          {/* Library Health */}
-          <GlassPanel className="p-4">
+        <div className="flex flex-col gap-4 h-full min-h-0">
+          <GlassPanel className="p-4 shrink-0">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="size-5 text-emerald-500 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
@@ -350,8 +416,7 @@ function Dashboard({
             </div>
           </GlassPanel>
 
-          {/* Quick Actions */}
-          <GlassPanel className="p-4 space-y-3">
+          <GlassPanel className="p-4 space-y-3 shrink-0">
             <div className="border-b border-white/5 pb-2">
               <h3 className="font-display text-sm font-semibold text-white tracking-wide">
                 Quick Actions
@@ -371,11 +436,22 @@ function Dashboard({
               </button>
               <button
                 onClick={async () => {
+                  try {
+                    await fetch("/api/system/watch/rescan", { method: "POST" });
+                  } catch {}
+                }}
+                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
+              >
+                <RotateCcw className="size-4 text-accent-amber" />
+                <span>Rescan Watch Folder</span>
+              </button>
+              <button
+                onClick={async () => {
                   // Check Upgrades — placeholder for future integration
                 }}
                 className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
               >
-                <RefreshCw className="size-4 text-accent-amber" />
+                <RefreshCw className="size-4 text-blue-400" />
                 <span>Check Upgrades</span>
               </button>
               <button
@@ -384,14 +460,13 @@ function Dashboard({
                 }}
                 className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
               >
-                <Activity className="size-4 text-blue-400" />
+                <Activity className="size-4 text-purple-400" />
                 <span>Refresh Metadata</span>
               </button>
             </div>
           </GlassPanel>
 
-          {/* Recent Activity */}
-          <WatcherPanel onEvents={setRecentEvents} />
+          <WatcherPanel onEvents={setRecentEvents} className="flex-1 min-h-0" />
         </div>
       </div>
     </div>

@@ -62,16 +62,19 @@ program
 
 program
   .command('init')
-  .description('Initialize a default config.json')
+  .description('Initialize default settings in the database')
   .action(() => {
-    const defaultConfig = {
-      apiKeys: {},
-      defaultProvider: 'tmdb',
-      onCollision: 'skip',
-      dryRun: false,
-    };
-    fs.writeFileSync('config.json', JSON.stringify(defaultConfig, null, 2));
-    console.log('Created default config.json. Configure library path and root folders via the UI.');
+    const existing = db.getAllSettings();
+    if (existing.length > 0) {
+      console.log('Settings already exist in the database. Skipping.');
+      return;
+    }
+    db.setSetting('defaultProvider', 'tvdb');
+    db.setSetting('onCollision', 'skip');
+    db.setSetting('dryRun', false);
+    db.setSetting('apiKeys', {});
+    db.setSetting('downloadClient', { type: 'blackhole' });
+    console.log('Initialized default settings in the database. Configure profiles, root folders, and providers via the UI.');
   });
 
 const showCmd = program.command('show').description('Manage registered shows');

@@ -30,9 +30,9 @@ export interface IndexerResult {
   /**
    * The exact ReleaseResource JSON Prowlarr returned for this release.
    * Grabbing requires POSTing this object back verbatim - Prowlarr doesn't
-   * grab by GUID alone.
+   * grab by GUID alone. Only present for Prowlarr-sourced results.
    */
-  raw: Record<string, unknown>;
+  raw?: Record<string, unknown>;
 }
 
 export interface IndexerInfo {

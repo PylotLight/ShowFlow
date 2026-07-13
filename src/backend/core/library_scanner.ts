@@ -10,12 +10,10 @@ export class LibraryScanner {
   constructor(private config: Config) {}
 
   async scan() {
-    const rootFolders = db.listRootFolders().map(r => r.path);
-    if (this.config.libraryPath) {
-      rootFolders.push(this.config.libraryPath);
-    }
+    const profiles = db.listShowProfiles();
+    const rootFolders = [...new Set(profiles.map(p => p.root_folder_path))];
     if (rootFolders.length === 0) {
-      console.log('No root folders configured. Nothing to scan.');
+      console.log('No profiles with root folders configured. Nothing to scan.');
       return;
     }
     console.log(`Scanning ${rootFolders.length} root folder(s): ${rootFolders.join(', ')}`);
@@ -23,8 +21,12 @@ export class LibraryScanner {
     for (const rf of rootFolders) {
       try {
         files.push(...this.walk(rf));
-      } catch (e) {
-        console.warn(`Could not scan root folder ${rf}:`, e);
+      } catch (e: any) {
+        if (e?.code === 'ENOENT') {
+          debugLog(`Root folder not found: ${rf}`);
+        } else {
+          console.warn(`Could not scan root folder ${rf}:`, e);
+        }
       }
     }
     let foundCount = 0;

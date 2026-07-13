@@ -1,8 +1,9 @@
-import { Loader2 } from "lucide-react";
+import { Check, Loader2, Trash2 } from "lucide-react";
 import * as React from "react";
 
 import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
 import { PosterCard, type ShowSummary } from "@frontend/components/showflow/PosterCard";
+import { cn } from "@frontend/lib/utils";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
 const MIN_POSTER_SIZE = 180;
@@ -39,6 +40,9 @@ export function Library({
   const [filter, setFilter] = React.useState<LibraryFilter>({ providerType: null, profile: null });
   const [posterSize, setPosterSize] = React.useState(loadPosterSize);
 
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [removing, setRemoving] = React.useState(false);
+
   const [backdropShow, setBackdropShow] = React.useState<ShowSummary | null>(null);
   const rotRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,12 +60,12 @@ export function Library({
     const q = [...shows].sort(() => Math.random() - 0.5);
     queueRef.current = q;
     idxRef.current = 0;
-    setBackdropShow(q[0]);
+    setBackdropShow(q[0] ?? null);
 
     rotRef.current = setInterval(() => {
       if (hoverTimerRef.current) return;
       idxRef.current = (idxRef.current + 1) % q.length;
-      setBackdropShow(q[idxRef.current]);
+      setBackdropShow(q[idxRef.current] ?? null);
     }, ROTATION_INTERVAL);
 
     return () => {
@@ -98,6 +102,38 @@ export function Library({
     const val = parseInt(e.target.value, 10);
     setPosterSize(val);
     savePosterSize(val);
+  }
+
+  function toggleSelection(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkRemove() {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    const names = shows?.filter((s) => selectedIds.has(s.id)).map((s) => s.title) ?? [];
+    const msg = `Remove ${count} show${count !== 1 ? "s" : ""}?\n\n${names.join("\n")}`;
+    if (!confirm(msg)) return;
+    setRemoving(true);
+    try {
+      const res = await fetch("/api/shows/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      if (!res.ok) throw new Error("Failed to remove shows");
+      setShows((prev) => (prev ? prev.filter((s) => !selectedIds.has(s.id)) : prev));
+      setSelectedIds(new Set());
+    } catch (err) {
+      alert(`Error removing shows: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRemoving(false);
+    }
   }
 
   return (
@@ -138,7 +174,7 @@ export function Library({
 
                 {/* Profile filter */}
                 {shows && (() => {
-                  const profiles = Array.from(new Set(shows.map(s => s.profile).filter(Boolean))).sort();
+                  const profiles = Array.from(new Set(shows.map(s => s.profile).filter((p): p is string => !!p))).sort();
                   if (profiles.length === 0) return null;
                   return (
                     <div className="flex items-center gap-1.5">
@@ -179,8 +215,27 @@ export function Library({
                 style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` }}
               >
                 {filtered.map((show) => (
-                  <div key={show.id} onMouseEnter={() => handleShowHover(show)}>
-                    <PosterCard show={show} onClick={() => onSelectShow(show)} />
+                  <div key={show.id} className="relative group" onMouseEnter={() => handleShowHover(show)}>
+                    <div
+                      className="absolute top-2 left-2 z-10 cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); toggleSelection(show.id); }}
+                    >
+                      <div
+                        className={cn(
+                          "size-5 rounded-full border-2 flex items-center justify-center transition-all duration-150",
+                          selectedIds.has(show.id)
+                            ? "bg-signal border-signal shadow-[0_0_8px_var(--signal)]"
+                            : "border-white/30 bg-black/30 group-hover:border-white/60"
+                        )}
+                      >
+                        {selectedIds.has(show.id) && <Check className="size-3 text-white" strokeWidth={3} />}
+                      </div>
+                    </div>
+                    <PosterCard
+                      show={show}
+                      onClick={() => onSelectShow(show)}
+                      selected={selectedIds.has(show.id)}
+                    />
                   </div>
                 ))}
               </div>
@@ -188,6 +243,36 @@ export function Library({
           )}
         </div>
       </main>
+
+      {/* Floating action bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 md:bottom-6 animate-[slideUp_0.2s_ease-out]">
+          <div className="glass-panel rounded-full px-5 py-2.5 flex items-center gap-4 shadow-2xl">
+            <span className="font-mono text-xs text-white/70 whitespace-nowrap">
+              {selectedIds.size} selected
+            </span>
+            <div className="w-px h-5 bg-white/10" />
+            <button
+              onClick={handleBulkRemove}
+              disabled={removing}
+              className="flex items-center gap-2 rounded-full bg-red-500/15 text-red-400 hover:bg-red-500/25 disabled:opacity-50 px-4 py-1.5 text-sm font-medium transition-colors"
+            >
+              {removing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              Remove
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-muted-foreground hover:text-white transition-colors font-mono uppercase tracking-wider"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

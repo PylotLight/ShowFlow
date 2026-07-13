@@ -3,6 +3,7 @@ import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { Skeleton } from "@frontend/components/ui/skeleton";
 import { cn } from "@frontend/lib/utils";
 
 export interface ActivityEvent {
@@ -17,7 +18,7 @@ export interface ActivityEvent {
  * file-drop events are bursty but not so time-critical that a 15s poll
  * feels stale, and it avoids a websocket for a v1 dashboard.
  */
-function WatcherPanel({ onEvents }: { onEvents?: (events: ActivityEvent[]) => void }) {
+function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEvent[]) => void; className?: string }) {
   const [watching, setWatching] = React.useState<boolean | null>(null);
   const [events, setEvents] = React.useState<ActivityEvent[] | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -54,8 +55,8 @@ function WatcherPanel({ onEvents }: { onEvents?: (events: ActivityEvent[]) => vo
   }
 
   return (
-    <GlassPanel className="flex flex-col gap-4 p-5">
-      <div className="flex items-center justify-between">
+    <GlassPanel className={cn("flex flex-col gap-4 p-5 min-h-0", className)}>
+      <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="relative flex items-center justify-center">
             <RadioIcon className={cn("size-4 z-10", watching ? "text-signal" : "text-muted-foreground")} />
@@ -88,9 +89,19 @@ function WatcherPanel({ onEvents }: { onEvents?: (events: ActivityEvent[]) => vo
         </Button>
       </div>
 
-      <div className="flex flex-col divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto max-h-[220px] scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
+      <div className="flex flex-col divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
         {events === null ? (
-          <span className="text-muted-foreground py-3 text-center text-xs font-mono">LOADING ACTIVITY...</span>
+          <div className="flex flex-col gap-2 py-3 px-1">
+            {Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <Skeleton className="h-4 w-10 rounded shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-2.5 w-16" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : events.length === 0 ? (
           <span className="text-muted-foreground py-3 text-center text-xs font-mono">NO ACTIVITY LOGGED.</span>
         ) : (
@@ -107,6 +118,21 @@ function WatcherPanel({ onEvents }: { onEvents?: (events: ActivityEvent[]) => vo
             } else if (e.type === "import" || e.message.toLowerCase().includes("import") || e.message.toLowerCase().includes("completed")) {
               badgeClass = "bg-accent-amber/15 text-accent-amber font-semibold border border-accent-amber/10";
               badgeLabel = "import";
+            } else if (e.type === "scan") {
+              badgeClass = "bg-blue-500/15 text-blue-400 font-semibold border border-blue-500/10";
+              badgeLabel = "scan";
+            } else if (e.type === "watcher") {
+              badgeClass = "bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/10";
+              badgeLabel = "watcher";
+            } else if (e.type === "upgrade") {
+              badgeClass = "bg-green-500/15 text-green-400 font-semibold border border-green-500/10";
+              badgeLabel = "upgrade";
+            } else if (e.type === "skip") {
+              badgeClass = "bg-gray-500/15 text-gray-400 font-semibold border border-gray-500/10";
+              badgeLabel = "skip";
+            } else if (e.type === "dryrun") {
+              badgeClass = "bg-yellow-500/15 text-yellow-400 font-semibold border border-yellow-500/10";
+              badgeLabel = "dryrun";
             }
 
             return (

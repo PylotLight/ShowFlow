@@ -63,6 +63,8 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
     return mediaList.map((media) => ({
       id: media.id.toString(),
       title: media.title.english || media.title.romaji,
+      originalTitle: media.title.native,
+      romanizedTitle: media.title.romaji,
       year: media.startDate?.year,
       provider: this.name,
       normalizedId: media.id.toString(),
@@ -128,45 +130,55 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getEpisodes(showId: string, seasonNumber?: number): Promise<Episode[]> {
-    const gqlQuery = {
-      query: `
-        query ($mediaId: Int) {
-          Media(id: $mediaId, type: ANIME) {
-            id
-            episodes
-            airingSchedule(notYetAired: false, perPage: 500) {
-              nodes {
-                episode
-                airingAt
-              }
-            }
-          }
-        }
-      `,
-      variables: { mediaId: parseInt(showId, 10) },
-    };
+    const scheduleMap = new Map<number, number>();
+    let page = 1;
 
     try {
-      const data = await this.fetch<{ Media: { episodes: number | null; airingSchedule: { nodes: { episode: number; airingAt: number }[] } | null } }>(this.apiBaseUrl, {
-        body: JSON.stringify(gqlQuery),
-      });
+      while (true) {
+        const gqlQuery = {
+          query: `
+            query ($mediaId: Int, $page: Int) {
+              Media(id: $mediaId, type: ANIME) {
+                id
+                episodes
+                airingSchedule(notYetAired: false, perPage: 50, page: $page) {
+                  nodes {
+                    episode
+                    airingAt
+                  }
+                  pageInfo {
+                    hasNextPage
+                  }
+                }
+              }
+            }
+          `,
+          variables: { mediaId: parseInt(showId, 10), page },
+        };
 
-      const media = data?.Media;
-      if (!media) return [];
+        const data = await this.fetch<{ Media: { episodes: number | null; airingSchedule: { nodes: { episode: number; airingAt: number }[]; pageInfo: { hasNextPage: boolean } } | null } }>(this.apiBaseUrl, {
+          body: JSON.stringify(gqlQuery),
+        });
 
-      const totalEpisodes = media.episodes ?? 0;
-      const scheduleMap = new Map<number, number>();
-      if (media.airingSchedule?.nodes) {
-        for (const node of media.airingSchedule.nodes) {
-          scheduleMap.set(node.episode, node.airingAt);
+        const media = data?.Media;
+        if (!media) break;
+
+        if (media.airingSchedule?.nodes) {
+          for (const node of media.airingSchedule.nodes) {
+            scheduleMap.set(node.episode, node.airingAt);
+          }
         }
+
+        const hasNext = media.airingSchedule?.pageInfo?.hasNextPage ?? false;
+        if (!hasNext || page > 100) break;
+        page++;
       }
 
-      const episodes: Episode[] = [];
-      const count = totalEpisodes > 0 ? totalEpisodes : Math.max(...scheduleMap.keys(), 0);
-      if (count === 0) return [];
+      const totalEpisodes = scheduleMap.size;
+      if (totalEpisodes === 0) return [];
 
-      for (let i = 1; i <= count; i++) {
+      const episodes: Episode[] = [];
+      for (let i = 1; i <= totalEpisodes; i++) {
         const airingAt = scheduleMap.get(i);
         episodes.push({
           season: 1,
@@ -197,6 +209,13 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
 
     const media = data?.Media;
     if (!media) throw new Error(`AniListProvider: show not found for ID ${id}`);
-    return { id: media.id.toString(), title: media.title.english || media.title.romaji, provider: this.name, metadata: media };
+    return {
+      id: media.id.toString(),
+      title: media.title.english || media.title.romaji,
+      originalTitle: media.title.native,
+      romanizedTitle: media.title.romaji,
+      provider: this.name,
+      metadata: media,
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { ChevronLeft, Columns2, DownloadIcon, Loader2Icon, SearchIcon } from "lucide-react";
+import { Check, ChevronLeft, Columns2, DownloadIcon, Loader2Icon, MoreHorizontal, RefreshCwIcon, SearchIcon } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -54,7 +54,7 @@ interface SearchTarget {
   episode?: number;
 }
 
-function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void }) {
+function ShowDetail({ show, onBack, modal = false }: { show: ShowSummary; onBack: () => void; modal?: boolean }) {
   const [seasons, setSeasons] = React.useState<SeasonStat[] | null>(null);
   const [activeSeason, setActiveSeason] = React.useState<number | null>(null);
   const [episodes, setEpisodes] = React.useState<EpisodeData[] | null>(null);
@@ -63,13 +63,23 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
   const [columnConfig, setColumnConfig] = React.useState<ColumnDef[]>(loadColumns);
   const [showColumnMenu, setShowColumnMenu] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
+  const headerMenuRef = React.useRef<HTMLDivElement>(null);
 
   const [profiles, setProfiles] = React.useState<Profile[]>([]);
   const [profile, setProfile] = React.useState<string>(show.profile || "standard");
 
+  const [folderProfiles, setFolderProfiles] = React.useState<{ id: string; name: string; root_folder_path: string }[]>([]);
+  const [rootFolderPath, setRootFolderPath] = React.useState<string | null>(null);
+  const [rootFolderSaving, setRootFolderSaving] = React.useState(false);
+  const [seriesType, setSeriesType] = React.useState<string>("standard");
+
   const [manageSourcesOpen, setManageSourcesOpen] = React.useState(false);
   const [searchTarget, setSearchTarget] = React.useState<SearchTarget | null>(null);
   const [grabTarget, setGrabTarget] = React.useState<GrabTarget>(null);
+  const [relocating, setRelocating] = React.useState(false);
+  const [organizing, setOrganizing] = React.useState(false);
+  const [moveDialog, setMoveDialog] = React.useState<{ oldRoot: string; newRoot: string; profileName: string; profileId: string } | null>(null);
 
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const statusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,18 +91,48 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
   }
 
   React.useEffect(() => {
+    // Quality profiles (points-system: 1080p/h265/etc via custom formats) -
+    // distinct from the show_profiles folder presets used at Add Show time.
     fetch("/api/profiles").then(r => r.json()).then(data => setProfiles(Array.isArray(data) ? data : [])).catch(() => setProfiles([]));
   }, []);
+
+  React.useEffect(() => {
+    // Root-folder presets ("Shows" vs "Anime" etc.) - only ever applied at
+    // Add Show time previously, so surfacing + editing them here is what
+    // lets an existing show move between categories after the fact.
+    fetch("/api/show-profiles").then(r => r.json()).then(data => setFolderProfiles(Array.isArray(data) ? data : [])).catch(() => setFolderProfiles([]));
+  }, []);
+
+  React.useEffect(() => {
+    setRootFolderPath(null);
+    fetch(`/api/shows/${show.id}`).then(r => r.json()).then(data => {
+      const resolvedType = data.seriesType ?? data.config?.seriesType ?? (show.providerType === 'anilist' ? 'anime' : 'standard');
+      setSeriesType(resolvedType);
+      if (data.rootFolderPath) {
+        setRootFolderPath(data.rootFolderPath);
+      }
+    }).catch(() => {});
+  }, [show.id, show.providerType]);
+
+  React.useEffect(() => {
+    if (rootFolderPath === null && seriesType && folderProfiles.length > 0) {
+      const match = findProfileForType(seriesType);
+      if (match) setRootFolderPath(match.root_folder_path);
+    }
+  }, [seriesType, folderProfiles.length]);
 
   React.useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowColumnMenu(false);
       }
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) {
+        setHeaderMenuOpen(false);
+      }
     }
-    if (showColumnMenu) document.addEventListener('mousedown', handleClick);
+    if (showColumnMenu || headerMenuOpen) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [showColumnMenu]);
+  }, [showColumnMenu, headerMenuOpen]);
 
   React.useEffect(() => {
     setSeasons(null);
@@ -127,6 +167,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
 
   const availableCount = episodes?.filter((e) => !!e.filePath).length ?? 0;
   const totalCount = episodes?.length ?? 0;
+  const allTracked = episodes && episodes.length > 0 && episodes.every((e) => e.tracked);
 
   async function toggleTracked(episode: EpisodeData, tracked: boolean) {
     setEpisodes((prev) => prev?.map((e) => (e.episode === episode.episode ? { ...e, tracked } : e)) ?? prev);
@@ -170,6 +211,100 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
     }
   }
 
+  const matchedFolderProfileId = React.useMemo(
+    () => folderProfiles.find(fp => fp.root_folder_path === rootFolderPath)?.id ?? "",
+    [folderProfiles, rootFolderPath],
+  );
+
+  function findProfileForType(type: string) {
+    if (!folderProfiles.length) return null;
+    if (type === "anime") {
+      return folderProfiles.find(fp =>
+        fp.id.toLowerCase().includes("anime") || fp.name.toLowerCase().includes("anime")
+      ) ?? folderProfiles[0];
+    }
+    return folderProfiles.find(fp =>
+      !fp.id.toLowerCase().includes("anime") && !fp.name.toLowerCase().includes("anime")
+    ) ?? folderProfiles[0];
+  }
+
+  async function handleRootFolderChange(profileId: string) {
+    const target = folderProfiles.find(fp => fp.id === profileId);
+    if (!target) return;
+    if (!rootFolderPath) {
+      executeRootFolderChange(target);
+      return;
+    }
+    setMoveDialog({ oldRoot: rootFolderPath, newRoot: target.root_folder_path, profileName: target.name, profileId: target.id });
+  }
+
+  async function executeRootFolderChange(target: { id: string; name: string; root_folder_path: string }) {
+    const prevPath = rootFolderPath;
+    setRootFolderPath(target.root_folder_path);
+    setRootFolderSaving(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rootFolderPath: target.root_folder_path }),
+      });
+      if (!res.ok) throw new Error("Failed to update root folder");
+      flashStatus(`Root folder set to "${target.name}".`);
+    } catch {
+      setRootFolderPath(prevPath);
+      flashStatus("Failed to update root folder.", false);
+    } finally {
+      setRootFolderSaving(false);
+    }
+  }
+
+  async function handleRelocateWithChange(target: { id: string; name: string; root_folder_path: string; }, oldRoot: string) {
+    setMoveDialog(null);
+    setRootFolderPath(target.root_folder_path);
+    setRootFolderSaving(true);
+    setRelocating(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rootFolderPath: target.root_folder_path }),
+      });
+      if (!res.ok) throw new Error("Failed to update root folder");
+      const relocate = await fetch(`/api/shows/${show.id}/relocate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newRootPath: target.root_folder_path }),
+      });
+      if (!relocate.ok) throw new Error("Failed to move files");
+      const data = await relocate.json();
+      flashStatus(`Moved ${data.moved} file${data.moved !== 1 ? "s" : ""} to "${target.name}"${data.failed > 0 ? `. ${data.failed} failed.` : "."}`);
+    } catch {
+      setRootFolderPath(oldRoot);
+      flashStatus("Failed to update root folder.", false);
+    } finally {
+      setRootFolderSaving(false);
+      setRelocating(false);
+    }
+  }
+
+  async function handleOrganize() {
+    setOrganizing(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}/organize`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to organize files");
+      const data = await res.json();
+      const parts: string[] = [];
+      if (data.renamed > 0) parts.push(`Renamed ${data.renamed} file${data.renamed !== 1 ? "s" : ""}`);
+      if (data.skipped > 0) parts.push(`${data.skipped} already correct`);
+      flashStatus(parts.length > 0 ? parts.join(", ") + "." : "No files to rename.");
+      if (data.renamed > 0) loadEpisodes();
+    } catch (err: any) {
+      flashStatus(err.message ?? "Failed to organize files.", false);
+    } finally {
+      setOrganizing(false);
+    }
+  }
+
   async function autoGrabEpisode(episode: EpisodeData) {
     setGrabTarget(episode.episode);
     try {
@@ -202,6 +337,24 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
     }
   }
 
+  async function toggleSeasonTracked(tracked: boolean) {
+    if (activeSeason === null) return;
+    setEpisodes((prev) => prev?.map((e) => ({ ...e, tracked })) ?? prev);
+    setSeasons((prev) => prev?.map((s) =>
+      s.seasonNumber === activeSeason ? { ...s, trackedCount: tracked ? s.episodeCount : 0 } : s
+    ) ?? prev);
+    try {
+      const res = await fetch(`/api/shows/${show.id}/seasons/${activeSeason}/tracked`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tracked }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+    } catch {
+      loadEpisodes();
+    }
+  }
+
   function toggleColumn(id: string) {
     setColumnConfig(prev => {
       const next = prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c);
@@ -224,7 +377,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto relative">
       {/* Backdrop background */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      <div className={`pointer-events-none ${modal ? 'absolute' : 'fixed'} inset-0 z-0 overflow-hidden`}>
         <img
           src={`/api/shows/${show.id}/images/backdrop`}
           alt=""
@@ -242,11 +395,11 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
       </div>
 
       {/* Top bar */}
-      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 px-6 border-b border-white/5 shrink-0"
+      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 md:px-6 py-2 border-b border-white/5 shrink-0"
         style={{ backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", background: "rgba(13,16,21,.75)" }}>
         <button onClick={onBack} className="text-muted-foreground hover:text-foreground text-sm flex items-center gap-1.5 transition-colors">
           <ChevronLeft className="size-4" />
-          Library
+          Back
         </button>
         <span className="text-white/20 text-xs">/</span>
         <span className="text-foreground text-sm font-medium truncate">{show.title}</span>
@@ -257,7 +410,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto items-center gap-3 hidden md:flex">
           <button onClick={() => setManageSourcesOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors">
             Sources
           </button>
@@ -276,9 +429,102 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
               </Select>
             </div>
           )}
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Type</span>
+              <Select value={seriesType} onValueChange={v => {
+                const match = findProfileForType(v);
+                const body: Record<string, any> = { seriesType: v };
+                if (match && match.root_folder_path !== rootFolderPath) {
+                  body.rootFolderPath = match.root_folder_path;
+                }
+                setSeriesType(v);
+                if (match && match.root_folder_path !== rootFolderPath) {
+                  setRootFolderPath(match.root_folder_path);
+                }
+                fetch(`/api/shows/${show.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                }).then(r => r.ok && flashStatus(`Type set to "${v}".`)).catch(() => flashStatus("Failed to update.", false));
+              }}>
+                <SelectTrigger size="sm" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="standard">Standard</SelectItem>
+                  <SelectItem value="anime">Anime</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           <button onClick={removeShow} className="text-muted-foreground hover:text-red-400 text-sub font-mono tracking-wider uppercase transition-colors">
             Remove
           </button>
+        </div>
+
+        {/* Mobile header menu */}
+        <div className="relative md:hidden ml-auto" ref={headerMenuRef}>
+          <button
+            onClick={() => setHeaderMenuOpen(v => !v)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Show options"
+          >
+            <MoreHorizontal className="size-5" />
+          </button>
+          {headerMenuOpen && (
+            <div className="absolute right-0 top-full mt-1.5 z-30 w-52 rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-2 space-y-1"
+              style={{ backdropFilter: "blur(16px)" }}>
+              <button onClick={() => { setManageSourcesOpen(true); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] text-sm text-foreground/80">
+                Sources
+              </button>
+              {profiles.length > 0 && (
+                <div className="px-2 py-1.5">
+                  <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60 mb-1">Profile</div>
+                  <Select value={profile} onValueChange={handleProfileChange}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {profiles.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="px-2 py-1.5">
+                <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60 mb-1">Type</div>
+                <Select value={seriesType} onValueChange={v => {
+                  const match = findProfileForType(v);
+                  const body: Record<string, any> = { seriesType: v };
+                  if (match && match.root_folder_path !== rootFolderPath) {
+                    body.rootFolderPath = match.root_folder_path;
+                  }
+                  setSeriesType(v);
+                  if (match && match.root_folder_path !== rootFolderPath) {
+                    setRootFolderPath(match.root_folder_path);
+                  }
+                  fetch(`/api/shows/${show.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                  }).then(r => r.ok && flashStatus(`Type set to "${v}".`)).catch(() => flashStatus("Failed to update.", false));
+                  setHeaderMenuOpen(false);
+                }}>
+                  <SelectTrigger size="sm" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                  <SelectItem value="standard">Standard</SelectItem>
+                  <SelectItem value="anime">Anime</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <hr className="border-white/5 my-1" />
+              <button onClick={() => { removeShow(); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-red-400/10 text-sm text-red-400">
+                Remove
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -297,7 +543,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
             linear-gradient(to bottom, rgba(13,16,21,.15) 0%, rgba(13,16,21,.5) 40%, rgba(13,16,21,.95) 100%)
           `
         }} />
-        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-6 px-8 pb-8">
+        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-4 md:gap-6 px-4 md:px-8 pb-4 md:pb-8">
           <div className="shrink-0 w-[110px] md:w-[140px] rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
             <img
               src={`/api/shows/${show.id}/images/poster`}
@@ -312,7 +558,6 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
             <div className="flex items-center gap-2.5 mt-2 text-xs font-mono text-muted-foreground">
               <span className="uppercase tracking-wider">{show.providerType}</span>
               <span className="text-white/15">·</span>
-              <span>#{show.id}</span>
               {seasons && (
                 <>
                   <span className="text-white/15">·</span>
@@ -327,7 +572,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
       </section>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 px-8 pb-8 flex flex-col min-h-0">
+      <div className="relative z-10 flex-1 px-4 md:px-8 pb-4 md:pb-8 flex flex-col min-h-0">
         {seasons === null ? (
           <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
             <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />
@@ -358,7 +603,7 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
             </div>
 
             {/* Episode toolbar */}
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex flex-wrap items-center gap-3 shrink-0">
               <h2 className="font-display text-base font-semibold tracking-wide text-white/80">Episodes</h2>
               <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-full p-0.5 border border-white/5">
                 {(["all", "available", "missing"] as const).map((f) => (
@@ -376,20 +621,32 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
                 ))}
               </div>
 
-              {/* Season-level search / grab */}
+              {/* Season-level actions */}
               {activeSeason !== null && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {episodes && episodes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleSeasonTracked(!allTracked)}
+                      title={allTracked ? "Stop monitoring all episodes in this season" : "Start monitoring all episodes in this season for new releases"}
+                      className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
+                    >
+                      <Check className="size-3" /> {allTracked ? "Unmonitor All" : "Monitor All"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSearchTarget({ season: activeSeason })}
+                    title="Browse and manually pick a release"
                     className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
                   >
-                    <SearchIcon className="size-3" /> Search Season
+                    <SearchIcon className="size-3" /> Browse
                   </button>
                   <button
                     type="button"
                     onClick={autoGrabSeason}
                     disabled={grabTarget === 'season'}
+                    title="Automatically search and download the best matching release"
                     className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
                   >
                     {grabTarget === 'season' ? (
@@ -397,7 +654,21 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
                     ) : (
                       <DownloadIcon className="size-3" />
                     )}
-                    Auto Grab Season
+                    Auto Download
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOrganize}
+                    disabled={organizing}
+                    title="Rename all episode files to a consistent naming format"
+                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
+                  >
+                    {organizing ? (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    ) : (
+                      <RefreshCwIcon className="size-3" />
+                    )}
+                    Organize
                   </button>
                 </div>
               )}
@@ -514,6 +785,56 @@ function ShowDetail({ show, onBack }: { show: ShowSummary; onBack: () => void })
             });
         }}
       />
+
+      {moveDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+          <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
+            style={{ backdropFilter: "blur(16px)" }}>
+            <h3 className="font-display text-lg font-semibold text-white/90">Move existing files?</h3>
+            <p className="text-sm text-muted-foreground">
+              Episodes are currently stored under <code className="text-foreground/80">{moveDialog.oldRoot}</code>.
+              Moving to <code className="text-foreground/80">{moveDialog.newRoot}</code> will physically relocate them.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={relocating}
+                onClick={() => handleRelocateWithChange(
+                  folderProfiles.find(fp => fp.id === moveDialog.profileId)!,
+                  moveDialog.oldRoot,
+                )}
+                className="flex-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 text-sm font-medium py-2 transition-colors disabled:opacity-50"
+              >
+                {relocating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2Icon className="size-3.5 animate-spin" /> Moving...
+                  </span>
+                ) : (
+                  "Move files"
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = folderProfiles.find(fp => fp.id === moveDialog.profileId);
+                  if (target) executeRootFolderChange(target);
+                  setMoveDialog(null);
+                }}
+                className="flex-1 rounded-md border border-white/10 hover:bg-white/[0.04] text-sm text-muted-foreground hover:text-foreground py-2 transition-colors"
+              >
+                Change folder only
+              </button>
+              <button
+                type="button"
+                onClick={() => setMoveDialog(null)}
+                className="text-muted-foreground hover:text-foreground text-sm py-2 px-3 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

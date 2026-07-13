@@ -197,13 +197,14 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
       </aside>
 
       {/* Mobile Bottom Navigation (visible on screens < 768px) */}
-      <nav className="glass-plane fixed bottom-0 left-0 right-0 z-30 flex h-14 items-center justify-around border-x-0 border-b-0 px-2 py-1 md:hidden">
-        {mainNavs.concat(collectionNavs.slice(0, 1)).map((nav) => (
+      <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-14 items-center gap-1 overflow-x-auto border-t border-white/10 px-2 py-1 md:hidden"
+        style={{ backdropFilter: "blur(18px) saturate(115%)", WebkitBackdropFilter: "blur(18px) saturate(115%)", background: "rgb(28 32 40 / 62%)" }}>
+        {mainNavs.concat(collectionNavs, manageNavs).map((nav) => (
           <button
             key={nav.id}
             onClick={() => onChange(nav.id)}
             className={cn(
-              "relative flex flex-col items-center justify-center px-3 py-1 font-sans text-caption font-medium transition-colors",
+              "relative flex shrink-0 flex-col items-center justify-center px-3 py-1 font-sans text-caption font-medium transition-colors",
               activeItem === nav.id ? "text-signal" : "text-muted-foreground"
             )}
           >

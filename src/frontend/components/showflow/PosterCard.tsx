@@ -1,7 +1,6 @@
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
-import { Badge } from "@frontend/components/ui/badge";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 
 export interface ShowSummary {
@@ -36,11 +35,6 @@ function PosterCard({
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent opacity-90 transition-opacity group-hover:opacity-100" />
 
       <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-3">
-        {show.profile === "anime" && (
-          <Badge variant="amber" className="w-fit">
-            anime
-          </Badge>
-        )}
         <span className="font-display text-base leading-tight font-semibold tracking-wide text-white drop-shadow-sm">
           {show.title}
         </span>

@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/backend/server.ts",
+    "dev": "bun --hot --host=0.0.0.0 src/backend/server.ts",
     "start": "NODE_ENV=production bun src/backend/server.ts",
     "build": "bun run build.ts",
     "test": "bun test",
-    "cli": "bun src/cli/index.ts"
+    "cli": "bun src/cli/index.ts",
+    "backup": "bun scripts/backup.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

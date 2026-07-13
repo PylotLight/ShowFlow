@@ -1,111 +1,815 @@
-import { FilenameParser } from './index';
+import Fuse from 'fuse.js';
+
+import { FilenameParser, type ParsedFilename } from './index';
 import { ProviderFactory, type ProviderType } from '../providers/factory';
 import { db } from '../db';
-import type { Show, Episode, EpisodeQuery } from '../core/types';
-import Fuse from 'fuse.js';
+import type {
+  Episode,
+  EpisodeQuery,
+  IMetadataProvider,
+  Show,
+} from '../core/types';
 import { debugLog } from '../core/debug';
 
-export class Oracle {
-  private parser = new FilenameParser();
+type ShowTitleType =
+  | 'canonical'
+  | 'original'
+  | 'romanized'
+  | 'translation'
+  | 'alias'
+  | 'provider'
+  | 'user';
 
-  async resolve(filename: string, preferredProvider: ProviderType = 'tmdb', config: any = {}): Promise<{
+interface LocalShowRow {
+  showId: string;
+  showTitle: string;
+  showOriginalTitle: string | null;
+  showYear: number | null;
+  showSeriesType: string | null;
+
+  providerType: string;
+  providerId: string;
+  providerTitle: string | null;
+  providerOriginalTitle: string | null;
+  providerMetadataJson: string | null;
+  isPrimary: number | null;
+
+  knownTitle?: string | null;
+  knownTitleType?: string | null;
+  knownTitleLanguage?: string | null;
+
+  matchedTitle?: string | null;
+  matchedTitleType?: string | null;
+  matchedTitleLanguage?: string | null;
+}
+
+interface LocalShowCandidate {
+  localShowId: string;
+  show: Show;
+  providerType: ProviderType;
+  providerId: string;
+  titles: string[];
+  isPrimary: boolean;
+  score?: number;
+}
+
+interface ProviderShow extends Show {
+  aliases?: string[];
+  alternateTitles?: string[];
+  translations?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+}
+
+
+const PROVIDER_TYPES: ProviderType[] = ['tmdb', 'tvdb', 'anilist'];
+
+function isProviderType(value: string): value is ProviderType {
+  return PROVIDER_TYPES.includes(value as ProviderType);
+}
+
+function normalizeTitle(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[._]+/g, ' ')
+    .replace(/[‐‑‒–—]/g, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function uniqueTitles(titles: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+
+  return titles.filter((title): title is string => {
+    if (!title?.trim()) return false;
+
+    const normalized = normalizeTitle(title);
+
+    if (!normalized || seen.has(normalized)) {
+      return false;
+    }
+
+    seen.add(normalized);
+    return true;
+  });
+}
+
+export class Oracle {
+  private readonly parser = new FilenameParser();
+
+    private lastParsed: ParsedFilename | null = null;
+  private lastSearchResults: Show[] = [];
+  private lastProviderAttempts: Array<{
+    provider: ProviderType;
+    strategies: string[];
+    candidateCount: number;
+    candidates: { id: string; title: string }[];
+    matchedTitle: string | null;
+    episodeErrors: string[];
+  }> = [];
+
+  async resolve(
+    filename: string,
+    preferredProvider: ProviderType = 'tmdb',
+    config: Record<string, unknown> = {},
+  ): Promise<{
     show: Show;
     episodes: Episode[];
     proposedPath: string;
-    } | null> {
+    parsed?: unknown;
+  } | null> {
     const parsed = this.parser.parse(filename);
-    if (!parsed) return null;
-    debugLog('Filename parsed', { filename, parsed });
 
-    let providerType = preferredProvider;
+    this.lastParsed = parsed;
+    this.lastSearchResults = [];
 
-    // If the show is already registered in our DB, use that provider instead of the default
-    if (parsed.show) {
-      const registeredShows = db.getShowByName(parsed.show);
-      if (registeredShows.length > 0) {
-        providerType = registeredShows[0].provider_type;
+    if (!parsed?.show) {
+      debugLog('Filename parsing failed or did not include a show title', {
+        filename,
+        parsed,
+      });
+      return null;
+    }
+
+    parsed.show = this.cleanParsedTitle(parsed.show);
+
+    debugLog('Filename parsed', {
+      filename,
+      parsed,
+    });
+
+    const localCandidate = this.findLocalShow(parsed.show);
+
+    if (localCandidate) {
+      debugLog('Resolved show from local database before provider lookup', {
+        parsedTitle: parsed.show,
+        localShowId: localCandidate.localShowId,
+        title: localCandidate.show.title,
+        providerType: localCandidate.providerType,
+        providerId: localCandidate.providerId,
+        score: localCandidate.score,
+      });
+
+      const provider = ProviderFactory.getProvider(
+        localCandidate.providerType,
+        config,
+      );
+
+      const { episodes, errors: episodeErrors } = await this.resolveEpisodes(
+        provider,
+        localCandidate.providerId,
+        parsed,
+        localCandidate.show,
+      );
+
+      if (episodes.length === 0) {
+        debugLog('Local show matched, but no episode could be resolved', {
+          parsedTitle: parsed.show,
+          show: localCandidate.show.title,
+          episodeErrors,
+          providerType: localCandidate.providerType,
+          providerId: localCandidate.providerId,
+          parsed,
+        });
+        return null;
+      }
+
+      const proposedPath = this.buildPath(
+        localCandidate.show,
+        episodes,
+        filename,
+      );
+
+      return {
+        show: localCandidate.show,
+        episodes,
+        proposedPath,
+        parsed,
+      };
+    }
+
+    const provider = ProviderFactory.getProvider(preferredProvider, config);
+    const strategies = this.buildSearchStrategies(parsed.show);
+    const searchResults = await this.searchProvider(provider, strategies);
+
+    this.lastSearchResults = searchResults;
+    this.lastProviderAttempts = [];
+
+    let matchedShow = this.matchProviderShow(parsed.show, searchResults);
+    let resolvedProvider = provider;
+    let resolvedProviderType = preferredProvider;
+
+    this.lastProviderAttempts.push({
+      provider: preferredProvider,
+      strategies,
+      candidateCount: searchResults.length,
+      candidates: searchResults.slice(0, 5).map(s => ({
+        id: s.id,
+        title: s.title,
+      })),
+      matchedTitle: matchedShow?.title ?? null,
+      episodeErrors: [],
+    });
+
+
+    // The preferred provider (usually TVDB/TMDB) frequently has poor or no
+    // coverage for anime, non-English, or niche titles. Rather than giving
+    // up immediately, fall back through the remaining provider types before
+    // reporting failure - this is what actually fixes most "could not
+    // resolve metadata" cases for fansub-style releases.
+    if (!matchedShow) {
+      const remainingProviders = PROVIDER_TYPES.filter(p => p !== preferredProvider);
+
+      for (const fallbackType of remainingProviders) {
+        const fallbackProvider = ProviderFactory.getProvider(fallbackType, config);
+        const fallbackResults = await this.searchProvider(fallbackProvider, strategies);
+
+        this.lastProviderAttempts.push({
+          provider: fallbackType,
+          strategies,
+          candidateCount: fallbackResults.length,
+          candidates: fallbackResults.slice(0, 5).map(s => ({
+            id: s.id,
+            title: s.title,
+          })),
+          matchedTitle: null,
+          episodeErrors: [],
+        });
+
+
+        const fallbackMatch = this.matchProviderShow(parsed.show, fallbackResults);
+        this.lastProviderAttempts[
+          this.lastProviderAttempts.length - 1
+        ]!.matchedTitle = fallbackMatch?.title ?? null;
+
+        if (fallbackMatch) {
+          matchedShow = fallbackMatch;
+          resolvedProvider = fallbackProvider;
+          resolvedProviderType = fallbackType;
+          this.lastSearchResults = fallbackResults;
+
+          debugLog('Resolved show via fallback provider after preferred provider found no match', {
+            parsedTitle: parsed.show,
+            preferredProvider,
+            fallbackProvider: fallbackType,
+            title: fallbackMatch.title,
+          });
+          break;
+        }
       }
     }
 
-    const provider = ProviderFactory.getProvider(providerType, config);
-    debugLog('Using provider', { providerType, parsedShow: parsed.show });
-    const searchResults = await provider.searchShow(parsed.show!);
-
-    if (searchResults.length === 0) return null;
-
-    // Fuzzy match search results to parsed show name
-    const fuse = new Fuse(searchResults, { keys: ['title'], threshold: 0.4 });
-    const bestMatch = fuse.search(parsed.show!).at(0);
-
-    if (!bestMatch) return null;
-    const show = bestMatch.item;
-
-    // Resolve all episodes in the range
-    const episodes: Episode[] = [];
-    
-    if (parsed.episodes) {
-      for (const epNum of parsed.episodes) {
-        try {
-          const ep = await provider.getEpisode(show.id, { season: parsed.season, episode: epNum });
-          episodes.push(ep);
-        } catch (e) {
-          debugLog('Failed to resolve episode', { showId: show.id, epNum, error: e });
-        }
-      }
-    } else if (parsed.absoluteNumbers) {
-      for (const absNum of parsed.absoluteNumbers) {
-        try {
-          const ep = await provider.getEpisode(show.id, { absoluteNumber: absNum });
-          episodes.push(ep);
-        } catch (e) {
-          debugLog('Failed to resolve absolute episode', { showId: show.id, absNum, error: e });
-        }
-      }
+    if (!matchedShow) {
+      debugLog('No confident provider show match across any provider', {
+        parsedTitle: parsed.show,
+        attempts: this.lastProviderAttempts,
+      });
+      return null;
     }
 
-    if (episodes.length === 0) return null;
+    debugLog('Resolved show from external provider', {
+      parsedTitle: parsed.show,
+      providerType: resolvedProviderType,
+      providerId: matchedShow.id,
+      title: matchedShow.title,
+      titles: this.getProviderTitles(matchedShow),
+    });
 
-    const proposedPath = this.buildPath(show, episodes, filename);
+    const { episodes, errors: episodeErrors } = await this.resolveEpisodes(
+      resolvedProvider,
+      matchedShow.id,
+      parsed,
+      matchedShow,
+    );
 
-    return { show, episodes, proposedPath };
+    const resolvedAttempt = this.lastProviderAttempts.find(
+      attempt => attempt.provider === resolvedProviderType,
+    );
+
+    if (resolvedAttempt) {
+      resolvedAttempt.episodeErrors = episodeErrors;
+    }
+
+    if (episodes.length === 0) {
+      debugLog('Provider show matched, but no episode could be resolved', {
+        parsedTitle: parsed.show,
+        show: matchedShow.title,
+        providerType: resolvedProviderType,
+        providerId: matchedShow.id,
+        parsed,
+        episodeErrors,
+      });
+      return null;
+    }
+
+    const proposedPath = this.buildPath(matchedShow, episodes, filename);
+
+    return {
+      show: matchedShow,
+      episodes,
+      proposedPath,
+      parsed,
+    };
   }
 
   /**
-   * Builds a Sonarr-style path: `{Show}/Season {SS}/{Show} - S{SS}E{EE} - {Title}.ext`
-   * If multiple episodes, uses range: S01E01-03
+   * Exact local-title match is indexed and always attempted first.
+   * Fuzzy local matching is a fallback only; it refuses close alternatives.
    */
-  private buildPath(show: Show, episodes: Episode[], originalFilename: string): string {
-    const extMatch = originalFilename.match(/\.[^.]+$/);
-    const ext = extMatch ? extMatch[0] : '.mkv';
+  private findLocalShow(parsedTitle: string): LocalShowCandidate | null {
+    const normalized = normalizeTitle(parsedTitle);
 
-    const firstEp = episodes[0];
-    if (!firstEp) return `Unknown/${originalFilename}`;
-    const seasonNum = firstEp.season;
-    const season = String(seasonNum).padStart(2, '0');
-    
-    let episodeCode = '';
-    if (episodes.length === 1) {
-      episodeCode = `S${season}E${String(firstEp.episode).padStart(2, '0')}`;
-    } else {
-      const lastEp = episodes[episodes.length - 1];
-      const firstEpNum = String(firstEp.episode).padStart(2, '0');
-      const lastEpNum = lastEp ? String(lastEp.episode).padStart(2, '0') : firstEpNum;
-      episodeCode = `S${season}E${firstEpNum}-${lastEpNum}`;
+    const exactRows = db.findShowsByNormalizedTitle(
+      normalized,
+    ) as LocalShowRow[];
+
+    const exactCandidates = this.groupLocalRows(exactRows);
+
+    const exact = this.selectPreferredLocalCandidate(
+      exactCandidates,
+      normalized,
+      true,
+    );
+
+    if (exact) {
+      return exact;
     }
-    
-    const titleSuffix = firstEp.title ? ` - ${firstEp.title}` : '';
+
+    const fuzzyRows = db.getLocalShowCandidates() as LocalShowRow[];
+    const fuzzyCandidates = this.groupLocalRows(fuzzyRows);
+
+    if (fuzzyCandidates.length === 0) {
+      return null;
+    }
+
+    const fuse = new Fuse(fuzzyCandidates, {
+      keys: ['titles'],
+      includeScore: true,
+      threshold: 0.18,
+      ignoreLocation: true,
+      minMatchCharLength: 4,
+    });
+
+    const matches = fuse.search(normalized);
+    const best = matches[0];
+    const second = matches[1];
+
+    if (!best || best.score == null || best.score > 0.18) {
+      return null;
+    }
+
+    if (
+      second?.score != null &&
+      Math.abs(second.score - best.score) < 0.04
+    ) {
+      debugLog('Ambiguous local fuzzy match; provider search will be used', {
+        parsedTitle,
+        first: {
+          title: best.item.show.title,
+          score: best.score,
+        },
+        second: {
+          title: second.item.show.title,
+          score: second.score,
+        },
+      });
+      return null;
+    }
+
+    return {
+      ...best.item,
+      score: best.score,
+    };
+  }
+
+  private groupLocalRows(rows: LocalShowRow[]): LocalShowCandidate[] {
+    const candidates = new Map<string, LocalShowCandidate>();
+
+    for (const row of rows) {
+      if (!isProviderType(row.providerType)) {
+        debugLog('Skipping local show with unsupported provider type', {
+          showId: row.showId,
+          providerType: row.providerType,
+        });
+        continue;
+      }
+
+      const key = `${row.showId}:${row.providerType}`;
+
+      const candidate = candidates.get(key) ?? {
+        localShowId: row.showId,
+        providerType: row.providerType,
+        providerId: row.providerId,
+        show: {
+          id: row.providerId,
+          title: row.showTitle,
+          originalTitle: row.showOriginalTitle ?? undefined,
+          year: row.showYear ?? undefined,
+          provider: row.providerType,
+          metadata: this.safeJsonObject(row.providerMetadataJson),
+        },
+        isPrimary: row.isPrimary === 1,
+        titles: [],
+      };
+
+      candidate.titles.push(
+        ...uniqueTitles([
+          row.showTitle,
+          row.showOriginalTitle,
+          row.providerTitle,
+          row.providerOriginalTitle,
+          row.knownTitle,
+          row.matchedTitle,
+          ...this.extractTitlesFromMetadata(row.providerMetadataJson),
+        ]),
+      );
+
+
+      candidate.titles = uniqueTitles(candidate.titles);
+
+      candidates.set(key, candidate);
+    }
+
+    return [...candidates.values()];
+  }
+
+  private selectPreferredLocalCandidate(
+    candidates: LocalShowCandidate[],
+    normalizedQuery: string,
+    requireExact: boolean,
+  ): LocalShowCandidate | null {
+    const matching = candidates.filter(candidate => {
+      return candidate.titles.some(title => {
+        const isExact = normalizeTitle(title) === normalizedQuery;
+        return requireExact ? isExact : true;
+      });
+    });
+
+    if (matching.length === 0) {
+      return null;
+    }
+
+    const sorted = [...matching].sort((a, b) => {
+      if (a.isPrimary !== b.isPrimary) {
+        return a.isPrimary ? -1 : 1;
+      }
+
+      return a.show.title.localeCompare(b.show.title);
+    });
+
+    if (sorted.length > 1) {
+      debugLog('Multiple exact local title matches found', {
+        normalizedQuery,
+        matches: sorted.map(candidate => ({
+          localShowId: candidate.localShowId,
+          title: candidate.show.title,
+          providerType: candidate.providerType,
+          providerId: candidate.providerId,
+        })),
+      });
+    }
+
+    return sorted[0] ?? null;
+  }
+
+  private async searchProvider(
+    provider: IMetadataProvider,
+    strategies: string[],
+  ): Promise<Show[]> {
+    const resultsById = new Map<string, Show>();
+
+    for (const strategy of strategies) {
+      try {
+        const results = await provider.searchShow(strategy);
+
+        debugLog('Provider search completed', {
+          strategy,
+          resultCount: results.length,
+        });
+
+        for (const show of results) {
+          resultsById.set(show.id, show);
+        }
+      } catch (error) {
+        debugLog('Provider search failed', {
+          strategy,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return [...resultsById.values()];
+  }
+
+  private matchProviderShow(
+    parsedTitle: string,
+    results: Show[],
+  ): Show | null {
+    const normalizedQuery = normalizeTitle(parsedTitle);
+
+    const exact = results.find(show =>
+      this.getProviderTitles(show).some(
+        title => normalizeTitle(title) === normalizedQuery,
+      ),
+    );
+
+    if (exact) {
+      return exact;
+    }
+
+    const candidates = results.map(show => ({
+      show,
+      titles: this.getProviderTitles(show).map(normalizeTitle),
+    }));
+
+    const fuse = new Fuse(candidates, {
+      keys: ['titles'],
+      includeScore: true,
+      threshold: 0.24,
+      ignoreLocation: true,
+      minMatchCharLength: 3,
+    });
+
+    const matches = fuse.search(normalizedQuery);
+    const best = matches[0];
+    const second = matches[1];
+
+    if (!best || best.score == null || best.score > 0.24) {
+      return null;
+    }
+
+    if (
+      second?.score != null &&
+      Math.abs(second.score - best.score) < 0.05
+    ) {
+      debugLog('Ambiguous provider result; refusing automatic selection', {
+        parsedTitle,
+        first: {
+          title: best.item.show.title,
+          score: best.score,
+        },
+        second: {
+          title: second.item.show.title,
+          score: second.score,
+        },
+      });
+
+      return null;
+    }
+
+    return best.item.show;
+  }
+
+  private getProviderTitles(show: Show): string[] {
+    const providerShow = show as ProviderShow;
+    const translations = Object.values(providerShow.translations ?? {});
+
+    return uniqueTitles([
+      show.title,
+      show.originalTitle,
+      show.romanizedTitle,
+      ...(providerShow.aliases ?? []),
+      ...(providerShow.alternateTitles ?? []),
+      ...translations,
+      ...this.extractTitlesFromObject(show.metadata),
+    ]);
+  }
+
+  /**
+   * Metadata varies by provider. This reads likely title arrays/fields without
+   * making Oracle depend on TVDB-specific response types.
+   */
+  private extractTitlesFromMetadata(metadataJson: string | null): string[] {
+    return this.extractTitlesFromObject(this.safeJsonObject(metadataJson));
+  }
+
+  private extractTitlesFromObject(
+    metadata: Record<string, unknown> | undefined,
+  ): string[] {
+    if (!metadata) {
+      return [];
+    }
+
+    const values: string[] = [];
+
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string' && value.trim()) {
+        values.push(value);
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string') {
+            collect(item);
+          } else if (item && typeof item === 'object') {
+            const record = item as Record<string, unknown>;
+            collect(record.name);
+            collect(record.title);
+            collect(record.value);
+          }
+        }
+      }
+
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const nestedValue of Object.values(value)) {
+          if (typeof nestedValue === 'string') {
+            collect(nestedValue);
+          }
+        }
+      }
+    };
+
+    collect(metadata.aliases);
+    collect(metadata.alias);
+    collect(metadata.alternateTitles);
+    collect(metadata.alternate_titles);
+    collect(metadata.translations);
+    collect(metadata.titles);
+    collect(metadata.nameTranslations);
+    collect(metadata.name_translations);
+
+    return uniqueTitles(values);
+  }
+
+  private safeJsonObject(
+    rawJson: string | null,
+  ): Record<string, unknown> | undefined {
+    if (!rawJson) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(rawJson);
+
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch (error) {
+      debugLog('Unable to parse provider metadata JSON', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return undefined;
+  }
+
+  private buildSearchStrategies(parsedTitle: string): string[] {
+    const cleaned = this.cleanParsedTitle(parsedTitle);
+
+    return uniqueTitles([
+      cleaned,
+      cleaned
+        .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    ]);
+  }
+
+  private cleanParsedTitle(value: string): string {
+    return value
+      .normalize('NFKC')
+      .replace(/[._]+/g, ' ')
+      .replace(/[‐‑‒–—]/g, '-')
+      .replace(/\s+-\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private async resolveEpisodes(
+    provider: IMetadataProvider,
+    showId: string,
+    parsed: {
+      season?: number;
+      episodes?: number[];
+      absoluteNumbers?: number[];
+    },
+    show: Show,
+  ): Promise<{ episodes: Episode[]; errors: string[] }> {
+    const episodes: Episode[] = [];
+    const errors: string[] = [];
+
+    if (parsed.episodes?.length) {
+      for (const episodeNumber of parsed.episodes) {
+        const query: EpisodeQuery = {
+          season: parsed.season,
+          episode: episodeNumber,
+        };
+
+        try {
+          const episode = await provider.getEpisode(showId, query);
+          episodes.push(episode);
+
+          debugLog('Episode resolved', {
+            show: show.title,
+            showId,
+            season: parsed.season,
+            episodeNumber,
+            title: episode.title,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`S${parsed.season}E${episodeNumber}: ${message}`);
+          debugLog('Failed to resolve episode', {
+            show: show.title,
+            showId,
+            season: parsed.season,
+            episodeNumber,
+            error: message,
+          });
+        }
+      }
+
+      return { episodes, errors };
+    }
+
+    if (parsed.absoluteNumbers?.length) {
+      for (const absoluteNumber of parsed.absoluteNumbers) {
+        try {
+          const episode = await provider.getEpisode(showId, {
+            absoluteNumber,
+          });
+
+          episodes.push(episode);
+
+          debugLog('Absolute episode resolved', {
+            show: show.title,
+            showId,
+            absoluteNumber,
+            title: episode.title,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`Absolute #${absoluteNumber}: ${message}`);
+          debugLog('Failed to resolve absolute episode', {
+            show: show.title,
+            showId,
+            absoluteNumber,
+            error: message,
+          });
+        }
+      }
+    }
+
+    return { episodes, errors };
+  }
+
+  private buildPath(
+    show: Show,
+    episodes: Episode[],
+    originalFilename: string,
+  ): string {
+    const extension = originalFilename.match(/\.[^.]+$/)?.[0] ?? '.mkv';
+    const firstEpisode = episodes[0];
+
+    if (!firstEpisode) {
+      return `Unknown/${originalFilename}`;
+    }
+
+    const season = String(firstEpisode.season).padStart(2, '0');
+
+    const episodeCode = episodes.length === 1
+      ? `S${season}E${String(firstEpisode.episode).padStart(2, '0')}`
+      : `S${season}E${String(firstEpisode.episode).padStart(2, '0')}-${String(
+          episodes.at(-1)?.episode ?? firstEpisode.episode,
+        ).padStart(2, '0')}`;
 
     const safeShowTitle = this.sanitize(show.title);
-    const safeTitleSuffix = this.sanitize(titleSuffix);
+    const safeEpisodeTitle = firstEpisode.title
+      ? ` - ${this.sanitize(firstEpisode.title)}`
+      : '';
 
-    const seasonFolder = `Season ${season}`;
-    const fileName = `${safeShowTitle} - ${episodeCode}${safeTitleSuffix}${ext}`;
-
-    return `${safeShowTitle}/${seasonFolder}/${fileName}`;
+    return [
+      safeShowTitle,
+      `Season ${season}`,
+      `${safeShowTitle} - ${episodeCode}${safeEpisodeTitle}${extension}`,
+    ].join('/');
   }
 
-  /** Strips characters that are unsafe/problematic in file and folder names. */
-  private sanitize(input: string): string {
-    return input.replace(/[<>:"/\\|?*]/g, '').trim();
+  private sanitize(value: string): string {
+    return value.replace(/[<>:"/\\|?*]/g, '').trim();
   }
+
+  getDiagnostics(): {
+    parsed: ParsedFilename | null;
+    searchResults: Show[];
+    searchResultCount: number;
+    providerAttempts: Array<{
+      provider: ProviderType;
+      strategies: string[];
+      candidateCount: number;
+      candidates: { id: string; title: string }[];
+      matchedTitle: string | null;
+      episodeErrors: string[];
+    }>;
+  } {
+    return {
+      parsed: this.lastParsed as ParsedFilename | null,
+      searchResults: this.lastSearchResults,
+      searchResultCount: this.lastSearchResults.length,
+      providerAttempts: this.lastProviderAttempts,
+    };
+  }
+
 }

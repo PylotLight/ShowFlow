@@ -40,4 +40,21 @@ export class SystemManager {
   getProcessingFiles(): string[] {
     return this.watcher ? this.watcher.getProcessingFiles() : [];
   }
+
+  async rescanWatcher() {
+    if (!this.watcher) {
+      throw new Error('Watcher is not running.');
+    }
+    const folder = this.config.downloadClient?.blackhole?.watchFolder;
+    if (!folder) {
+      throw new Error('No watch folder configured.');
+    }
+    // Access the BlackholeClient's scan method
+    const client = (this.watcher as any).clients?.get('blackhole');
+    if (client && typeof client.scanExistingFiles === 'function') {
+      await client.scanExistingFiles(folder);
+      return { status: 'rescanned' };
+    }
+    throw new Error('Blackhole client not available or does not support scanning.');
+  }
 }

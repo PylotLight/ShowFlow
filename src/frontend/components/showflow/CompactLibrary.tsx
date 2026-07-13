@@ -51,11 +51,6 @@ function CompactLibrary({
                     {show.title}
                   </span>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {show.profile === "anime" && (
-                      <span className="rounded bg-accent-amber/10 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-accent-amber">
-                        anime
-                      </span>
-                    )}
                     <span className="rounded bg-white/5 px-1 py-0.5 font-mono text-[7px] uppercase tracking-wider text-white/40">
                       {show.providerType}
                     </span>

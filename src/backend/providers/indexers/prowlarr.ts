@@ -4,6 +4,7 @@ import type {
   IndexerResult,
   SearchOptions,
 } from './types';
+import { logDebug } from '../../core/debug';
 
 /**
  * Client for a Prowlarr instance's v1 API.
@@ -102,7 +103,17 @@ export class ProwlarrIndexer implements Indexer {
     for (const cat of options?.categories ?? []) url.searchParams.append('categories', String(cat));
     for (const id of options?.indexerIds ?? []) url.searchParams.append('indexerIds', String(id));
 
-    const response = await fetch(url.toString(), {
+    const requestUrl = url.toString();
+
+    logDebug({
+      type: 'provider',
+      level: 'info',
+      source: 'Prowlarr',
+      message: `Searching "${query}" (type=${options?.type ?? 'search'})`,
+      url: requestUrl,
+    });
+
+    const response = await fetch(requestUrl, {
       headers: { 'X-Api-Key': this.apiKey },
     }).catch(err => {
       throw new Error(`Could not reach Prowlarr at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
@@ -117,6 +128,13 @@ export class ProwlarrIndexer implements Indexer {
     }
 
     const data = (await response.json()) as any[];
+
+    logDebug({
+      type: 'provider',
+      level: data.length > 0 ? 'info' : 'debug',
+      source: 'Prowlarr',
+      message: `Search returned ${data.length} results for "${query}"`,
+    });
 
     return data.map((item): IndexerResult => ({
       guid: item.guid,
@@ -136,7 +154,7 @@ export class ProwlarrIndexer implements Indexer {
       protocol: item.protocol ?? 'unknown',
       categories: (item.categories || []).map((c: any) => ({ id: c.id, name: c.name })),
       indexerFlags: item.indexerFlags || [],
-      isPack: /pack|complete|season/i.test(item.title || ''),
+      isPack: /\b(?:pack(?:s)?|complete|season)\b|\bS\d{1,2}\b(?!E)/i.test(item.title || ''),
       raw: item,
     }));
   }
@@ -153,13 +171,26 @@ export class ProwlarrIndexer implements Indexer {
    */
   async grab(release: IndexerResult): Promise<boolean> {
     try {
+      logDebug({
+        type: 'provider',
+        level: 'info',
+        source: 'Prowlarr',
+        message: `POST grab for "${release.title}" (${release.guid})`,
+        url: `${this.baseUrl}/api/v1/search`,
+      });
       await this.request('/api/v1/search', {
         method: 'POST',
         body: JSON.stringify(release.raw),
       });
       return true;
     } catch (err) {
-      console.error(`[Prowlarr] Grab failed for "${release.title}":`, err);
+      logDebug({
+        type: 'provider',
+        level: 'error',
+        source: 'Prowlarr',
+        message: `Grab failed for "${release.title}"`,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
   }

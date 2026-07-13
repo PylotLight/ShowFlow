@@ -2,8 +2,9 @@ import { db, type Config } from '../db';
 import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
+import { runBackup } from '../../../scripts/backup';
 
-export type TaskName = 'sync-shows' | 'scan-library';
+export type TaskName = 'sync-shows' | 'scan-library' | 'backup';
 
 export interface TaskDefinition {
   name: TaskName;
@@ -27,6 +28,14 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     action: async (config) => {
       const scanner = new LibraryScanner(config);
       await scanner.scan();
+    },
+  },
+  'backup': {
+    name: 'backup',
+    intervalMinutes: 1440, // Daily
+    action: async () => {
+      const result = await runBackup();
+      debugLog(`Task backup complete: ${(result.dbSize / 1024 / 1024).toFixed(1)} MB DB, ${(result.sqlSize / 1024).toFixed(1)} KB seed`);
     },
   },
 };

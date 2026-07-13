@@ -39,7 +39,12 @@ export abstract class BaseProvider {
       headers,
     });
     if (response.status === 401) {
-      console.error(`[DEBUG] 401 Unauthorized for ${url}. Headers:`, Object.fromEntries(headers.entries()));
+      const redactedHeaders = Object.fromEntries(
+        [...headers.entries()].map(([key, value]) =>
+          key.toLowerCase() === 'authorization' ? [key, '[redacted]'] : [key, value],
+        ),
+      );
+      console.error(`[${this.name}] 401 Unauthorized for ${url}. Headers:`, redactedHeaders);
     }
 
     if (response.status === 429) {

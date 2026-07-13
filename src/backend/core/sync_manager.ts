@@ -1,5 +1,5 @@
 import { db, type Config } from '../db';
-import { ProviderFactory } from '../providers/factory';
+import { ProviderFactory, type ProviderType } from '../providers/factory';
 import { debugLog } from './debug';
 
 export class SyncManager {
@@ -20,19 +20,20 @@ export class SyncManager {
 
       // 1. Update show metadata (title, images, etc.)
       if (metadataProviderInfo) {
-        const metadataProvider = ProviderFactory.getProvider(metadataProviderInfo.providerType, this.config);
+        const metadataProvider = ProviderFactory.getProvider(metadataProviderInfo.providerType as ProviderType, this.config);
         const liveShow = await metadataProvider.getShow(metadataProviderInfo.providerId);
         db.updateShowSyncData(showId, metadataProviderInfo.providerType, {
           title: liveShow.title,
           year: liveShow.year,
           originalTitle: liveShow.originalTitle,
+          romanizedTitle: liveShow.romanizedTitle,
           metadata: liveShow.metadata,
         });
       }
 
       // 2. Update episodes with air dates (may be from a different provider)
       if (airtimeProviderInfo) {
-        const airtimeProvider = ProviderFactory.getProvider(airtimeProviderInfo.providerType, this.config);
+        const airtimeProvider = ProviderFactory.getProvider(airtimeProviderInfo.providerType as ProviderType, this.config);
         const episodes = await airtimeProvider.getEpisodes(airtimeProviderInfo.providerId);
 
         if (episodes.length > 0) {

@@ -1,4 +1,4 @@
-import { Loader2, PlusIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, Loader2, PlusIcon, SearchIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
@@ -30,8 +30,45 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [searching, setSearching] = React.useState(false);
-  const [adding, setAdding] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  const [qualityProfiles, setQualityProfiles] = React.useState<{ id: string; name: string }[]>([]);
+  const [selectedQualityProfile, setSelectedQualityProfile] = React.useState("");
+
+  const [seriesType, setSeriesType] = React.useState<string>("standard");
+  const [showProfiles, setShowProfiles] = React.useState<{ id: string; name: string; root_folder_path: string }[]>([]);
+  const [selectedShowProfileId, setSelectedShowProfileId] = React.useState<string>("");
+  const [selectedItems, setSelectedItems] = React.useState<Map<string, SearchResult>>(new Map());
+
+  function findProfileForType(type: string): string {
+    if (!showProfiles.length) return "";
+    const matched = showProfiles.find(p => p.name.toLowerCase() === type.toLowerCase());
+    return matched?.id ?? showProfiles[0]?.id ?? "";
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    setSelectedItems(new Map());
+    setQuery("");
+    setResults([]);
+    setError(null);
+    setSeriesType(source === "anilist" ? "anime" : "standard");
+    fetch("/api/profiles").then(r => r.json()).then(data => {
+      const list = Array.isArray(data) ? data : [];
+      setQualityProfiles(list);
+      if (list.length > 0 && !list.some(p => p.id === selectedQualityProfile)) {
+        setSelectedQualityProfile(list[0].id);
+      }
+    }).catch(() => {});
+    fetch("/api/show-profiles").then(r => r.json()).then(data => {
+      const list = Array.isArray(data) ? data : [];
+      setShowProfiles(list);
+    }).catch(() => {});
+  }, [open, source]);
+
+  React.useEffect(() => {
+    setSelectedShowProfileId(findProfileForType(seriesType));
+  }, [seriesType, showProfiles]);
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -44,7 +81,8 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
       try {
         const res = await fetch(`/api/providers/${source}/search?q=${encodeURIComponent(query)}`);
         if (!res.ok) throw new Error((await res.json()).error ?? "Search failed");
-        setResults(await res.json());
+        const data = await res.json();
+        setResults(data);
       } catch (err: any) {
         setError(err.message);
         setResults([]);
@@ -55,29 +93,50 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     return () => clearTimeout(timeout);
   }, [query, source]);
 
-  async function handleAdd(result: SearchResult) {
-    setAdding(result.id);
-    setError(null);
-    try {
-      const res = await fetch("/api/shows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, providerId: result.id, name: result.title }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to add show");
-      setOpen(false);
-      setQuery("");
-      setResults([]);
-      onAdded();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setAdding(null);
+  function toggleSelect(item: SearchResult) {
+    setSelectedItems(prev => {
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
+      return next;
+    });
+  }
+
+  async function handleBulkAdd() {
+    const items = [...selectedItems.values()];
+    if (items.length === 0) return;
+
+    setOpen(false);
+
+    for (const item of items) {
+      try {
+        const res = await fetch("/api/shows", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source,
+            providerId: item.id,
+            name: item.title,
+            profile: selectedQualityProfile || undefined,
+            seriesType,
+            showProfileId: selectedShowProfileId || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.warn(`[bulk] Failed to add ${item.title}: ${body.error || res.statusText}`);
+        }
+      } catch (err) {
+        console.warn(`[bulk] Error adding ${item.title}:`, err);
+      }
+      await new Promise(r => setTimeout(r, 300));
     }
+
+    onAdded();
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSelectedItems(new Map()); }}>
       <DialogTrigger asChild>
         <Button variant="default" size="sm">
           <PlusIcon /> Add Show
@@ -85,13 +144,13 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
       </DialogTrigger>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add a show</DialogTitle>
-          <DialogDescription>Search a provider and pick the right match.</DialogDescription>
+          <DialogTitle>Add shows</DialogTitle>
+          <DialogDescription>Search a provider, select shows, then add them all at once.</DialogDescription>
         </DialogHeader>
 
         <div className="flex gap-2">
-          <Select value={source} onValueChange={(v) => setSource(v as typeof source)}>
-            <SelectTrigger className="w-32 shrink-0">
+          <Select value={source} onValueChange={(v) => { setSource(v as typeof source); setSeriesType(v === "anilist" ? "anime" : "standard"); }}>
+            <SelectTrigger className="w-28 shrink-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -112,10 +171,40 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          {qualityProfiles.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quality</span>
+              <Select value={selectedQualityProfile} onValueChange={setSelectedQualityProfile}>
+                <SelectTrigger className="w-32 h-7 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {qualityProfiles.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Type</span>
+            <Select value={seriesType} onValueChange={setSeriesType}>
+              <SelectTrigger className="w-28 h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="anime">Anime</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {error && <p className="text-destructive text-sm">{error}</p>}
 
-        <ScrollArea className="h-80 rounded-lg border border-white/10">
-          <div className="flex flex-col divide-y divide-white/5">
+        <ScrollArea className="h-80 w-full rounded-lg border border-white/10 overflow-hidden">
+          <div className="flex flex-col divide-y divide-white/5 overflow-hidden">
             {searching && (
               <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
                 <Loader2 className="size-4 animate-spin" /> Searching {source}...
@@ -124,35 +213,55 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             {!searching && query.trim() && results.length === 0 && (
               <p className="text-muted-foreground p-4 text-sm">No results for &ldquo;{query}&rdquo;.</p>
             )}
-            {results.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => handleAdd(r)}
-                disabled={adding !== null}
-                className={cn(
-                  "hover:bg-white/5 flex items-center gap-3 p-3 text-left transition-colors disabled:opacity-50",
-                )}
-              >
-                <PosterImage source={source} id={r.id} alt={r.title} className="h-16 w-11 shrink-0 rounded-sm" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{r.title}</p>
-                  <p className="text-muted-foreground font-mono text-xs">
-                    {r.year ?? "—"} · #{r.id}
-                  </p>
-                </div>
-                {r.existingShowId && (
-                  <span className="text-emerald-400 font-mono text-[10px]">Already added</span>
-                )}
-                {adding === r.id ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <PlusIcon className="text-muted-foreground size-4" />
-                )}
-              </button>
-            ))}
+            {results.map((r) => {
+              const isSelected = selectedItems.has(r.id);
+              const disabled = !!r.existingShowId;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => { if (!disabled) toggleSelect(r); }}
+                  disabled={disabled}
+                  className={cn(
+                    "min-w-0 flex items-center gap-3 p-3 text-left transition-colors disabled:opacity-50",
+                    isSelected ? "bg-signal/10" : "hover:bg-white/5",
+                  )}
+                >
+                  <div className={cn(
+                    "size-5 shrink-0 rounded border-2 grid place-items-center transition-colors",
+                    isSelected ? "border-signal bg-signal" : "border-white/20",
+                  )}>
+                    {isSelected && <CheckIcon className="size-3 text-white" />}
+                  </div>
+                  <PosterImage source={source} id={r.id} alt={r.title} className="h-16 w-11 shrink-0 rounded-sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{r.title}</p>
+                    <p className="text-muted-foreground font-mono text-xs">
+                      {r.year ?? "—"} · #{r.id}
+                    </p>
+                  </div>
+                  {r.existingShowId && (
+                    <span className="text-emerald-400 font-mono text-[10px] shrink-0">Already added</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </ScrollArea>
+
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-muted-foreground text-xs font-mono">
+            {selectedItems.size > 0 ? <>{selectedItems.size} selected</> : null}
+          </span>
+          <Button
+            size="sm"
+            onClick={handleBulkAdd}
+            disabled={selectedItems.size === 0}
+          >
+            <PlusIcon className="size-3.5 mr-1.5" />
+            Add Selected{selectedItems.size > 0 ? ` (${selectedItems.size})` : ''}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

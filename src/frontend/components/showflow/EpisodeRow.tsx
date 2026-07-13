@@ -19,6 +19,13 @@ export interface ColumnDef {
   visible: boolean;
 }
 
+function formatAirTime(airDate: string) {
+  if (!airDate.includes("T")) return null;
+  const d = new Date(airDate);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
 function EpisodeRow({
   episode,
   columns,
@@ -49,9 +56,9 @@ function EpisodeRow({
         gridTemplateColumns: [
           '24px',
           '60px',
-          showAirDate ? '84px' : '',
+          showAirDate ? 'auto' : '',
           'minmax(0, 1fr)',
-          showStatus ? '68px' : '',
+          showStatus ? 'auto' : '',
           showActions ? '76px' : '',
           showSearch ? '48px' : '',
         ].filter(Boolean).join(' '),
@@ -85,9 +92,14 @@ function EpisodeRow({
 
       {/* Air Date */}
       {showAirDate && (
-        <span className="font-mono text-sub text-muted-foreground/70 truncate">
+        <span className="font-mono text-sub text-muted-foreground/70 truncate whitespace-nowrap">
           {episode.airDate
-            ? new Date(episode.airDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+            ? (() => {
+                const d = new Date(episode.airDate);
+                const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                const time = formatAirTime(episode.airDate);
+                return time ? `${date} ${time}` : date;
+              })()
             : '—'}
         </span>
       )}
@@ -99,7 +111,7 @@ function EpisodeRow({
 
       {/* Status */}
       {showStatus && (
-        <span className={`font-mono text-caption uppercase tracking-wider ${
+        <span className={`font-mono text-caption uppercase tracking-wider whitespace-nowrap ${
           available ? "text-signal/70" : "text-muted-foreground/50"
         }`}>
           {available ? "Available" : "Missing"}

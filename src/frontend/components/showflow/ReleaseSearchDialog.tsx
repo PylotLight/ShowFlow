@@ -3,6 +3,7 @@ import {
   Ban,
   CheckIcon,
   DownloadIcon,
+  FilterIcon,
   Loader2Icon,
   PackageIcon,
   SearchIcon,
@@ -29,6 +30,8 @@ export interface ReleaseScore {
   formatScore: number;
   totalScore: number;
   qualityId?: string;
+  qualityName?: string;
+  matchedTags?: string[];
 }
 
 export interface Release {
@@ -73,15 +76,6 @@ function formatAge(hours: number): string {
   return `${Math.round(months / 12)}y`;
 }
 
-/**
- * Both auto-grab and interactive search score releases the same way
- * (GrabberService.searchReleases), so this reads exactly what a person
- * would need to understand why a release ranked where it did:
- * - `rank` is the detected quality's position (0 = unrecognized).
- * - `formatScore` is the custom-format bonus/penalty from the show's profile.
- * - `totalScore === -1` means a forbidden custom format matched - the
- *   engine would never auto-grab this, but a person can still choose to.
- */
 function ScoreBadge({ score }: { score: ReleaseScore }) {
   if (score.totalScore === -1) {
     return (
@@ -91,10 +85,12 @@ function ScoreBadge({ score }: { score: ReleaseScore }) {
     );
   }
   return (
-    <Badge variant={score.rank > 0 ? "signal" : "muted"}>
-      {score.formatScore >= 0 ? "+" : ""}
-      {score.formatScore} pts
-    </Badge>
+    <span className="inline-flex items-center gap-0.5 font-mono text-xs tabular-nums">
+      <span className="text-foreground/70">{score.rank}</span>
+      {score.formatScore > 0 && (
+        <span className="text-emerald-400">+{score.formatScore}</span>
+      )}
+    </span>
   );
 }
 
@@ -104,7 +100,6 @@ interface ReleaseSearchDialogProps {
   showId: string;
   showTitle: string;
   season: number;
-  /** Omit for a season-level (pack) search. */
   episode?: number;
   onGrabbed?: (message: string) => void;
 }
@@ -129,6 +124,8 @@ function ReleaseSearchDialog({
   const [minSeeders, setMinSeeders] = React.useState(0);
   const [indexerFilter, setIndexerFilter] = React.useState("all");
   const [packsOnly, setPacksOnly] = React.useState(false);
+  const [qualityFilter, setQualityFilter] = React.useState("all");
+  const [textFilter, setTextFilter] = React.useState("");
 
   const [grabbingGuid, setGrabbingGuid] = React.useState<string | null>(null);
   const [grabbedGuids, setGrabbedGuids] = React.useState<Set<string>>(new Set());
@@ -161,6 +158,11 @@ function ReleaseSearchDialog({
     return Array.from(new Set(releases.map((r) => r.indexerName))).sort();
   }, [releases]);
 
+  const qualityNames = React.useMemo(() => {
+    if (!releases) return [];
+    return Array.from(new Set(releases.map((r) => r.score.qualityName).filter(Boolean))).sort() as string[];
+  }, [releases]);
+
   const filtered = React.useMemo(() => {
     if (!releases) return [];
     let list = releases;
@@ -168,6 +170,11 @@ function ReleaseSearchDialog({
     if (indexerFilter !== "all") list = list.filter((r) => r.indexerName === indexerFilter);
     if (minSeeders > 0) list = list.filter((r) => r.protocol !== "torrent" || r.seeders >= minSeeders);
     if (isSeasonScope && packsOnly) list = list.filter((r) => r.isPack);
+    if (qualityFilter !== "all") list = list.filter((r) => r.score.qualityName === qualityFilter);
+    if (textFilter) {
+      const q = textFilter.toLowerCase();
+      list = list.filter((r) => r.title.toLowerCase().includes(q));
+    }
 
     const sorted = [...list];
     switch (sortBy) {
@@ -184,7 +191,7 @@ function ReleaseSearchDialog({
         sorted.sort((a, b) => b.score.totalScore - a.score.totalScore);
     }
     return sorted;
-  }, [releases, protocol, indexerFilter, minSeeders, packsOnly, isSeasonScope, sortBy]);
+  }, [releases, protocol, indexerFilter, minSeeders, packsOnly, isSeasonScope, sortBy, qualityFilter, textFilter]);
 
   async function handleGrab(release: Release) {
     setGrabbingGuid(release.guid);
@@ -209,20 +216,27 @@ function ReleaseSearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
+      <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Search Releases</DialogTitle>
           <DialogDescription>
-            {showTitle} · {isSeasonScope
+            {showTitle} ·{" "}
+            {isSeasonScope
               ? `Season ${season} (packs & episodes)`
               : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <Input
+            placeholder="Filter titles..."
+            value={textFilter}
+            onChange={(e) => setTextFilter(e.target.value)}
+            className="h-8 w-48 text-xs"
+          />
+
           <Select value={protocol} onValueChange={(v) => setProtocol(v as ProtocolFilter)}>
-            <SelectTrigger size="sm" className="w-32">
+            <SelectTrigger size="sm" className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -233,7 +247,7 @@ function ReleaseSearchDialog({
           </Select>
 
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
-            <SelectTrigger size="sm" className="w-36">
+            <SelectTrigger size="sm" className="w-32">
               <ArrowDownUp className="size-3.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -247,7 +261,7 @@ function ReleaseSearchDialog({
 
           {indexerNames.length > 1 && (
             <Select value={indexerFilter} onValueChange={setIndexerFilter}>
-              <SelectTrigger size="sm" className="w-36">
+              <SelectTrigger size="sm" className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -261,16 +275,31 @@ function ReleaseSearchDialog({
             </Select>
           )}
 
+          {qualityNames.length > 1 && (
+            <Select value={qualityFilter} onValueChange={setQualityFilter}>
+              <SelectTrigger size="sm" className="w-32">
+                <FilterIcon className="size-3.5 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All qualities</SelectItem>
+                {qualityNames.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           <div className="flex items-center gap-1.5">
-            <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground">
-              Min seeders
-            </span>
+            <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground">Seeds</span>
             <Input
               type="number"
               min={0}
               value={minSeeders}
               onChange={(e) => setMinSeeders(Math.max(0, parseInt(e.target.value, 10) || 0))}
-              className="h-8 w-16 px-2 text-xs"
+              className="h-8 w-14 px-2 text-xs"
             />
           </div>
 
@@ -295,8 +324,7 @@ function ReleaseSearchDialog({
           </Button>
         </div>
 
-        {/* Results */}
-        <ScrollArea className="h-96 rounded-lg border border-white/10">
+        <ScrollArea className="flex-1 min-h-0 mt-3 rounded-lg border border-white/10">
           <div className="flex flex-col divide-y divide-white/5">
             {loading && (
               <div className="text-muted-foreground flex items-center gap-2 p-6 text-sm">
@@ -325,7 +353,9 @@ function ReleaseSearchDialog({
                     className={cn("flex items-start gap-3 p-3", blocked && "opacity-60")}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-snug text-foreground/90">{release.title}</p>
+                      <p className="truncate text-sm font-medium leading-snug text-foreground/90" title={release.title}>
+                        {release.title}
+                      </p>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-caption text-muted-foreground">
                         <Badge variant="outline" className="uppercase">
                           {release.protocol}
@@ -334,6 +364,14 @@ function ReleaseSearchDialog({
                           <Badge variant="amber">
                             <PackageIcon className="size-3" /> Pack
                           </Badge>
+                        )}
+                        {release.score.qualityName && (
+                          <Badge variant="muted">{release.score.qualityName}</Badge>
+                        )}
+                        {release.score.matchedTags && release.score.matchedTags.length > 0 && (
+                          <span className="text-muted-foreground/50 text-[10px] font-mono truncate max-w-[200px]">
+                            {release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}
+                          </span>
                         )}
                         <ScoreBadge score={release.score} />
                         <span>{formatBytes(release.size)}</span>

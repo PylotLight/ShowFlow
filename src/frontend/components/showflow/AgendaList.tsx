@@ -32,7 +32,7 @@ function AgendaList({
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toDateString();
 
-    const sections: { title: string; items: UpcomingEpisode[] }[] = [
+    const sections: [{ title: string; items: UpcomingEpisode[] }, { title: string; items: UpcomingEpisode[] }, { title: string; items: UpcomingEpisode[] }] = [
       { title: "Today", items: [] },
       { title: "Tomorrow", items: [] },
       { title: "Later this week", items: [] },

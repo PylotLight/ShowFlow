@@ -40,4 +40,60 @@ describe('FilenameParser', () => {
     const result = parser.parse('Attack_on_Titan.S04E16.mkv');
     expect(result?.show).toBe('Attack on Titan');
   });
+
+  test('parses Season X Episode Y text format', () => {
+    const result = parser.parse('[Mizurex33] Quanzhi Fashi Season 02 Episode 03 [1080p].mkv');
+    expect(result?.show).toBe('Quanzhi Fashi');
+    expect(result?.season).toBe(2);
+    expect(result?.episodes).toContain(3);
+  });
+
+  test('parses Season X Episode Y without release group', () => {
+    const result = parser.parse('Quanzhi Fashi Season 02 Episode 03.mkv');
+    expect(result?.show).toBe('Quanzhi Fashi');
+    expect(result?.season).toBe(2);
+    expect(result?.episodes).toContain(3);
+  });
+
+  test('parses Season X Episode Y dotted format', () => {
+    const result = parser.parse('ShowName.Season.03.Episode.12.720p.mkv');
+    expect(result?.show).toBe('ShowName');
+    expect(result?.season).toBe(3);
+    expect(result?.episodes).toContain(12);
+  });
+
+  test('parses Season X Episode Y dotted format with release group', () => {
+    const result = parser.parse('[ReleaseGroup] ShowName.Season.03.Episode.12.720p.mkv');
+    expect(result?.show).toBe('ShowName');
+    expect(result?.season).toBe(3);
+    expect(result?.episodes).toContain(12);
+  });
+
+  test('strips release group names in curly braces', () => {
+    const result = parser.parse('{HorribleSubs} Attack on Titan S04E16 720p.mkv');
+    expect(result?.show).toBe('Attack on Titan');
+    expect(result?.season).toBe(4);
+    expect(result?.episodes).toContain(16);
+  });
+
+  test('strips release group names in parentheses', () => {
+    const result = parser.parse('(Commie) Show.Name.Season.03.Episode.12.720p.mkv');
+    expect(result?.show).toBe('Show Name');
+    expect(result?.season).toBe(3);
+    expect(result?.episodes).toContain(12);
+  });
+
+  test('strips multiple release group names', () => {
+    const result = parser.parse('[Group1][Group2] ShowName S01E05.mkv');
+    expect(result?.show).toBe('ShowName');
+    expect(result?.season).toBe(1);
+    expect(result?.episodes).toContain(5);
+  });
+
+  test('strips release group names in middle of filename', () => {
+    const result = parser.parse('ShowName [Group] S01E05.mkv');
+    expect(result?.show).toBe('ShowName');
+    expect(result?.season).toBe(1);
+    expect(result?.episodes).toContain(5);
+  });
 });
