@@ -1,5 +1,5 @@
 import {
-  Scan, Activity, CheckCircle2, ChevronRight, RotateCcw, RefreshCw,
+  Scan, Activity, ChevronRight, RotateCcw, RefreshCw,
 } from "lucide-react";
 import * as React from "react";
 
@@ -237,10 +237,10 @@ function Dashboard({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px] items-stretch flex-1 min-h-0">
+      <div className="flex flex-row gap-6 flex-1 min-h-0 overflow-hidden">
 
         {/* LEFT COLUMN: Primary Agenda */}
-        <GlassPanel className="flex flex-col overflow-hidden h-full min-h-[500px]">
+        <GlassPanel className="flex flex-col overflow-hidden flex-1">
           {/* Header */}
           <div className="border-b border-white/5 px-5 py-3">
             <div className="flex items-center justify-between">
@@ -391,30 +391,7 @@ function Dashboard({
         </GlassPanel>
 
         {/* RIGHT COLUMN: Context Rail */}
-        <div className="flex flex-col gap-4 h-full min-h-0">
-          <GlassPanel className="p-4 shrink-0">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="size-5 text-emerald-500 shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display text-sm font-semibold text-white tracking-wide">
-                    Library Health
-                  </h3>
-                  <span className="font-mono text-[8px] font-bold uppercase tracking-widest text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                    Healthy
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 mt-1.5 font-mono text-[10px] text-muted-foreground">
-                  <span>{shows ? shows.length : "—"} series</span>
-                  <span className="text-white/10">|</span>
-                  <span className="flex items-center gap-1">
-                    <CheckCircle2 className="size-2.5 text-emerald-500" />
-                    Verified 2m ago
-                  </span>
-                </div>
-              </div>
-            </div>
-          </GlassPanel>
+        <div className="flex flex-col gap-4 w-[340px] min-w-[340px] shrink-0 min-h-0">
 
           <GlassPanel className="p-4 space-y-3 shrink-0">
             <div className="border-b border-white/5 pb-2">

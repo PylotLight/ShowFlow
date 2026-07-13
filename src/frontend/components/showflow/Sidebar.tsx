@@ -6,6 +6,7 @@ import {
   AlertCircle,
   HardDrive,
   Settings,
+  CheckCircle2,
 } from "lucide-react";
 import * as React from "react";
 
@@ -23,6 +24,7 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
   const [missingCount, setMissingCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
   const [isHealthy, setIsHealthy] = React.useState<boolean | null>(null);
+  const [seriesCount, setSeriesCount] = React.useState(0);
 
   React.useEffect(() => {
     // Poll processing queue count
@@ -39,12 +41,21 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
         .then((d) => setIsHealthy(d.watching !== null))
         .catch(() => setIsHealthy(false));
 
+    // Poll library series count
+    const pollLibrary = () =>
+      fetch("/api/shows")
+        .then((r) => r.json())
+        .then((shows: any[]) => setSeriesCount(shows.length))
+        .catch(() => {});
+
     pollQueue();
     pollHealth();
+    pollLibrary();
 
     const id = setInterval(() => {
       pollQueue();
       pollHealth();
+      pollLibrary();
     }, 15_000);
     return () => clearInterval(id);
   }, []);
@@ -169,29 +180,34 @@ export function Sidebar({ activeItem, onChange, className }: SidebarProps) {
           </div>
         </div>
 
-        {/* System Health (Bottom of Sidebar) */}
+        {/* Combined Health (Bottom of Sidebar) */}
         <div className="mt-auto border-t border-white/5 pt-4">
-          <div className="flex items-start gap-2.5 rounded-lg bg-white/[0.01] p-3 border border-white/5 lg:block">
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                {isHealthy === null ? (
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-white/30"></span>
-                ) : isHealthy ? (
-                  <>
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-signal"></span>
-                  </>
-                ) : (
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive"></span>
-                )}
-              </span>
-              <span className="font-sans text-xs font-semibold text-white/90 hidden lg:inline">
-                {isHealthy === null ? "Checking..." : isHealthy ? "System healthy" : "System offline"}
-              </span>
+          <div className="space-y-1">
+            <div className="flex items-start gap-2.5 rounded-lg bg-white/[0.01] p-2.5 border border-white/5">
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    {isHealthy === null ? (
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-white/30"></span>
+                    ) : isHealthy ? (
+                      <>
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75"></span>
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-signal"></span>
+                      </>
+                    ) : (
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive"></span>
+                    )}
+                  </span>
+                  <span className="font-sans text-xs font-semibold text-white/90 hidden lg:inline">
+                    {isHealthy === null ? "Checking..." : isHealthy ? "System healthy" : "System offline"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
+                  <span className="font-sans text-xs text-white/70 hidden lg:inline">{seriesCount} series</span>
+                </div>
+              </div>
             </div>
-            <p className="font-mono text-[9px] text-muted-foreground mt-1.5 hidden lg:block">
-              Watcher {isHealthy ? "active" : "stopped"}
-            </p>
           </div>
         </div>
       </aside>

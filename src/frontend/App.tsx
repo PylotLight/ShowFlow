@@ -87,7 +87,7 @@ export function App() {
         {/* Dynamic Content Views */}
         <div className="flex-1 overflow-y-auto p-6">
           {activeNav === "dashboard" ? (
-            <div className="h-full flex flex-col">
+            <div className="h-full flex flex-col overflow-hidden">
               <Dashboard
                 key={refreshKey}
                 onSelectShow={selectShow}
