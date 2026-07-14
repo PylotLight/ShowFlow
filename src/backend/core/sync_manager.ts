@@ -82,6 +82,13 @@ export class SyncManager {
     let errorCount = 0;
     let skippedCount = 0;
 
+    db.logEvent({
+      type: 'sync',
+      entityType: 'system',
+      entityId: 'sync-all',
+      message: `Starting metadata sync for ${shows.length} shows`,
+    });
+
     for (const show of shows) {
       // --- Intelligence: Determine if this show actually needs syncing ---
       
@@ -110,12 +117,25 @@ export class SyncManager {
           type: 'sync',
           entityType: 'show',
           entityId: show.id,
-          message: `Successfully synced show ${show.title}`,
+          message: `Synced show "${show.title}" (${syncedCount}/${shows.length})`,
         });
       } catch (err) {
         errorCount++;
+        db.logEvent({
+          type: 'error',
+          entityType: 'show',
+          entityId: show.id,
+          message: `Failed to sync show "${show.title}": ${err instanceof Error ? err.message : String(err)}`,
+        });
       }
     }
+
+    db.logEvent({
+      type: 'sync',
+      entityType: 'system',
+      entityId: 'sync-all',
+      message: `Metadata sync complete: ${syncedCount} synced, ${errorCount} errors, ${skippedCount} skipped`,
+    });
 
     return { syncedCount, errorCount, skippedCount };
   }

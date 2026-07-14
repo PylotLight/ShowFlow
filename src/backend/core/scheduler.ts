@@ -1,9 +1,10 @@
-import { db, type Config } from '../db';
+import { db, type Config, JellyfinConfigSchema } from '../db';
 import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
 import { runBackup } from '../../../scripts/backup';
 import { GrabberService } from './grabber_service';
+import { JellyfinSync } from '../providers/jellyfin/sync';
 
 export type TaskName = 
   | 'sync-shows' 
@@ -12,7 +13,8 @@ export type TaskName =
   | 'rss-scan'
   | 'housekeeping'
   | 'update-check'
-  | 'watcher-monitor';
+  | 'watcher-monitor'
+  | 'jellyfin-sync';
 
 export interface TaskDefinition {
   name: TaskName;
@@ -113,6 +115,34 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     defaultEnabled: false,
     action: async (config) => {
       debugLog('Task watcher-monitor complete: Watcher health checked');
+    },
+  },
+  'jellyfin-sync': {
+    name: 'jellyfin-sync',
+    displayName: 'Jellyfin Sync',
+    description: 'Sync watched state from Jellyfin to ShowFlow',
+    category: 'sync',
+    intervalMinutes: 1440, // Daily
+    defaultEnabled: false,
+    action: async () => {
+      const raw = db.getSetting('jellyfin');
+      if (!raw) {
+        debugLog('Task jellyfin-sync skipped: Jellyfin not configured');
+        return;
+      }
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const config = JellyfinConfigSchema.parse(parsed);
+        if (!config.enabled || !config.baseUrl || !config.apiKey) {
+          debugLog('Task jellyfin-sync skipped: Jellyfin not fully configured');
+          return;
+        }
+        const syncer = new JellyfinSync(config.baseUrl, config.apiKey);
+        const result = await syncer.sync();
+        debugLog(`Task jellyfin-sync complete: ${result.totalEpisodes} total, ${result.matchedEpisodes} matched, ${result.errors.length} errors`);
+      } catch (err) {
+        debugLog(`Task jellyfin-sync error: ${err}`);
+      }
     },
   },
 };

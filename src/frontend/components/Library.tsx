@@ -1,4 +1,4 @@
-import { Check, Loader2, Trash2 } from "lucide-react";
+import { Check, Loader2, Trash2, ArrowUpDown, Eye, EyeOff, ListFilter } from "lucide-react";
 import * as React from "react";
 
 import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
@@ -6,8 +6,8 @@ import { PosterCard, type ShowSummary } from "@frontend/components/showflow/Post
 import { cn } from "@frontend/lib/utils";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
-const MIN_POSTER_SIZE = 180;
-const MAX_POSTER_SIZE = 300;
+const MIN_POSTER_SIZE = 120;
+const MAX_POSTER_SIZE = 400;
 const DEFAULT_POSTER_SIZE = 300;
 const ROTATION_INTERVAL = 12000;
 const HOVER_RESUME_DELAY = 4000;
@@ -42,6 +42,13 @@ export function Library({
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [removing, setRemoving] = React.useState(false);
+
+  const [sortBy, setSortBy] = React.useState<'title' | 'added' | 'updated' | 'tracked' | 'grabbed'>('title');
+  const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('asc');
+  const [seriesTypeFilter, setSeriesTypeFilter] = React.useState<string | null>(null);
+  const [trackingFilter, setTrackingFilter] = React.useState<'all' | 'tracked' | 'untracked'>('all');
+  const [showProvider, setShowProvider] = React.useState(true);
+  const [showStats, setShowStats] = React.useState(true);
 
   const [backdropShow, setBackdropShow] = React.useState<ShowSummary | null>(null);
   const rotRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -89,14 +96,48 @@ export function Library({
   const filtered = React.useMemo(() => {
     if (!shows) return null;
     let result = shows;
+    
+    // Apply filters
     if (filter.providerType) result = result.filter((s) => s.providerType === filter.providerType);
     if (filter.profile) result = result.filter((s) => s.profile === filter.profile);
+    if (seriesTypeFilter) result = result.filter((s) => s.seriesType === seriesTypeFilter);
+    
+    if (trackingFilter === 'tracked') {
+      result = result.filter((s) => (s.trackedCount || 0) > 0);
+    } else if (trackingFilter === 'untracked') {
+      result = result.filter((s) => (s.trackedCount || 0) === 0);
+    }
+    
     if (query.trim()) {
       const q = query.toLowerCase();
       result = result.filter((s) => s.title.toLowerCase().includes(q));
     }
+    
+    // Apply sorting
+    result = [...result].sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case 'title':
+          comparison = a.title.localeCompare(b.title);
+          break;
+        case 'added':
+          comparison = (a.addedAt || '').localeCompare(b.addedAt || '');
+          break;
+        case 'updated':
+          comparison = (a.lastUpdated || '').localeCompare(b.lastUpdated || '');
+          break;
+        case 'tracked':
+          comparison = (a.trackedCount || 0) - (b.trackedCount || 0);
+          break;
+        case 'grabbed':
+          comparison = (a.grabbedCount || 0) - (b.grabbedCount || 0);
+          break;
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+    
     return result;
-  }, [shows, query, filter]);
+  }, [shows, query, filter, seriesTypeFilter, trackingFilter, sortBy, sortOrder]);
 
   function handlePosterSize(e: React.ChangeEvent<HTMLInputElement>) {
     const val = parseInt(e.target.value, 10);
@@ -111,6 +152,16 @@ export function Library({
       else next.add(id);
       return next;
     });
+  }
+
+  function handleSelectAll() {
+    if (!filtered) return;
+    const allSelected = filtered.length > 0 && filtered.every(s => selectedIds.has(s.id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(s => s.id)));
+    }
   }
 
   async function handleBulkRemove() {
@@ -189,24 +240,104 @@ export function Library({
                   );
                 })()}
 
-                {/* Poster size slider (push to right) */}
-                <div className="ml-auto flex items-center gap-2 text-muted-foreground">
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                  </svg>
-                  <input
-                    type="range"
-                    min={MIN_POSTER_SIZE}
-                    max={MAX_POSTER_SIZE}
-                    step={5}
-                    value={posterSize}
-                    onChange={handlePosterSize}
-                    className="w-20 h-1.5 rounded-full appearance-none cursor-pointer bg-white/10 accent-signal
-                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-signal [&::-webkit-slider-thumb]:shadow-sm"
-                  />
+                {/* Series type filter */}
+                {shows && (() => {
+                  const seriesTypes = Array.from(new Set(shows.map(s => s.seriesType).filter((t): t is string => !!t))).sort();
+                  if (seriesTypes.length === 0) return null;
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Type</span>
+                      <button onClick={() => setSeriesTypeFilter(null)}
+                        className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                      {seriesTypes.map(st => (
+                        <button key={st} onClick={() => setSeriesTypeFilter(st)}
+                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === st ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{st}</button>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Tracking filter */}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Tracking</span>
+                  <button onClick={() => setTrackingFilter('all')}
+                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'all' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                  <button onClick={() => setTrackingFilter('tracked')}
+                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'tracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Tracked</button>
+                  <button onClick={() => setTrackingFilter('untracked')}
+                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'untracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Untracked</button>
+                </div>
+
+                {/* Sort dropdown */}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Sort</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                    className="rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border-0 cursor-pointer"
+                  >
+                    <option value="title">Title</option>
+                    <option value="added">Added</option>
+                    <option value="updated">Updated</option>
+                    <option value="tracked">Tracked</option>
+                    <option value="grabbed">Grabbed</option>
+                  </select>
+                  <button
+                    onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    className="rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                  >
+                    <ArrowUpDown className="size-3" />
+                  </button>
+                </div>
+
+                {/* Controls section (push to right) */}
+                <div className="ml-auto flex items-center gap-4 text-muted-foreground">
+                  {/* Show/hide toggles */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowProvider(prev => !prev)}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${showProvider ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
+                    >
+                      {showProvider ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+                      Provider
+                    </button>
+                    <button
+                      onClick={() => setShowStats(prev => !prev)}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${showStats ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
+                    >
+                      {showStats ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+                      Stats
+                    </button>
+                  </div>
+
+                  {/* Select all */}
+                  <button
+                    onClick={handleSelectAll}
+                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                  >
+                    <Check className="size-3" />
+                    {filtered && filtered.length > 0 && filtered.every(s => selectedIds.has(s.id)) ? 'Deselect All' : 'Select All'}
+                  </button>
+
+                  {/* Poster size slider */}
+                  <div className="flex items-center gap-2">
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1" />
+                      <rect x="14" y="3" width="7" height="7" rx="1" />
+                      <rect x="3" y="14" width="7" height="7" rx="1" />
+                      <rect x="14" y="14" width="7" height="7" rx="1" />
+                    </svg>
+                    <input
+                      type="range"
+                      min={MIN_POSTER_SIZE}
+                      max={MAX_POSTER_SIZE}
+                      step={10}
+                      value={posterSize}
+                      onChange={handlePosterSize}
+                      className="w-24 h-1.5 rounded-full appearance-none cursor-pointer bg-white/10 accent-signal
+                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-signal [&::-webkit-slider-thumb]:shadow-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -235,6 +366,8 @@ export function Library({
                       show={show}
                       onClick={() => onSelectShow(show)}
                       selected={selectedIds.has(show.id)}
+                      showProvider={showProvider}
+                      showStats={showStats}
                     />
                   </div>
                 ))}

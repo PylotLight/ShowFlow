@@ -2,6 +2,7 @@ import { db } from '../../db';
 import { ProviderFactory } from '../factory';
 import type { Config } from '../../db';
 import { SonarrClient, type SonarrSeries, type SonarrEpisode } from './client';
+import { SyncManager } from '../../core/sync_manager';
 
 export interface ImportResult {
   seriesId: string;
@@ -10,6 +11,23 @@ export interface ImportResult {
   status: 'imported' | 'skipped' | 'existing' | 'error';
   message?: string;
 }
+
+/** Sonarr's `seriesType` values — used as the key for per-type mapping. */
+export type SonarrSeriesType = 'standard' | 'daily' | 'anime';
+
+/**
+ * Per-type destination mapping chosen in the import UI. When a mapping is
+ * present for a series' seriesType, it takes priority over both Sonarr's own
+ * rootFolderPath and the "just grab the first profile" fallback — the whole
+ * point of a mapped import is that the person is explicitly choosing where
+ * each type of show should land in ShowFlow, not inheriting Sonarr's layout.
+ */
+export type SonarrTypeMapping = Partial<Record<SonarrSeriesType, {
+  /** ShowFlow show_profiles.id — resolved to a root folder path. */
+  showProfileId?: string;
+  /** ShowFlow quality_profiles.id (e.g. 'standard' | 'anime'). */
+  qualityProfileId?: string;
+}>>;
 
 export class SonarrImporter {
   private client: SonarrClient;
@@ -24,7 +42,7 @@ export class SonarrImporter {
     return this.client.getSeries();
   }
 
-  async importSeries(seriesIds?: number[]): Promise<ImportResult[]> {
+  async importSeries(seriesIds?: number[], typeMapping?: SonarrTypeMapping): Promise<ImportResult[]> {
     const allSeries = await this.client.getSeries();
     const toImport = seriesIds
       ? allSeries.filter(s => seriesIds.includes(s.id))
@@ -32,10 +50,25 @@ export class SonarrImporter {
 
     const results: ImportResult[] = [];
 
+    db.logEvent({
+      type: 'import',
+      entityType: 'system',
+      entityId: 'sonarr-import',
+      message: `Starting Sonarr import for ${toImport.length} series`,
+    });
+
     for (const series of toImport) {
       try {
-        const result = await this.importSingleSeries(series);
+        const result = await this.importSingleSeries(series, typeMapping);
         results.push(result);
+        
+        // Log progress event
+        db.logEvent({
+          type: 'import',
+          entityType: 'show',
+          entityId: result.seriesId,
+          message: `Imported "${series.title}" from Sonarr (${results.length}/${toImport.length})`,
+        });
       } catch (err) {
         results.push({
           seriesId: '',
@@ -44,13 +77,27 @@ export class SonarrImporter {
           status: 'error',
           message: err instanceof Error ? err.message : String(err),
         });
+        
+        db.logEvent({
+          type: 'error',
+          entityType: 'show',
+          entityId: '',
+          message: `Failed to import "${series.title}" from Sonarr: ${err instanceof Error ? err.message : String(err)}`,
+        });
       }
     }
+
+    db.logEvent({
+      type: 'import',
+      entityType: 'system',
+      entityId: 'sonarr-import',
+      message: `Sonarr import complete: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`,
+    });
 
     return results;
   }
 
-  private async importSingleSeries(series: SonarrSeries): Promise<ImportResult> {
+  private async importSingleSeries(series: SonarrSeries, typeMapping?: SonarrTypeMapping): Promise<ImportResult> {
     // Determine the best provider type from Sonarr's IDs
     const tvdbId = series.tvdbId ? String(series.tvdbId) : null;
     const tmdbId = series.tmdbId ? String(series.tmdbId) : null;
@@ -114,11 +161,31 @@ export class SonarrImporter {
     // Create show in database
     const showUuid = crypto.randomUUID();
 
-    const showProfiles = db.listShowProfiles();
-    const profileId = showProfiles.length > 0 ? showProfiles[0]!.id : null;
-    const rootFolderPath: string | undefined = series.rootFolderPath || (profileId ? db.getShowProfileRootFolder(profileId) ?? undefined : undefined);
+    const seriesType: SonarrSeriesType = series.seriesType === 'anime' ? 'anime' : series.seriesType === 'daily' ? 'daily' : 'standard';
+    const mapping = typeMapping?.[seriesType];
 
-    const seriesType = series.seriesType === 'anime' ? 'anime' : series.seriesType === 'daily' ? 'daily' : 'standard';
+    // A mapping chosen for this series' type wins outright for both the root
+    // folder and quality profile - that's the entire point of a mapped
+    // import: the person is explicitly choosing where each type lands in
+    // ShowFlow rather than inheriting Sonarr's own layout. Without a mapping
+    // for this type, fall back to Sonarr's own rootFolderPath (or the first
+    // configured show profile) and let saveShow() pick a default quality
+    // profile, matching the previous flat-import behavior.
+    let rootFolderPath: string | undefined;
+    if (mapping?.showProfileId) {
+      rootFolderPath = db.getShowProfileRootFolder(mapping.showProfileId) ?? undefined;
+    }
+    if (!rootFolderPath) {
+      if (series.rootFolderPath) {
+        rootFolderPath = series.rootFolderPath;
+      } else {
+        const showProfiles = db.listShowProfiles();
+        const fallbackProfileId = showProfiles.length > 0 ? showProfiles[0]!.id : null;
+        rootFolderPath = fallbackProfileId ? db.getShowProfileRootFolder(fallbackProfileId) ?? undefined : undefined;
+      }
+    }
+
+    const qualityProfileId = mapping?.qualityProfileId;
 
     db.saveShow({
       uuid: showUuid,
@@ -129,6 +196,7 @@ export class SonarrImporter {
       romanizedTitle: showData.romanizedTitle,
       metadata: showData.metadata,
       rootFolderPath: rootFolderPath ?? undefined,
+      profile: qualityProfileId,
       seriesType,
       config: {},
     });
@@ -182,6 +250,15 @@ export class SonarrImporter {
       entityId: showUuid,
       message: `Imported from Sonarr: "${series.title}" (${sonarrEpisodes.length} episodes)`,
     });
+
+    // Trigger full metadata sync after import to fetch all metadata
+    try {
+      const syncManager = new SyncManager(this.config);
+      await syncManager.syncShow(showUuid);
+    } catch (syncErr) {
+      console.warn(`[sonarr] Metadata sync failed for "${series.title}":`, syncErr);
+      // Don't fail the import if sync fails, just log it
+    }
 
     return {
       seriesId: showUuid,

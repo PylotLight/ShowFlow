@@ -56,6 +56,17 @@ export const SonarrConfigSchema = z.object({
 
 export type SonarrConfig = z.infer<typeof SonarrConfigSchema>;
 
+export const JellyfinConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().default('').refine(
+    v => v === '' || /^https?:\/\/.+/.test(v),
+    { message: "Jellyfin URL must be a valid URL (e.g. http://localhost:8096)" },
+  ),
+  apiKey: z.string().default(''),
+});
+
+export type JellyfinConfig = z.infer<typeof JellyfinConfigSchema>;
+
 const NativeIndexerIdSchema = z.enum(['nyaa', 'subsplease', 'tpb', 'knaben', 'rarbg']);
 
 export const NativeIndexerConfigSchema = z.object({

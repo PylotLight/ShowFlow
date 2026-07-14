@@ -19,6 +19,7 @@ const SETTINGS_TABS = [
   { id: "providers", label: "Providers" },
   { id: "indexers", label: "Indexers" },
   { id: "sonarr", label: "Sonarr" },
+  { id: "jellyfin", label: "Jellyfin" },
   { id: "quality", label: "Quality" },
   { id: "downloads", label: "Downloads" },
   { id: "tasks", label: "Tasks" },
@@ -38,6 +39,13 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
   const [sonarr, setSonarr] = React.useState({ enabled: false, baseUrl: "", apiKey: "", apiVersion: "v3" as "v3" | "v5" });
   const [showSonarrKey, setShowSonarrKey] = React.useState(false);
 
+  const [jellyfin, setJellyfin] = React.useState({ enabled: false, baseUrl: "", apiKey: "" });
+  const [showJellyfinKey, setShowJellyfinKey] = React.useState(false);
+  const [jellyfinTesting, setJellyfinTesting] = React.useState(false);
+  const [jellyfinStatus, setJellyfinStatus] = React.useState<{ ok: boolean; message?: string; version?: string } | null>(null);
+  const [jellyfinSyncing, setJellyfinSyncing] = React.useState(false);
+  const [jellyfinSyncResult, setJellyfinSyncResult] = React.useState<{ totalEpisodes?: number; matchedEpisodes?: number; errors?: string[] } | null>(null);
+
   const [showProwlarrKey, setShowProwlarrKey] = React.useState(false);
   const [showTmdbKey, setShowTmdbKey] = React.useState(false);
   const [showTvdbKey, setShowTvdbKey] = React.useState(false);
@@ -55,6 +63,27 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
   const [sonarrImportResults, setSonarrImportResults] = React.useState<any[]>([]);
   const [sonarrImportTotal, setSonarrImportTotal] = React.useState(0);
   const [selectedSonarrSeries, setSelectedSonarrSeries] = React.useState<Set<number>>(new Set());
+
+  // Per-Sonarr-seriesType mapping: which types to pull in, and which
+  // ShowFlow show profile (root folder) + quality profile each type lands in.
+  const [showProfilesList, setShowProfilesList] = React.useState<any[]>([]);
+  const [qualityProfilesList, setQualityProfilesList] = React.useState<any[]>([]);
+  const [sonarrTypeConfig, setSonarrTypeConfig] = React.useState<Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }>>({});
+
+  const visibleSonarrSeries = React.useMemo(() => {
+    if (!sonarrSeries) return [];
+    return sonarrSeries.filter((s: any) => sonarrTypeConfig[s.seriesType || 'standard']?.included !== false);
+  }, [sonarrSeries, sonarrTypeConfig]);
+
+  const sonarrTypesPresent = React.useMemo(() => {
+    if (!sonarrSeries) return [];
+    const counts: Record<string, number> = {};
+    for (const s of sonarrSeries) {
+      const t = s.seriesType || 'standard';
+      counts[t] = (counts[t] || 0) + 1;
+    }
+    return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
+  }, [sonarrSeries]);
 
   const [prowlarrTesting, setProwlarrTesting] = React.useState(false);
   const [prowlarrStatus, setProwlarrStatus] = React.useState<{ ok: boolean; message?: string } | null>(null);
@@ -78,17 +107,29 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
       fetch("/api/settings").then(r => r.json()),
       fetch("/api/indexers/native/meta").then(r => r.json()),
       fetch("/api/tasks").then(r => r.json()),
+      fetch("/api/show-profiles").then(r => r.json()).catch(() => []),
+      fetch("/api/profiles").then(r => r.json()).catch(() => []),
       loadTheme(),
-    ]).then(([cfg, settings, nativeMetaData, tasksData, loadedTheme]) => {
+    ]).then(([cfg, settings, nativeMetaData, tasksData, showProfilesData, qualityProfilesData, loadedTheme]) => {
       setConfig(cfg);
       setTheme(loadedTheme);
       setNativeMeta(Array.isArray(nativeMetaData) ? nativeMetaData : []);
       setTasks(Array.isArray(tasksData) ? tasksData : []);
+      setShowProfilesList(Array.isArray(showProfilesData) ? showProfilesData : []);
+      setQualityProfilesList(Array.isArray(qualityProfilesData) ? qualityProfilesData : []);
       const sonarrRaw = settings.find((s: any) => s.key === "sonarr");
       if (sonarrRaw) {
         try {
           const s = JSON.parse(sonarrRaw.value);
           setSonarr({ enabled: !!s.enabled, baseUrl: s.baseUrl || "", apiKey: s.apiKey || "", apiVersion: s.apiVersion === "v5" ? "v5" : "v3" });
+        } catch {}
+      }
+
+      const jellyfinRaw = settings.find((s: any) => s.key === "jellyfin");
+      if (jellyfinRaw) {
+        try {
+          const j = JSON.parse(jellyfinRaw.value);
+          setJellyfin({ enabled: !!j.enabled, baseUrl: j.baseUrl || "", apiKey: j.apiKey || "" });
         } catch {}
       }
 
@@ -760,7 +801,28 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                         setSonarrImportTotal(0);
                         setSelectedSonarrSeries(new Set());
                         fetch("/api/sonarr/series").then(r => r.json()).then(res => {
-                          setSonarrSeries(Array.isArray(res) ? res : []);
+                          const list = Array.isArray(res) ? res : [];
+                          setSonarrSeries(list);
+
+                          // Seed a default mapping per seriesType actually present in
+                          // this Sonarr instance (standard / daily / anime), so the
+                          // person only has to adjust it, not build it from scratch.
+                          const typesPresent = Array.from(new Set(list.map((s: any) => s.seriesType || 'standard')));
+                          setSonarrTypeConfig(() => {
+                            const next: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }> = {};
+                            for (const t of typesPresent) {
+                              const guessedProfile = showProfilesList.find(p => p.id === t || p.name?.toLowerCase() === t)
+                                ?? showProfilesList[0];
+                              const guessedQuality = qualityProfilesList.find(p => p.id === t)
+                                ?? qualityProfilesList[0];
+                              next[t] = {
+                                included: true,
+                                showProfileId: guessedProfile?.id ?? '',
+                                qualityProfileId: guessedQuality?.id ?? '',
+                              };
+                            }
+                            return next;
+                          });
                         }).catch(() => setSonarrSeries([]))
                         .finally(() => setSonarrSeriesLoading(false));
                       }}
@@ -776,7 +838,18 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                           const ids = [...selectedSonarrSeries];
                           const toImport = ids.length > 0
                             ? sonarrSeries.filter((s: any) => ids.includes(s.id))
-                            : sonarrSeries;
+                            : visibleSonarrSeries;
+
+                          // Build the type -> {showProfileId, qualityProfileId} mapping
+                          // for every included type, so the backend resolves each
+                          // series' root folder + quality profile from its Sonarr
+                          // seriesType instead of falling back to "first profile".
+                          const typeMapping: Record<string, { showProfileId?: string; qualityProfileId?: string }> = {};
+                          for (const [t, cfg] of Object.entries(sonarrTypeConfig)) {
+                            if (!cfg.included) continue;
+                            typeMapping[t] = { showProfileId: cfg.showProfileId || undefined, qualityProfileId: cfg.qualityProfileId || undefined };
+                          }
+
                           setSonarrImporting(true);
                           setSonarrImportResults([]);
                           setSonarrImportTotal(toImport.length);
@@ -786,7 +859,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                               const res = await fetch("/api/sonarr/import", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ seriesIds: [s.id] }),
+                                body: JSON.stringify({ seriesIds: [s.id], typeMapping }),
                               });
                               const data = await res.json();
                               const result = data.results?.[0] || { title: s.title, status: 'error', message: 'No result' };
@@ -801,14 +874,80 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                           setSonarrSeries(null);
                           setSelectedSonarrSeries(new Set());
                         }}
-                        disabled={sonarrImporting}
+                        disabled={sonarrImporting || visibleSonarrSeries.length === 0}
                       >
                         {sonarrImporting ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
-                        Import {selectedSonarrSeries.size > 0 ? `(${selectedSonarrSeries.size})` : `All ${sonarrSeries.length}`}
+                        Import {selectedSonarrSeries.size > 0 ? `(${selectedSonarrSeries.size})` : `All ${visibleSonarrSeries.length}`}
                       </Button>
                     )}
                   </div>
                 </div>
+
+                {sonarrSeries && sonarrSeries.length > 0 && sonarrImportResults.length === 0 && !sonarrImporting && (
+                  <div className="rounded-lg border border-white/10 divide-y divide-white/5 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-white/[0.02]">
+                      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        Map Series Types → ShowFlow Profiles
+                      </span>
+                      <p className="text-muted-foreground text-xs mt-0.5">
+                        Choose which Sonarr series types to import and where each type lands.
+                      </p>
+                    </div>
+                    {sonarrTypesPresent.map(([type, count]) => {
+                      const cfg = sonarrTypeConfig[type] ?? { included: true, showProfileId: '', qualityProfileId: '' };
+                      return (
+                        <div key={type} className="flex items-center gap-3 px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setSonarrTypeConfig(prev => ({ ...prev, [type]: { ...cfg, included: !cfg.included } }))}
+                            className={cn(
+                              "size-4 shrink-0 rounded border-2 transition-colors flex items-center justify-center",
+                              cfg.included ? "border-signal bg-signal" : "border-white/20",
+                            )}
+                          >
+                            {cfg.included && <CheckIcon className="size-3 text-white" />}
+                          </button>
+                          <div className="w-24 shrink-0">
+                            <span className="font-mono text-xs uppercase tracking-wider text-white/85">{type}</span>
+                            <div className="text-muted-foreground text-[10px] font-mono">{count} series</div>
+                          </div>
+                          <Select
+                            value={cfg.showProfileId || undefined}
+                            onValueChange={v => setSonarrTypeConfig(prev => ({ ...prev, [type]: { ...cfg, showProfileId: v } }))}
+                            disabled={!cfg.included}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="Root folder profile" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {showProfilesList.length === 0 ? (
+                                <div className="px-2 py-1.5 text-muted-foreground text-xs">No show profiles configured</div>
+                              ) : showProfilesList.map(p => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={cfg.qualityProfileId || undefined}
+                            onValueChange={v => setSonarrTypeConfig(prev => ({ ...prev, [type]: { ...cfg, qualityProfileId: v } }))}
+                            disabled={!cfg.included}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="Quality profile" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {qualityProfilesList.length === 0 ? (
+                                <div className="px-2 py-1.5 text-muted-foreground text-xs">No quality profiles configured</div>
+                              ) : qualityProfilesList.map(p => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {sonarrImportResults.length > 0 || sonarrImporting ? (
                   <div className="rounded-lg border border-white/10 overflow-hidden">
@@ -861,9 +1000,11 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                   </div>
                 ) : sonarrSeries && sonarrSeries.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No series found in Sonarr.</p>
+                ) : sonarrSeries && sonarrSeries.length > 0 && visibleSonarrSeries.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No series match the included types above.</p>
                 ) : sonarrSeries && sonarrSeries.length > 0 && (
                   <div className="max-h-96 overflow-y-auto space-y-1.5">
-                    {sonarrSeries.map((s: any) => {
+                    {visibleSonarrSeries.map((s: any) => {
                       const selected = selectedSonarrSeries.has(s.id);
                       return (
                         <div
@@ -890,6 +1031,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                           <div className="flex-1 min-w-0">
                             <div className="font-mono text-sm truncate">{s.title}</div>
                             <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                              <span className="uppercase tracking-wider font-mono text-signal/80">{s.seriesType || 'standard'}</span>
                               {s.year > 0 && <span>{s.year}</span>}
                               <span className={cn(
                                 "uppercase tracking-wider font-mono",
@@ -1022,6 +1164,150 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                 />
               </FieldRow>
             </GlassPanel>
+          </>
+        )}
+
+        {tab === "jellyfin" && (
+          <>
+            <GlassPanel className="p-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Jellyfin Connection</h3>
+                  <p className="text-muted-foreground text-xs mt-0.5">Connect to Jellyfin to sync watched state to ShowFlow</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {jellyfin.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  <Switch
+                    checked={jellyfin.enabled}
+                    onCheckedChange={v => setJellyfin(prev => ({ ...prev, enabled: v }))}
+                  />
+                </div>
+              </div>
+              {jellyfin.enabled && (
+              <>
+                <FieldRow label="Jellyfin URL" description="e.g. http://localhost:8096">
+                  <Input
+                    value={jellyfin.baseUrl}
+                    onChange={e => setJellyfin(prev => ({ ...prev, baseUrl: e.target.value }))}
+                    placeholder="http://localhost:8096"
+                  />
+                </FieldRow>
+                <FieldRow label="API Key" description="Found in Jellyfin Dashboard > API Keys">
+                  <div className="relative">
+                    <Input
+                      type={showJellyfinKey ? "text" : "password"}
+                      value={jellyfin.apiKey}
+                      onChange={e => setJellyfin(prev => ({ ...prev, apiKey: e.target.value }))}
+                      placeholder="Jellyfin API key"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowJellyfinKey(!showJellyfinKey)}
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+                    >
+                      {showJellyfinKey ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                    </button>
+                  </div>
+                </FieldRow>
+                <div className="flex items-center gap-2 pt-1">
+                  <Button size="sm" onClick={() => {
+                    setSaving("jellyfin");
+                    setSaveMsg(null);
+                    fetch("/api/settings", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ key: "jellyfin", value: jellyfin }),
+                    }).then(r => {
+                      setSaveMsg(r.ok ? { ok: true, text: "Saved" } : { ok: false, text: "Failed to save" });
+                    }).catch(() => setSaveMsg({ ok: false, text: "Network error" }))
+                    .finally(() => setSaving(null));
+                  }} disabled={saving === "jellyfin"}>
+                    {saving === "jellyfin" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                    Save Jellyfin Settings
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setJellyfinTesting(true);
+                      setJellyfinStatus(null);
+                      fetch("/api/jellyfin/test").then(r => r.json()).then(res => {
+                        setJellyfinStatus(res);
+                      }).catch(() => setJellyfinStatus({ ok: false, message: "Connection failed" }))
+                      .finally(() => setJellyfinTesting(false));
+                    }}
+                    disabled={jellyfinTesting || !jellyfin.baseUrl}
+                  >
+                    {jellyfinTesting ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                    Test Connection
+                  </Button>
+                </div>
+                {jellyfinStatus && (
+                  <div className={cn(
+                    "flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs",
+                    jellyfinStatus.ok ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400",
+                  )}>
+                    {jellyfinStatus.ok ? <CheckIcon className="size-3.5 shrink-0" /> : <XIcon className="size-3.5 shrink-0" />}
+                    {jellyfinStatus.message || (jellyfinStatus.ok ? `Connected v${jellyfinStatus.version}` : "Failed")}
+                  </div>
+                )}
+              </>
+              )}
+            </GlassPanel>
+
+            {jellyfin.enabled && jellyfin.baseUrl && jellyfin.apiKey && (
+              <GlassPanel className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Sync Watched State</h3>
+                    <p className="text-muted-foreground text-xs mt-0.5">Sync watched episode data from Jellyfin to ShowFlow tracking</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      setJellyfinSyncing(true);
+                      setJellyfinSyncResult(null);
+                      try {
+                        const res = await fetch("/api/jellyfin/sync", { method: "POST" });
+                        const data = await res.json();
+                        setJellyfinSyncResult(data);
+                      } catch {
+                        setJellyfinSyncResult({ errors: ["Sync request failed"] });
+                      }
+                      setJellyfinSyncing(false);
+                    }}
+                    disabled={jellyfinSyncing}
+                  >
+                    {jellyfinSyncing ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                    {jellyfinSyncing ? "Syncing..." : "Sync Now"}
+                  </Button>
+                </div>
+                {jellyfinSyncResult && (
+                  <div className="rounded-lg border border-white/10 overflow-hidden">
+                    <div className="flex flex-col divide-y divide-white/5">
+                      <div className="flex items-center justify-between p-3">
+                        <span className="text-sm font-mono">Watched episodes found</span>
+                        <span className="text-sm font-mono text-signal">{jellyfinSyncResult.totalEpisodes ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3">
+                        <span className="text-sm font-mono">Matched & tracked in ShowFlow</span>
+                        <span className="text-sm font-mono text-emerald-400">{jellyfinSyncResult.matchedEpisodes ?? 0}</span>
+                      </div>
+                      {jellyfinSyncResult.errors && jellyfinSyncResult.errors.length > 0 && (
+                        <div className="p-3 space-y-1">
+                          <span className="text-xs font-mono text-red-400">Errors ({jellyfinSyncResult.errors.length})</span>
+                          {jellyfinSyncResult.errors.slice(0, 5).map((err, i) => (
+                            <div key={i} className="text-[10px] font-mono text-red-400/70 truncate">{err}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </GlassPanel>
+            )}
           </>
         )}
 

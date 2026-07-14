@@ -142,6 +142,8 @@ function Dashboard({
   const [upcoming, setUpcoming] = React.useState<UpcomingEpisode[] | null>(null);
   const [recentEvents, setRecentEvents] = React.useState<ActivityEvent[]>([]);
   const [processingFiles, setProcessingFiles] = React.useState<string[]>([]);
+  const [syncingAll, setSyncingAll] = React.useState(false);
+  const [syncProgress, setSyncProgress] = React.useState<{ synced: number; total: number; errors: number } | null>(null);
 
   const POLL_INTERVAL = 30_000;
 
@@ -499,12 +501,34 @@ function Dashboard({
               </button>
               <button
                 onClick={async () => {
-                  // Refresh Metadata — placeholder for future integration
+                  if (syncingAll) return;
+                  setSyncingAll(true);
+                  setSyncProgress({ synced: 0, total: shows?.length || 0, errors: 0 });
+                  try {
+                    const res = await fetch("/api/shows/sync-all", { method: "POST" });
+                    const data = await res.json();
+                    if (data.ok) {
+                      setSyncProgress({ synced: data.syncedCount, total: shows?.length || 0, errors: data.errorCount });
+                      // Refresh shows data after sync completes
+                      fetchShowsAndCalendar();
+                    }
+                  } catch (err) {
+                    console.error("Failed to sync all shows:", err);
+                  } finally {
+                    setSyncingAll(false);
+                    setTimeout(() => setSyncProgress(null), 3000);
+                  }
                 }}
-                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
+                disabled={syncingAll}
+                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Activity className="size-4 text-purple-400" />
-                <span>Refresh Metadata</span>
+                <Activity className={`size-4 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
+                <span>{syncingAll ? 'Syncing...' : 'Refresh Metadata'}</span>
+                {syncProgress && (
+                  <span className="text-white/50 ml-auto">
+                    {syncProgress.synced}/{syncProgress.total}
+                  </span>
+                )}
               </button>
             </div>
           </GlassPanel>

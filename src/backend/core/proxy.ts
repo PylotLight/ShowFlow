@@ -136,7 +136,7 @@ async function nodeFetch(
     headers['Content-Type'] = 'application/octet-stream';
   }
 
-  const agent = useProxy ? socksAgent : undefined;
+  const agent = useProxy && socksAgent ? socksAgent : undefined;
   const requestFn = resource.startsWith('https:') ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {

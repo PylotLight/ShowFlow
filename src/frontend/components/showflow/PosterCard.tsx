@@ -8,16 +8,25 @@ export interface ShowSummary {
   providerType: string;
   title: string;
   profile?: string;
+  seriesType?: string;
+  trackedCount?: number;
+  grabbedCount?: number;
+  addedAt?: string;
+  lastUpdated?: string;
 }
 
 function PosterCard({
   show,
   selected,
   onClick,
+  showProvider = true,
+  showStats = true,
 }: {
   show: ShowSummary;
   selected?: boolean;
   onClick?: () => void;
+  showProvider?: boolean;
+  showStats?: boolean;
 }) {
   return (
     <button
@@ -38,7 +47,25 @@ function PosterCard({
         <span className="font-display text-base leading-tight font-semibold tracking-wide text-white drop-shadow-sm">
           {show.title}
         </span>
-        <span className="font-mono text-caption uppercase tracking-wider text-white/50">{show.providerType}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          {showProvider && (
+            <span className="font-mono text-caption uppercase tracking-wider text-white/50">{show.providerType}</span>
+          )}
+          {showStats && (show.trackedCount !== undefined || show.grabbedCount !== undefined) && (
+            <div className="flex items-center gap-1.5">
+              {(show.trackedCount || 0) > 0 && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-signal bg-signal/10 px-1 rounded">
+                  {show.trackedCount} tracked
+                </span>
+              )}
+              {(show.grabbedCount || 0) > 0 && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-green-400 bg-green-400/10 px-1 rounded">
+                  {show.grabbedCount} grabbed
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </button>
   );
