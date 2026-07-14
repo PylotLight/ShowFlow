@@ -75,7 +75,7 @@ export class SyncManager {
     }
   }
 
-  async syncAllShows() {
+  async syncAllShows(force: boolean = false) {
     const shows = db.listShows();
     const now = new Date();
     let syncedCount = 0;
@@ -86,7 +86,7 @@ export class SyncManager {
       type: 'sync',
       entityType: 'system',
       entityId: 'sync-all',
-      message: `Starting metadata sync for ${shows.length} shows`,
+      message: `Starting metadata sync for ${shows.length} shows ${force ? '(forced)' : ''}`,
     });
 
     for (const show of shows) {
@@ -100,14 +100,17 @@ export class SyncManager {
       const hasUpcoming = db.hasUpcomingEpisodes(show.id);
       
       // Logic:
+      // - If force=true: Sync all shows regardless of last update time
       // - If it has upcoming episodes: Sync every 3 days to ensure air dates/titles are correct.
       // - Otherwise: Sync every 30 days (maintenance mode).
       // - New shows (lastUpdated ~ 0) always sync.
       
-      const syncIntervalDays = hasUpcoming ? 3 : 30;
-      if (daysSinceUpdate < syncIntervalDays) {
-        skippedCount++;
-        continue;
+      if (!force) {
+        const syncIntervalDays = hasUpcoming ? 3 : 30;
+        if (daysSinceUpdate < syncIntervalDays) {
+          skippedCount++;
+          continue;
+        }
       }
 
       try {

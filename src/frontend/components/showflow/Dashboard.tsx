@@ -505,10 +505,14 @@ function Dashboard({
                   setSyncingAll(true);
                   setSyncProgress({ synced: 0, total: shows?.length || 0, errors: 0 });
                   try {
-                    const res = await fetch("/api/shows/sync-all", { method: "POST" });
+                    const res = await fetch("/api/shows/sync-all", { 
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ force: true }) // Force sync on manual refresh
+                    });
                     const data = await res.json();
                     if (data.ok) {
-                      setSyncProgress({ synced: data.syncedCount, total: shows?.length || 0, errors: data.errorCount });
+                      setSyncProgress({ synced: data.syncedCount, total: data.syncedCount + data.skippedCount, errors: data.errorCount });
                       // Refresh shows data after sync completes
                       fetchShowsAndCalendar();
                     }

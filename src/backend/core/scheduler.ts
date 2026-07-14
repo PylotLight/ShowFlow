@@ -36,7 +36,7 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     defaultEnabled: true,
     action: async (config) => {
       const sync = new SyncManager(config);
-      const result = await sync.syncAllShows();
+      const result = await sync.syncAllShows(false); // Use intelligent sync for scheduled tasks
       debugLog(`Task sync-shows complete: ${result.syncedCount} synced, ${result.errorCount} errors.`);
     },
   },

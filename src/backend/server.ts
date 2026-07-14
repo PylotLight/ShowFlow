@@ -1505,10 +1505,11 @@ const routeDefinitions = {
   },
 
   "/api/shows/sync-all": {
-    async POST() {
+    async POST(req: RouteReq) {
       try {
+        const body = await req.json().catch(() => ({})) as { force?: boolean };
         const syncManager = new SyncManager(loadConfig());
-        const result = await syncManager.syncAllShows();
+        const result = await syncManager.syncAllShows(body.force ?? true); // Default to force for manual sync
         return json({ ok: true, ...result });
       } catch (err) {
         return errorResponse(err, 500);
