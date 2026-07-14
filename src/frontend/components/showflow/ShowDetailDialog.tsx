@@ -44,28 +44,11 @@ function ShowDetailDialog({
           "relative z-10 flex flex-col overflow-hidden glass-panel shadow-2xl transition-all duration-300 ease-out",
           expanded
             ? "fixed inset-3 md:inset-6 rounded-2xl"
-            : "w-[92vw] max-w-4xl h-[80vh] max-h-[85vh] rounded-2xl"
+            : "w-[92vw] max-w-6xl h-[80vh] max-h-[85vh] rounded-2xl"
         )}
       >
-        <div className="absolute top-3 right-3 z-30 flex items-center gap-1.5">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="size-8 flex items-center justify-center rounded-full bg-black/50 text-white/60 hover:text-white hover:bg-black/70 transition-colors"
-            aria-label={expanded ? "Minimize" : "Expand to full screen"}
-          >
-            {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </button>
-          <button
-            onClick={onClose}
-            className="size-8 flex items-center justify-center rounded-full bg-black/50 text-white/60 hover:text-white hover:bg-black/70 transition-colors"
-            aria-label="Close"
-          >
-            <XIcon className="size-4" />
-          </button>
-        </div>
-
         <div className="flex-1 flex flex-col min-h-0">
-          <ShowDetail show={show} onBack={onClose} modal />
+          <ShowDetail show={show} onBack={onClose} modal onToggleExpand={() => setExpanded(v => !v)} expanded={expanded} />
         </div>
       </div>
     </div>

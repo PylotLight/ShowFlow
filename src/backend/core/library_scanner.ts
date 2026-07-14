@@ -90,6 +90,117 @@ export class LibraryScanner {
     console.log(`Scan complete. Mapped ${foundCount} episodes. ${unknownCount} files belonged to unknown shows.`);
   }
 
+  private normalizeForMatch(value: string): string {
+    return value
+      .normalize('NFKC')
+      .replace(/[._]+/g, ' ')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLocaleLowerCase();
+  }
+
+  private titleMatchesShow(parsedTitle: string, showTitle: string, show: any): boolean {
+    const normalParsed = this.normalizeForMatch(parsedTitle);
+    const normalCanonical = this.normalizeForMatch(showTitle);
+
+    if (normalParsed === normalCanonical) return true;
+    if (normalCanonical.includes(normalParsed) || normalParsed.includes(normalCanonical)) return true;
+
+    if (show.original_title) {
+      const normalOriginal = this.normalizeForMatch(show.original_title);
+      if (normalParsed === normalOriginal) return true;
+      if (normalOriginal.includes(normalParsed) || normalParsed.includes(normalOriginal)) return true;
+    }
+
+    return false;
+  }
+
+  async scanShow(showId: string) {
+    const show = db.getShow(showId);
+    if (!show) {
+      console.log(`Show ${showId} not found. Nothing to scan.`);
+      return;
+    }
+
+    const rootFolder = show.root_folder_path || db.getShowRootFolder(showId);
+    if (!rootFolder) {
+      console.log(`No root folder for show "${show.title}". Nothing to scan.`);
+      return;
+    }
+
+    console.log(`Scanning show "${show.title}" in ${rootFolder}`);
+    let foundCount = 0;
+
+    try {
+      const files = this.walk(rootFolder);
+      for (const file of files) {
+        const filename = path.basename(file);
+        const parsed = this.parser.parse(filename);
+
+        if (!parsed) {
+          debugLog(`Could not parse filename: ${filename}`);
+          continue;
+        }
+
+        if (!this.titleMatchesShow(parsed.show, show.title, show)) {
+          debugLog(`Skipping file "${filename}" — parsed title "${parsed.show}" does not match show "${show.title}"`);
+          continue;
+        }
+
+        if (parsed.season !== undefined && parsed.episodes) {
+          for (const epNum of parsed.episodes) {
+            db.updateEpisodeFilePath(showId, parsed.season, epNum, file);
+            foundCount++;
+            db.logEvent({
+              type: 'scan',
+              entityType: 'episode',
+              entityId: `${showId}:${parsed.season}:${epNum}`,
+              message: `[show scan] Mapped file ${filename} to ${show.title} S${parsed.season}E${epNum}`,
+            });
+          }
+        } else if (parsed.absoluteNumbers) {
+          const episodes = db.listAllEpisodes(showId);
+          for (const absNum of parsed.absoluteNumbers) {
+            const ep = episodes.find((e: any) => e.absolute_number === absNum);
+            if (ep) {
+              db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, file);
+              foundCount++;
+              db.logEvent({
+                type: 'scan',
+                entityType: 'episode',
+                entityId: `${showId}:${ep.season_number}:${ep.episode_number}`,
+                message: `[show scan] Mapped file ${filename} to ${show.title} via absolute number`,
+              });
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') {
+        console.log(`Root folder not found for "${show.title}": ${rootFolder}`);
+      } else {
+        console.warn(`Error scanning show "${show.title}":`, e);
+      }
+    }
+
+    // Reconcile: clear file paths for episodes whose files no longer exist
+    const allEpisodes = db.listAllEpisodes(showId);
+    let clearedCount = 0;
+    for (const ep of allEpisodes) {
+      if (ep.file_path) {
+        try {
+          await fs.promises.access(ep.file_path);
+        } catch {
+          db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, '');
+          clearedCount++;
+        }
+      }
+    }
+
+    console.log(`Show scan for "${show.title}" complete. Mapped ${foundCount} episodes, cleared ${clearedCount} stale paths.`);
+  }
+
   private walk(dir: string): string[] {
     let results: string[] = [];
     const list = fs.readdirSync(dir);

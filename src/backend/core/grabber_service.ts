@@ -6,6 +6,7 @@ import type { NativeIndexerConfig } from '../providers/indexers/native/types';
 import { NATIVE_INDEXER_META } from '../providers/indexers/native/types';
 import { qualityEngine, type ReleaseScore } from './quality_engine';
 import { debugLog, logDebug } from './debug';
+import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
 
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'is', 'it', 'its']);
 
@@ -246,7 +247,7 @@ export class GrabberService {
     return this.grabRelease(releases[0]!);
   }
 
-  /** Grabs a specific, already-found release via the indexer that found it. */
+  /** Grabs a specific, already-found release. Routes through TorBox if configured, otherwise falls back to the indexer's built-in grab (blackhole folder). */
   async grabRelease(release: ScoredRelease): Promise<GrabResult> {
     logDebug({
       type: 'grabber',
@@ -255,6 +256,28 @@ export class GrabberService {
       message: `Grabbing "${release.title}" (score: ${release.score.totalScore})`,
     });
 
+    // When TorBox is configured, send the release directly instead of writing
+    // .torrent/.magnet files to a blackhole folder. This resolves once TorBox
+    // has accepted the torrent - the actual download continues in the
+    // background and reports its own completion/failure via db events (see
+    // TorboxDownloadClient.submitReleaseBackground), so this grab call itself
+    // stays fast regardless of how long the torrent takes to finish.
+    const torboxCfg = this.config.downloadClient?.torbox;
+    if (torboxCfg?.apiKey) {
+      const torbox = new TorboxDownloadClient(resolveTorboxConfig(this.config));
+
+      const result = await torbox.submitReleaseBackground(release);
+
+      if (result.ok) {
+        logDebug({ type: 'grabber', level: 'info', source: 'TorBox', message: result.message });
+        db.logEvent({ type: 'grab', entityType: 'release', message: result.message });
+        return { success: true, message: result.message, release };
+      }
+
+      logDebug({ type: 'grabber', level: 'warn', source: 'TorBox', message: `${result.message} — falling back to indexer grab` });
+    }
+
+    // Fallback: indexer's built-in grab (writes .torrent/.magnet to blackhole folder)
     const grabbed = await release.indexer.grab(release).catch(e => {
       logDebug({
         type: 'grabber', level: 'error', source: release.indexer.name,

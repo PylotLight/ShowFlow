@@ -32,10 +32,16 @@ function formatAirTime(airDate: string) {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+function getLocalDateKey(airDate: string): string {
+  const d = new Date(airDate);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function getRelativeDayLabel(airDate: string): string {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const target = new Date(airDate.slice(0, 10));
+  const d = new Date(airDate);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) return "Today";
@@ -48,7 +54,8 @@ function getRelativeDayLabel(airDate: string): string {
 function getCompactDate(airDate: string): string {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const target = new Date(airDate.slice(0, 10));
+  const d = new Date(airDate);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   const time = formatAirTime(airDate);
@@ -77,7 +84,7 @@ function getRowProximity(airDate: string): { color: string; dot: string } {
   const diffTime = target.getTime() - now.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-  if (diffDays < 0) return { color: "text-white/30", dot: "bg-white/20" };
+  if (diffDays < 0) return { color: "text-white/50", dot: "bg-white/20" };
   if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
   if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
   return { color: "text-white/50", dot: "bg-white/30" };
@@ -136,7 +143,9 @@ function Dashboard({
   const [recentEvents, setRecentEvents] = React.useState<ActivityEvent[]>([]);
   const [processingFiles, setProcessingFiles] = React.useState<string[]>([]);
 
-  React.useEffect(() => {
+  const POLL_INTERVAL = 30_000;
+
+  const fetchShowsAndCalendar = React.useCallback(() => {
     fetch("/api/shows")
       .then((r) => r.json())
       .then(setShows)
@@ -147,6 +156,24 @@ function Dashboard({
       .then(setUpcoming)
       .catch(() => setUpcoming([]));
   }, []);
+
+  React.useEffect(() => {
+    fetchShowsAndCalendar();
+    const id = setInterval(fetchShowsAndCalendar, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchShowsAndCalendar]);
+
+  // Re-fetch when a show finishes syncing, is removed, or is scanned (picked up from WatcherPanel events)
+  const lastTriggerEventId = React.useRef(0);
+  React.useEffect(() => {
+    const triggerEvent = recentEvents.find(
+      e => (e.type === 'sync' || e.type === 'delete' || e.type === 'scan') && e.id > lastTriggerEventId.current,
+    );
+    if (triggerEvent) {
+      lastTriggerEventId.current = triggerEvent.id;
+      fetchShowsAndCalendar();
+    }
+  }, [recentEvents, fetchShowsAndCalendar]);
 
   React.useEffect(() => {
     const poll = () => {
@@ -190,13 +217,17 @@ function Dashboard({
     if (!upcoming) return [];
     const groups: { [key: string]: UpcomingEpisode[] } = {};
     upcoming.forEach((ep) => {
-      const dateKey = ep.airDate.slice(0, 10);
+      const dateKey = getLocalDateKey(ep.airDate);
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(ep);
     });
     return Object.entries(groups).map(([dateKey, items]) => {
       const sample = items[0]?.airDate ?? dateKey;
-      return { dateKey, label: getRelativeDayLabel(sample), items };
+      return {
+        dateKey,
+        label: getRelativeDayLabel(sample),
+        items: [...items].sort((a, b) => new Date(a.airDate).getTime() - new Date(b.airDate).getTime()),
+      };
     });
   }, [upcoming]);
 
@@ -393,7 +424,7 @@ function Dashboard({
                             {ep.filePath && (
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />
-                                Grabbed
+                                Available
                               </span>
                             )}
                             <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">

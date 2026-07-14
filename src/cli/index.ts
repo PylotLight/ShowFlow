@@ -1,3 +1,6 @@
+// IMPORTANT: proxy-patch MUST be the first import
+import '../backend/proxy-patch';
+
 import { Command } from 'commander';
 import { DownloadManager } from '../backend/core/download_manager';
 import { LibraryScanner } from '../backend/core/library_scanner';

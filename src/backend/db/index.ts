@@ -12,13 +12,21 @@ export const ConfigSchema = z.object({
   defaultProvider: z.enum(['tmdb', 'tvdb', 'anilist']),
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
   dryRun: z.boolean().default(false),
+  seasonFolderFormat: z.string().default('Season {season}'),
   downloadClient: z.object({
-    type: z.enum(['blackhole', 'none']).default('blackhole'),
+    type: z.enum(['blackhole', 'torbox', 'none']).optional(),
     blackhole: z.object({
       outputFolder: z.string().optional(),
       watchFolder: z.string().optional(),
     }).optional(),
-  }).default({ type: 'blackhole' }),
+    torbox: z.object({
+      apiKey: z.string().optional(),
+      baseUrl: z.string().optional(),
+      inputFolder: z.string().optional(),
+      outputFolder: z.string().optional(),
+      concurrency: z.number().optional(),
+    }).optional(),
+  }).default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -1350,6 +1358,10 @@ export class DatabaseManager {
   isProcessed(hash: string): boolean {
     const row = this.db.query('SELECT file_hash FROM processed_files WHERE file_hash = ?').get(hash);
     return !!row;
+  }
+
+  removeProcessedFile(hash: string) {
+    this.db.run('DELETE FROM processed_files WHERE file_hash = ?', [hash]);
   }
 
   // ---- Metadata cache ----------------------------------------------------

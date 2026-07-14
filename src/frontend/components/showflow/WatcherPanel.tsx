@@ -133,6 +133,9 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
             } else if (e.type === "dryrun") {
               badgeClass = "bg-yellow-500/15 text-yellow-400 font-semibold border border-yellow-500/10";
               badgeLabel = "dryrun";
+            } else if (e.type === "delete") {
+              badgeClass = "bg-red-500/15 text-red-400 font-semibold border border-red-500/10";
+              badgeLabel = "delete";
             }
 
             return (

@@ -179,6 +179,7 @@ export class Oracle {
         localCandidate.show,
         episodes,
         filename,
+        config as Record<string, unknown>,
       );
 
       return {
@@ -303,7 +304,12 @@ export class Oracle {
       return null;
     }
 
-    const proposedPath = this.buildPath(matchedShow, episodes, filename);
+    const proposedPath = this.buildPath(
+      matchedShow,
+      episodes,
+      filename,
+      config as Record<string, unknown>,
+    );
 
     return {
       show: matchedShow,
@@ -759,6 +765,7 @@ export class Oracle {
     show: Show,
     episodes: Episode[],
     originalFilename: string,
+    config?: Record<string, unknown>,
   ): string {
     const extension = originalFilename.match(/\.[^.]+$/)?.[0] ?? '.mkv';
     const firstEpisode = episodes[0];
@@ -767,13 +774,19 @@ export class Oracle {
       return `Unknown/${originalFilename}`;
     }
 
-    const season = String(firstEpisode.season).padStart(2, '0');
+    const seasonPadded = String(firstEpisode.season).padStart(2, '0');
 
     const episodeCode = episodes.length === 1
-      ? `S${season}E${String(firstEpisode.episode).padStart(2, '0')}`
-      : `S${season}E${String(firstEpisode.episode).padStart(2, '0')}-${String(
+      ? `S${seasonPadded}E${String(firstEpisode.episode).padStart(2, '0')}`
+      : `S${seasonPadded}E${String(firstEpisode.episode).padStart(2, '0')}-${String(
           episodes.at(-1)?.episode ?? firstEpisode.episode,
         ).padStart(2, '0')}`;
+
+    const seasonFolderFormat =
+      (config?.seasonFolderFormat as string) || 'Season {season}';
+    const seasonFolder = seasonFolderFormat
+      .replace('{season:02}', seasonPadded)
+      .replace('{season}', String(firstEpisode.season));
 
     const safeShowTitle = this.sanitize(show.title);
     const safeEpisodeTitle = firstEpisode.title
@@ -782,7 +795,7 @@ export class Oracle {
 
     return [
       safeShowTitle,
-      `Season ${season}`,
+      seasonFolder,
       `${safeShowTitle} - ${episodeCode}${safeEpisodeTitle}${extension}`,
     ].join('/');
   }

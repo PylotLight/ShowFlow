@@ -110,7 +110,7 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
       if (!map.has(ep.showId)) map.set(ep.showId, []);
       map.get(ep.showId)!.push(ep);
     }
-    return [...map.entries()].sort((a, b) => a[1][0].showTitle.localeCompare(b[1][0].showTitle));
+    return [...map.entries()].sort((a, b) => (a[1][0]?.showTitle ?? '').localeCompare(b[1][0]?.showTitle ?? ''));
   }, [episodes]);
 
   function epKey(ep: MissingEpisode) {
@@ -183,12 +183,12 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
                   className="flex w-full items-center gap-3 px-4 py-3 border-b border-white/5 text-left hover:bg-white/[0.02] transition-colors"
                 >
                   {show ? (
-                    <PosterImage showId={show.id} alt={eps[0].showTitle} className="w-8 h-12 shrink-0 rounded" />
+                    <PosterImage showId={show.id} alt={eps[0]!.showTitle} className="w-8 h-12 shrink-0 rounded" />
                   ) : (
                     <div className="w-8 h-12 shrink-0 rounded bg-white/[0.03] border border-white/5" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-display text-base font-semibold text-white truncate">{eps[0].showTitle}</h3>
+                    <h3 className="font-display text-base font-semibold text-white truncate">{eps[0]!.showTitle}</h3>
                     <p className="text-muted-foreground text-xs">{eps.length} missing episode{eps.length !== 1 ? "s" : ""}</p>
                   </div>
                 </button>

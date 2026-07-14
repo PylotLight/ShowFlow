@@ -8,7 +8,7 @@ import { Input } from "@frontend/components/ui/input";
 import { Label } from "@frontend/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
-import { cn } from "@frontend/lib/utils";
+
 import { THEME_PRESETS, loadAccent, saveAccent, applyAccent, loadTheme, saveTheme, applyTheme, type ThemeConfig } from "@frontend/lib/theme";
 import { QualityProfilesTab } from "@frontend/components/showflow/QualityProfiles";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
@@ -38,6 +38,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
   const [showTmdbKey, setShowTmdbKey] = React.useState(false);
   const [showTvdbKey, setShowTvdbKey] = React.useState(false);
   const [showTvdbPin, setShowTvdbPin] = React.useState(false);
+  const [showTorboxKey, setShowTorboxKey] = React.useState(false);
 
   const [accent, setAccent] = React.useState(loadAccent);
   const [theme, setTheme] = React.useState<ThemeConfig | null>(null);
@@ -730,52 +731,193 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
         {tab === "quality" && <QualityProfilesTab />}
 
         {tab === "downloads" && (
-          <GlassPanel className="p-6 space-y-5">
-            <div>
-              <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Download Client</h3>
-              <p className="text-muted-foreground text-xs mt-0.5">Configure how ShowFlow sends releases to your download client</p>
-            </div>
-            <FieldRow label="Client Type" description="How downloads are triggered">
-              <Select
-                value={config.downloadClient?.type || "blackhole"}
-                onValueChange={v => saveConfig({ downloadClient: { ...config.downloadClient, type: v } })}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="blackhole">Blackhole</SelectItem>
-                  <SelectItem value="none">None</SelectItem>
-                </SelectContent>
-              </Select>
-            </FieldRow>
-            {config.downloadClient?.type === "blackhole" && (
-              <>
-                <FieldRow label="Blackhole Folder" description="Directory where grabbed .torrent/.magnet files are placed for your download client to pick up">
-                  <FolderPicker
-                    value={config.downloadClient?.blackhole?.outputFolder || ""}
-                    onChange={v => saveConfig({
-                      downloadClient: {
-                        ...config.downloadClient,
-                        blackhole: { ...(config.downloadClient?.blackhole || {}), outputFolder: v || null },
-                      },
-                    })}
-                  />
-                </FieldRow>
-                <FieldRow label="Watch Folder" description="Directory where completed downloads appear for import">
-                  <FolderPicker
-                    value={config.downloadClient?.blackhole?.watchFolder || ""}
-                    onChange={v => saveConfig({
-                      downloadClient: {
-                        ...config.downloadClient,
-                        blackhole: { ...(config.downloadClient?.blackhole || {}), watchFolder: v || null },
-                      },
-                    })}
-                  />
-                </FieldRow>
-              </>
-            )}
-          </GlassPanel>
+          <>
+            <GlassPanel className="p-6 space-y-5">
+              <div>
+                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Import Folder</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">
+                  Every finished download lands here — from TorBox, from an external torrent client, or dropped in by
+                  hand. ShowFlow watches it, resolves each file's show and episode, and moves it into your library.
+                  This is the one folder that always matters, regardless of which download client you use below.
+                </p>
+              </div>
+              <FieldRow label="Watch Folder" description="Directory ShowFlow watches for completed downloads to import">
+                <FolderPicker
+                  value={config.downloadClient?.blackhole?.watchFolder || ""}
+                  onChange={v => saveConfig({
+                    downloadClient: {
+                      ...config.downloadClient,
+                      blackhole: { ...(config.downloadClient?.blackhole || {}), watchFolder: v || null },
+                    },
+                  })}
+                />
+              </FieldRow>
+              {!config.downloadClient?.blackhole?.watchFolder && (
+                <p className="text-amber-400/80 text-xs">
+                  Not set — the watcher can't start and grabbed releases will never get imported until this is configured.
+                </p>
+              )}
+            </GlassPanel>
+
+            <GlassPanel className="p-6 space-y-5">
+              <div>
+                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Season Folder Format</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">
+                  Controls how season folders are named in your library. Uses <code className="mx-1 rounded bg-white/[0.06] px-1 py-0.5 font-mono">{'{season}'}</code> as the season number placeholder.
+                </p>
+              </div>
+              <FieldRow label="Format Template" description="e.g. Season {season} or Season {season:02}">
+                <Input
+                  value={config.seasonFolderFormat || "Season {season}"}
+                  onChange={e => saveConfig({ seasonFolderFormat: e.target.value })}
+                  placeholder="Season {season}"
+                  className="w-64 font-mono text-xs"
+                />
+              </FieldRow>
+              <p className="text-muted-foreground text-[10px]">
+                Example: <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">Season 1</code> (default), <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">Season 01</code> (<code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">{'season:02'}</code>), <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">S{'{season}'}</code>, etc.
+              </p>
+            </GlassPanel>
+
+            <GlassPanel className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-display text-base font-semibold tracking-wide text-white/90">TorBox</h3>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    Cloud-based download client. Grabbed releases go straight to TorBox, which downloads them and
+                    drops the finished file into your Import Folder above — automatically.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!config.downloadClient?.torbox?.apiKey}
+                  onCheckedChange={on => {
+                    if (on) {
+                      saveConfig({ downloadClient: { ...config.downloadClient, torbox: { apiKey: '' } } });
+                    } else {
+                      const { torbox, ...rest } = config.downloadClient || {};
+                      saveConfig({ downloadClient: Object.keys(rest).length ? rest : undefined });
+                    }
+                  }}
+                />
+              </div>
+              {config.downloadClient?.torbox?.apiKey !== undefined && (
+                <>
+                  <FieldRow label="API Key" description="TorBox API key for authentication">
+                    <div className="relative">
+                      <Input
+                        type={showTorboxKey ? "text" : "password"}
+                        value={config.downloadClient?.torbox?.apiKey || ""}
+                        onChange={e => saveConfig({
+                          downloadClient: {
+                            ...config.downloadClient,
+                            torbox: { ...(config.downloadClient?.torbox || {}), apiKey: e.target.value || null },
+                          },
+                        })}
+                        placeholder="torbox_api_key"
+                        className="pr-8 font-mono text-xs w-72"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowTorboxKey(!showTorboxKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
+                      >
+                        {showTorboxKey ? <EyeOffIcon size={16} /> : <EyeIcon size={16} />}
+                      </button>
+                    </div>
+                  </FieldRow>
+                  <FieldRow label="Concurrency" description="Max concurrent downloads (default 3)">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={config.downloadClient?.torbox?.concurrency ?? 3}
+                      onChange={e => saveConfig({
+                        downloadClient: {
+                          ...config.downloadClient,
+                          torbox: { ...(config.downloadClient?.torbox || {}), concurrency: parseInt(e.target.value) || 3 },
+                        },
+                      })}
+                      className="w-20"
+                    />
+                  </FieldRow>
+
+                  <details className="group pt-1">
+                    <summary className="cursor-pointer select-none font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors">
+                      Advanced
+                    </summary>
+                    <div className="mt-4 space-y-4 border-l border-white/10 pl-4">
+                      <FieldRow label="Base URL" description="TorBox API base URL — only change this for a self-hosted/alternate endpoint">
+                        <Input
+                          value={config.downloadClient?.torbox?.baseUrl || ""}
+                          onChange={e => saveConfig({
+                            downloadClient: {
+                              ...config.downloadClient,
+                              torbox: { ...(config.downloadClient?.torbox || {}), baseUrl: e.target.value || null },
+                            },
+                          })}
+                          placeholder="https://api.torbox.app"
+                          className="w-72 font-mono text-xs"
+                        />
+                      </FieldRow>
+                      <FieldRow label="Output Folder Override" description="Leave blank to use the Import Folder above (recommended). Only set this if TorBox downloads should land somewhere else.">
+                        <FolderPicker
+                          value={config.downloadClient?.torbox?.outputFolder || ""}
+                          onChange={v => saveConfig({
+                            downloadClient: {
+                              ...config.downloadClient,
+                              torbox: { ...(config.downloadClient?.torbox || {}), outputFolder: v || null },
+                            },
+                          })}
+                        />
+                      </FieldRow>
+                      <FieldRow label="Manual Drop Folder" description="Optional: drop a .torrent/.magnet file here yourself and TorBox will pick it up. Not needed for normal grabs — those go directly to TorBox.">
+                        <FolderPicker
+                          value={config.downloadClient?.torbox?.inputFolder || ""}
+                          onChange={v => saveConfig({
+                            downloadClient: {
+                              ...config.downloadClient,
+                              torbox: { ...(config.downloadClient?.torbox || {}), inputFolder: v || null },
+                            },
+                          })}
+                        />
+                      </FieldRow>
+                    </div>
+                  </details>
+                </>
+              )}
+            </GlassPanel>
+
+            <GlassPanel className="p-6 space-y-4">
+              <details className="group">
+                <summary className="cursor-pointer select-none">
+                  <h3 className="inline font-display text-base font-semibold tracking-wide text-white/90">External Download Client</h3>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    For a separate torrent app (e.g. qBittorrent) or Prowlarr's own configured download client, instead of TorBox
+                  </p>
+                </summary>
+                <div className="mt-4 space-y-4 border-l border-white/10 pl-4">
+                  <p className="text-muted-foreground text-xs">
+                    Native indexer grabs (and Prowlarr's, if you point its download client here) write a
+                    <code className="mx-1 rounded bg-white/[0.06] px-1 py-0.5 font-mono">.torrent</code>/
+                    <code className="mx-1 rounded bg-white/[0.06] px-1 py-0.5 font-mono">.magnet</code> file to this
+                    folder. Whatever's watching it — TorBox's Manual Drop Folder above, or a real torrent client —
+                    should ultimately save the finished video into your Import Folder.
+                  </p>
+                  <FieldRow label="Drop Folder" description="Directory where grabbed .torrent/.magnet files are placed">
+                    <FolderPicker
+                      value={config.downloadClient?.blackhole?.outputFolder || ""}
+                      onChange={v => saveConfig({
+                        downloadClient: {
+                          ...config.downloadClient,
+                          blackhole: { ...(config.downloadClient?.blackhole || {}), outputFolder: v || null },
+                        },
+                      })}
+                    />
+                  </FieldRow>
+                </div>
+              </details>
+            </GlassPanel>
+          </>
         )}
         {tab === "tasks" && <TasksPanel tasks={tasks} loading={tasksLoading} onRunTask={runTaskNow} onUpdateTask={updateTaskConfig} taskRunning={taskRunning} saving={saving} />}
         {tab === "backup" && <BackupPanel />}
@@ -1165,11 +1307,12 @@ function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunning, savi
       downloading: [],
       system: [],
     };
-    tasks.forEach(task => {
-      if (groups[task.category]) {
-        groups[task.category].push(task);
+    tasks.forEach((task: any) => {
+      const cat = task.category as keyof typeof groups;
+      if (cat in groups) {
+        groups[cat]!.push(task);
       } else {
-        groups.system.push(task);
+        groups.system!.push(task);
       }
     });
     return groups;

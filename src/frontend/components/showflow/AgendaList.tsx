@@ -61,7 +61,9 @@ function AgendaList({
       }
     }
 
-    return sections.filter((s) => s.items.length > 0);
+    return sections
+      .filter((s) => s.items.length > 0)
+      .map((s) => ({ ...s, items: [...s.items].sort((a, b) => new Date(a.airDate).getTime() - new Date(b.airDate).getTime()) }));
   }, [upcoming]);
 
   const handleSelectEpisodeShow = (showTitle: string) => {
@@ -135,7 +137,7 @@ function AgendaList({
                           onClick={() => handleSelectEpisodeShow(ep.showTitle)}
                           className={cn(
                             "group flex items-center justify-between gap-3 rounded-lg border border-l-2 border-white/0 bg-white/[0.01] px-3 py-2.5 text-left transition-all",
-                            past && isToday ? "border-l-white/5 opacity-40 hover:opacity-60" : groupBorderColor,
+                            past && isToday ? "border-l-white/5 opacity-60 hover:opacity-80" : groupBorderColor,
                             hasShow ? "hover:border-white/5 hover:bg-white/[0.03] cursor-pointer" : "cursor-default",
                           )}
                         >
@@ -157,7 +159,7 @@ function AgendaList({
                             {available && (
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />
-                                Grabbed
+                                Available
                               </span>
                             )}
                             <span className="font-mono text-[9px] text-white/30">

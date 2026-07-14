@@ -27,8 +27,8 @@ export function FeedbackButton() {
   async function captureScreenshot() {
     setState("capturing");
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ preferCurrentTab: true });
-      const track = stream.getVideoTracks()[0];
+      const stream = await navigator.mediaDevices.getDisplayMedia();
+      const track = stream.getVideoTracks()[0]!;
 
       const video = document.createElement("video");
       video.srcObject = stream;
@@ -44,7 +44,7 @@ export function FeedbackButton() {
       stream.getTracks().forEach((t) => t.stop());
       video.remove();
 
-      setScreenshot(canvas.toDataURL("image/png").split(",")[1]);
+      setScreenshot(canvas.toDataURL("image/png").split(",")[1] ?? null);
     } catch {
       // User cancelled or not supported — ignore
     }

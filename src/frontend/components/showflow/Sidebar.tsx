@@ -8,12 +8,13 @@ import {
   Settings,
   CheckCircle2,
   ChevronDown,
+  FolderOpen,
 } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" | "sources" | "settings";
+export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" | "sources" | "settings" | "manual-import";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -26,6 +27,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   const [settingsHovered, setSettingsHovered] = React.useState(false);
   const [missingCount, setMissingCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
+  const [manualCount, setManualCount] = React.useState(0);
   const [isHealthy, setIsHealthy] = React.useState<boolean | null>(null);
   const [seriesCount, setSeriesCount] = React.useState(0);
 
@@ -58,16 +60,25 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         .then((episodes: any[]) => setMissingCount(episodes.length))
         .catch(() => {});
 
+    // Poll manual import file count
+    const pollManual = () =>
+      fetch("/api/manual-import/count")
+        .then((r) => r.json())
+        .then((d: { count: number }) => setManualCount(d.count ?? 0))
+        .catch(() => {});
+
     pollQueue();
     pollHealth();
     pollLibrary();
     pollMissing();
+    pollManual();
 
     const id = setInterval(() => {
       pollQueue();
       pollHealth();
       pollLibrary();
       pollMissing();
+      pollManual();
     }, 15_000);
     return () => clearInterval(id);
   }, []);
@@ -84,6 +95,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   ];
 
   const manageNavs = [
+    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount },
     { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
     { id: "settings" as NavItem, label: "Settings", icon: Settings },
   ];
@@ -250,6 +262,16 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 >
                   <nav.icon className="size-4 shrink-0" />
                   <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
+                  {(nav as any).badge !== undefined && (nav as any).badge > 0 && (
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none shrink-0 hidden lg:inline-block",
+                        activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/60"
+                      )}
+                    >
+                      {(nav as any).badge}
+                    </span>
+                  )}
                 </button>
               )
             ))}

@@ -7,6 +7,8 @@ import { db, type Config } from '../db';
 import type { ProviderType } from '../providers/factory';
 import { debugLog } from './debug';
 import { qualityEngine } from './quality_engine';
+import { TorboxService } from '../providers/torbox/services';
+import { existsSync } from 'node:fs';
 
 export interface DownloadClient {
   name: string;
@@ -200,6 +202,10 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
+  getWatchFolder(): string | null {
+    return this.watchFolder;
+  }
+
   getProcessingFiles(): string[] {
     // Both the file actively inside handleFile() right now and everything
     // still waiting its turn, so the dashboard shows the real backlog depth
@@ -208,7 +214,133 @@ export class BlackholeClient implements DownloadClient {
     return [...active, ...this.pendingQueue];
   }
 
-  private async handleFile(folder: string, filename: string) {
+  /**
+   * Lists all files currently sitting in the watch folder, resolving each
+   * one's metadata (show, season, episode) so the manual-import UI can
+   * display a table of pending files with their resolution status.
+   */
+  async listWatchFolderFiles(): Promise<{
+    filename: string;
+    fullPath: string;
+    show?: string;
+    showId?: string;
+    season?: number;
+    episodes?: number[];
+    existingFile?: string;
+    resolved: boolean;
+    error?: string;
+  }[]> {
+    const folder = this.watchFolder;
+    if (!folder) return [];
+
+    const results: {
+      filename: string;
+      fullPath: string;
+      show?: string;
+      showId?: string;
+      season?: number;
+      episodes?: number[];
+      existingFile?: string;
+      resolved: boolean;
+      error?: string;
+    }[] = [];
+
+    try {
+      const files = await readdir(folder);
+      for (const filename of files) {
+        if (this.isIgnoredFile(filename)) continue;
+        const fullPath = path.join(folder, filename);
+
+        const entry: any = { filename, fullPath, resolved: false };
+        try {
+          const result = await this.oracle.resolve(
+            filename,
+            this.config.defaultProvider as any,
+            this.config as any,
+          );
+          if (result) {
+            entry.show = result.show.title;
+            entry.showId = result.show.id;
+            entry.season = result.episodes[0]?.season;
+            entry.episodes = result.episodes.map((e: any) => e.episode);
+            entry.resolved = true;
+
+            const existingShow = db.getShowByProvider(result.show.provider, result.show.id);
+            if (existingShow && entry.season != null && entry.episodes?.[0] != null) {
+              const existingEp = db.getEpisode(existingShow.id, entry.season, entry.episodes[0]);
+              if (existingEp?.file_path) {
+                entry.existingFile = path.basename(existingEp.file_path);
+              }
+            }
+          }
+        } catch (e) {
+          entry.error = e instanceof Error ? e.message : String(e);
+        }
+
+        results.push(entry);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`[${this.name}] Error listing watch folder:`, message);
+    }
+
+    return results;
+  }
+
+  async countWatchFolderFiles(): Promise<number> {
+    const folder = this.watchFolder;
+    if (!folder) return 0;
+    try {
+      const files = await readdir(folder);
+      return files.filter(f => !this.isIgnoredFile(f)).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  async deleteFile(filename: string): Promise<{ ok: boolean; message: string }> {
+    const folder = this.watchFolder;
+    if (!folder) {
+      return { ok: false, message: 'Watch folder is not configured.' };
+    }
+    const fullPath = path.join(folder, filename);
+    try {
+      await unlink(fullPath);
+      console.log(`[${this.name}] Deleted ${filename} from watch folder.`);
+      db.logEvent({ type: 'delete', entityType: 'file', message: `Deleted ${filename} from watch folder` });
+      return { ok: true, message: `Deleted "${filename}"` };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, message: `Failed to delete "${filename}": ${message}` };
+    }
+  }
+
+  /**
+   * Force-imports a file from the watch folder, bypassing the upgrade check.
+   */
+  async forceImport(filename: string): Promise<{ ok: boolean; message: string }> {
+    const folder = this.watchFolder;
+    if (!folder) {
+      return { ok: false, message: 'Watch folder is not configured.' };
+    }
+
+    const fullPath = path.join(folder, filename);
+    try {
+      await stat(fullPath);
+    } catch {
+      return { ok: false, message: `File "${filename}" no longer exists in the watch folder.` };
+    }
+
+    try {
+      await this.handleFile(folder, filename, { force: true });
+      return { ok: true, message: `Imported "${filename}"` };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, message: `Failed to import "${filename}": ${message}` };
+    }
+  }
+
+  private async handleFile(folder: string, filename: string, opts?: { force?: boolean }) {
     const fullPath = path.join(folder, filename);
 
     if (this.isIgnoredFile(filename)) {
@@ -252,9 +384,14 @@ export class BlackholeClient implements DownloadClient {
 
       const hash = await this.hashFile(fullPath);
       if (db.isProcessed(hash)) {
-        console.log(`[${this.name}] Skipping duplicate: ${filename}`);
-        db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
-        return;
+        if (opts?.force) {
+          console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
+          db.removeProcessedFile(hash);
+        } else {
+          console.log(`[${this.name}] Skipping duplicate: ${filename}`);
+          db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
+          return;
+        }
       }
 
       const result = await this.oracle.resolve(filename, this.config.defaultProvider as ProviderType, this.config);
@@ -423,7 +560,20 @@ export class BlackholeClient implements DownloadClient {
           const existingFilename = path.basename(existingEp.file_path);
           const profileId = db.getShow(showId)?.profile || 'standard';
 
-          if (!qualityEngine.shouldUpgrade(existingFilename, filename, profileId)) {
+          if (opts?.force) {
+            console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
+            // Delete old file when force-importing a replacement
+            try {
+              await unlink(existingEp.file_path);
+            } catch (e) {
+              console.warn(`[${this.name}] Failed to remove old file ${existingEp.file_path}:`, e);
+            }
+            db.logEvent({
+              type: 'manual-import',
+              entityType: 'file',
+              message: `Force-imported ${filename} over ${existingFilename} for ${show.title}`
+            });
+          } else if (!qualityEngine.shouldUpgrade(existingFilename, filename, profileId)) {
             console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}. Skipping. File remains in watch folder for manual review.`);
             db.logEvent({
               type: 'skip',
@@ -431,26 +581,23 @@ export class BlackholeClient implements DownloadClient {
               message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
             });
             return;
-          }
-          console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
-          db.logEvent({
-            type: 'upgrade',
-            entityType: 'file',
-            message: `Upgrading ${existingFilename} to ${filename} for ${show.title}`
-          });
-
-          // If we are replacing, we should probably move the old file to a backup or just delete it.
-          // For now, we'll rely on onCollision 'overwrite' or similar, but explicitly deleting 
-          // ensures we don't end up with multiple versions unless requested.
-          try {
-            await unlink(existingEp.file_path);
-          } catch (e) {
-            console.warn(`[${this.name}] Failed to remove old file ${existingEp.file_path}:`, e);
+          } else {
+            console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
             db.logEvent({
-              type: 'error',
+              type: 'upgrade',
               entityType: 'file',
-              message: `Failed to remove old file ${existingEp.file_path} during upgrade`
+              message: `Upgrading ${existingFilename} to ${filename} for ${show.title}`
             });
+            try {
+              await unlink(existingEp.file_path);
+            } catch (e) {
+              console.warn(`[${this.name}] Failed to remove old file ${existingEp.file_path}:`, e);
+              db.logEvent({
+                type: 'error',
+                entityType: 'file',
+                message: `Failed to remove old file ${existingEp.file_path} during upgrade`
+              });
+            }
           }
         }
       }
@@ -473,7 +620,11 @@ export class BlackholeClient implements DownloadClient {
 
       const firstEpisode = episodes[0];
       if (firstEpisode) {
-        db.saveSeason(showId, firstEpisode.season, `Season ${firstEpisode.season}`);
+        const seasonFolderFormat = this.config.seasonFolderFormat || 'Season {season}';
+        const seasonName = seasonFolderFormat
+          .replace('{season:02}', String(firstEpisode.season).padStart(2, '0'))
+          .replace('{season}', String(firstEpisode.season));
+        db.saveSeason(showId, firstEpisode.season, seasonName);
       }
 
       for (const ep of episodes) {
@@ -573,5 +724,372 @@ export class BlackholeClient implements DownloadClient {
     }
 
     return finalDest;
+  }
+}
+
+// ---- Torbox (cloud-based download client) --------------------------------
+//
+// Uploads .torrent / .magnet files to the TorBox cloud service, polls until
+// the torrent is cached / downloaded, then streams video files to the
+// configured output folder (which should be the Blackhole watch folder so
+// the importer can pick them up automatically).
+//
+// Architecture:
+//   grabber -> .torrent/.magnet file -> [torbox api] -> download -> output/
+//                                                                    |
+//                                                           BlackholeClient
+//                                                           imports to library
+
+export interface TorboxClientConfig {
+  apiKey?: string;
+  /** Defaults to "https://api.torbox.app" */
+  baseUrl?: string;
+  /** Folder to watch for .torrent/.magnet files (usually the blackhole outputFolder) */
+  inputFolder?: string;
+  /** Folder where completed downloads land (usually the blackhole watchFolder) */
+  outputFolder?: string;
+  /** Max concurrent downloads (default 3) */
+  concurrency?: number;
+}
+
+/**
+ * If the person hasn't explicitly set torbox.outputFolder, default it to
+ * blackhole.watchFolder - that's what actually makes the "direct to TorBox"
+ * flow work end-to-end without extra config: TorBox drops finished files
+ * straight where Blackhole is already watching to import them.
+ */
+export function resolveTorboxConfig(config: Config): Config {
+  const dc = config.downloadClient;
+  if (!dc?.torbox || dc.torbox.outputFolder) return config;
+
+  return {
+    ...config,
+    downloadClient: {
+      ...dc,
+      torbox: {
+        ...dc.torbox,
+        outputFolder: dc.blackhole?.watchFolder,
+      },
+    },
+  };
+}
+
+export class TorboxDownloadClient implements DownloadClient {
+  name = 'TorBox';
+
+  private service: TorboxService;
+  private config: TorboxClientConfig;
+  private processing = new Set<string>();
+  private activeTitles = new Set<string>();
+  private watchHandle: ReturnType<typeof watch> | null = null;
+
+  constructor(config: Config) {
+    const raw = config.downloadClient?.torbox;
+    this.config = {
+      apiKey: raw?.apiKey || '',
+      baseUrl: raw?.baseUrl || 'https://api.torbox.app',
+      inputFolder: raw?.inputFolder || './hotio',
+      outputFolder: raw?.outputFolder || './downloads',
+      concurrency: raw?.concurrency || 3,
+    };
+    this.service = new TorboxService({
+      apiKey: this.config.apiKey!,
+      baseUrl: this.config.baseUrl!,
+    });
+  }
+
+  async start() {
+    if (!this.config.apiKey) {
+      console.log(`[${this.name}] No API key configured. Skipping.`);
+      return;
+    }
+
+    await mkdir(this.config.inputFolder!, { recursive: true });
+    await mkdir(this.config.outputFolder!, { recursive: true });
+
+    console.log(`[${this.name}] Watching ${this.config.inputFolder} for torrent/magnet files`);
+    console.log(`[${this.name}] Output folder: ${this.config.outputFolder}`);
+
+    // Scan existing files
+    try {
+      const files = await readdir(this.config.inputFolder!);
+      for (const file of files) {
+        if (file.endsWith('.torrent') || file.endsWith('.magnet') || file.endsWith('.txt')) {
+          this.processFile(path.join(this.config.inputFolder!, file));
+        }
+      }
+    } catch { }
+
+    this.watchHandle = watch(this.config.inputFolder!, (eventType, filename) => {
+      if (eventType !== 'rename' || !filename) return;
+      const fullPath = path.join(this.config.inputFolder!, filename);
+      if (!existsSync(fullPath)) return;
+      if (!filename.endsWith('.torrent') && !filename.endsWith('.magnet') && !filename.endsWith('.txt')) return;
+      this.processFile(fullPath);
+    });
+
+    console.log(`[${this.name}] Running.`);
+  }
+
+  async stop() {
+    if (this.watchHandle) {
+      this.watchHandle.close();
+      this.watchHandle = null;
+    }
+  }
+
+  /**
+   * Directly submit a magnet link to TorBox, poll, and download.
+   * Returns true on success.
+   */
+  async submitMagnet(magnet: string, label?: string): Promise<boolean> {
+    const addRes = await this.service.addTorrent({ magnet, name: label });
+    if (!addRes.success) {
+      console.error(`[${this.name}] Failed to submit magnet:`, addRes.error);
+      return false;
+    }
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+      console.error(`[${this.name}] No torrent ID from magnet submit:`, JSON.stringify(addRes));
+      return false;
+    }
+    return this.waitForDownload(torrentId, label || 'magnet');
+  }
+
+  /**
+   * Fetch a .torrent from a URL and submit it to TorBox, poll, and download.
+   * Returns true on success.
+   */
+  async submitTorrentUrl(url: string, label?: string): Promise<boolean> {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`[${this.name}] Failed to fetch torrent from ${url}: ${res.status}`);
+      return false;
+    }
+    const blob = await res.blob();
+    const addRes = await this.service.addTorrent({ file: blob, name: label || 'torrent' });
+    if (!addRes.success) {
+      console.error(`[${this.name}] Failed to submit torrent:`, addRes.error);
+      return false;
+    }
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+      console.error(`[${this.name}] No torrent ID from torrent submit:`, JSON.stringify(addRes));
+      return false;
+    }
+    return this.waitForDownload(torrentId, label || url);
+  }
+
+  /**
+   * Submit a release (from indexer search) directly to TorBox.
+   * Uses magnetUrl, downloadUrl, or infoHash in that order.
+   */
+  async submitRelease(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<boolean> {
+    const { magnetUrl, downloadUrl, infoHash, title } = release;
+
+    if (magnetUrl?.startsWith('magnet:')) {
+      return this.submitMagnet(magnetUrl, title);
+    }
+
+    if (downloadUrl) {
+      return this.submitTorrentUrl(downloadUrl, title);
+    }
+
+    if (infoHash) {
+      const magnet = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}`;
+      return this.submitMagnet(magnet, title);
+    }
+
+    console.error(`[${this.name}] Release "${title}" has no magnetUrl, downloadUrl, or infoHash`);
+    return false;
+  }
+
+  /**
+   * Titles currently mid-flight - submitted to TorBox and either still
+   * being cached/downloaded there, or being pulled down to outputFolder.
+   * Surfaced on the Queue page alongside Blackhole's local processing queue
+   * so "active downloads" reflects both download paths in one place.
+   */
+  getActiveDownloads(): string[] {
+    return [...this.activeTitles];
+  }
+
+  /**
+   * Submits a release to TorBox and resolves as soon as it's accepted -
+   * NOT once it's fully downloaded. The actual poll-and-fetch continues in
+   * the background and reports its own completion/failure via db events,
+   * so callers on an HTTP request path (the grab endpoints) return quickly
+   * instead of blocking for however long the torrent takes to finish -
+   * `waitForDownload` alone can poll for up to 100 minutes.
+   */
+  async submitReleaseBackground(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<{ ok: boolean; message: string }> {
+    const { magnetUrl, downloadUrl, infoHash, title } = release;
+
+    let addRes: Awaited<ReturnType<TorboxService['addTorrent']>>;
+
+    if (magnetUrl?.startsWith('magnet:')) {
+      addRes = await this.service.addTorrent({ magnet: magnetUrl, name: title });
+    } else if (downloadUrl) {
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        return { ok: false, message: `Failed to fetch release file for "${title}": HTTP ${res.status}` };
+      }
+      const blob = await res.blob();
+      addRes = await this.service.addTorrent({ file: blob, name: title });
+    } else if (infoHash) {
+      const magnet = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}`;
+      addRes = await this.service.addTorrent({ magnet, name: title });
+    } else {
+      return { ok: false, message: `Release "${title}" has no magnetUrl, downloadUrl, or infoHash` };
+    }
+
+    if (!addRes.success) {
+      const errMsg = addRes.error instanceof Error ? addRes.error.message : String(addRes.error ?? 'unknown error');
+      return { ok: false, message: `TorBox rejected "${title}": ${errMsg}` };
+    }
+
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined') {
+      return { ok: false, message: `TorBox returned no torrent ID for "${title}"` };
+    }
+
+    this.activeTitles.add(title);
+
+    // Detached - deliberately not awaited. Progress is reported via db
+    // events rather than the caller's response.
+    this.waitForDownload(torrentId, title)
+      .then((ok) => {
+        db.logEvent({
+          type: ok ? 'download' : 'error',
+          entityType: 'release',
+          message: ok
+            ? `Downloaded "${title}" from TorBox and handed off for import`
+            : `TorBox download failed or timed out for "${title}"`,
+        });
+      })
+      .catch((err) => {
+        db.logEvent({
+          type: 'error',
+          entityType: 'release',
+          message: `TorBox download error for "${title}": ${err instanceof Error ? err.message : String(err)}`,
+        });
+      })
+      .finally(() => {
+        this.activeTitles.delete(title);
+      });
+
+    return { ok: true, message: `Submitted "${title}" to TorBox` };
+  }
+
+  /** Shared poll-and-download loop. */
+  private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
+    console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
+
+    const maxAttempts = 600;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      const status = await this.service.getStatus(torrentId);
+      if (status.success && status.result) {
+        let torrent = status.result.data || status.result;
+        if (Array.isArray(torrent)) {
+          torrent = torrent.find((t: any) => String(t.id) === torrentId);
+        }
+        if (!torrent) {
+          attempts++;
+          await new Promise(r => setTimeout(r, 10_000));
+          continue;
+        }
+        if (torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true) {
+          const files = (torrent.files || []).filter((f: any) => {
+            const name = (f.name || '').toLowerCase();
+            return ['.mkv', '.mp4', '.avi', '.mov'].some(ext => name.endsWith(ext));
+          });
+
+          if (files.length === 0) {
+            console.warn(`[${this.name}] No video files in torrent ${torrentId}`);
+            return false;
+          }
+
+          for (const file of files) {
+            const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
+            if (!dl.success) {
+              console.warn(`[${this.name}] Failed to get link for ${file.short_name || file.id}: ${JSON.stringify(dl.error)}`);
+              continue;
+            }
+            const url = dl.result?.data || dl.result?.download_link || (typeof dl.result === 'string' ? dl.result : null);
+            if (!url) {
+              console.warn(`[${this.name}] No download URL for ${file.short_name || file.id}`);
+              continue;
+            }
+
+            const outputPath = path.join(this.config.outputFolder!, file.short_name || `file_${file.id}.mkv`);
+            const res = await fetch(url);
+            if (!res.ok) {
+              console.warn(`[${this.name}] Download failed for ${file.short_name || file.id}: ${res.statusText}`);
+              continue;
+            }
+            await Bun.write(outputPath, res);
+            console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
+          }
+
+          return true;
+        }
+      }
+
+      attempts++;
+      await new Promise(r => setTimeout(r, 10_000));
+    }
+
+    console.error(`[${this.name}] Torrent ${torrentId} did not complete within time limit`);
+    return false;
+  }
+
+  private async processFile(filePath: string) {
+    if (this.processing.has(filePath)) return;
+    this.processing.add(filePath);
+
+    try {
+      const fileName = path.basename(filePath);
+      const isTorrent = filePath.endsWith('.torrent');
+      const isMagnet = filePath.endsWith('.magnet') || filePath.endsWith('.txt');
+
+      if (!isTorrent && !isMagnet) return;
+
+      const isTxtMagnet = isMagnet && !fileName.endsWith('.txt');
+      const rawText = isMagnet ? await Bun.file(filePath).text() : '';
+      const isContentMagnet = rawText.trim().startsWith('magnet:');
+
+      if (isContentMagnet) {
+        const ok = await this.submitMagnet(rawText.trim(), fileName);
+        if (ok) try { await unlink(filePath); } catch { }
+      } else if (isTorrent) {
+        const file = Bun.file(filePath);
+        const addRes = await this.service.addTorrent({ file, name: fileName });
+        if (!addRes.success) throw addRes.error || new Error('Failed to add torrent');
+        const data = addRes.result?.data || addRes.result;
+        const torrentId = String(data?.torrent_id || data?.id || '');
+        if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+          console.error(`[${this.name}] TorBox API response:`, JSON.stringify(addRes));
+          throw new Error('No torrent ID returned from TorBox');
+        }
+        const ok = await this.waitForDownload(torrentId, fileName);
+        if (ok) try { await unlink(filePath); } catch { }
+      } else {
+        console.log(`[${this.name}] Skipping unrecognized file: ${fileName}`);
+      }
+    } catch (err) {
+      console.error(`[${this.name}] Error processing ${path.basename(filePath)}:`, err);
+      db.logEvent({
+        type: 'error',
+        entityType: 'file',
+        message: `[${this.name}] Failed to process ${path.basename(filePath)}: ${err instanceof Error ? err.message : String(err)}`
+      });
+    } finally {
+      this.processing.delete(filePath);
+    }
   }
 }

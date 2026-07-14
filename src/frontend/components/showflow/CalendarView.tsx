@@ -35,13 +35,70 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
   const month = cursor.getMonth();
   const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
-  // Fetch shows once
-  React.useEffect(() => {
+  const POLL_INTERVAL = 30_000;
+
+  const fetchShows = React.useCallback(() => {
     fetch("/api/shows")
       .then((r) => r.json())
       .then(setShows)
       .catch(() => setShows([]));
   }, []);
+
+  const fetchCalendar = React.useCallback(() => {
+    if (loadedRange.past === 0 && loadedRange.future === 0) return;
+    fetch(`/api/calendar?past=${loadedRange.past}&days=${loadedRange.future}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: UpcomingEpisode[]) => {
+        setAllEpisodes(existing => {
+          const next = new Map(existing);
+          for (const ep of data) next.set(key(ep), ep);
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, [loadedRange.past, loadedRange.future]);
+
+  // Fetch shows with polling
+  React.useEffect(() => {
+    fetchShows();
+    const id = setInterval(fetchShows, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchShows]);
+
+  // Periodically re-fetch calendar episodes
+  React.useEffect(() => {
+    if (loadedRange.past === 0 && loadedRange.future === 0) return;
+    fetchCalendar();
+    const id = setInterval(fetchCalendar, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchCalendar, loadedRange.past, loadedRange.future]);
+
+  // Poll for events to trigger immediate re-fetch on sync or delete
+  const lastTriggerEventId = React.useRef(0);
+  const fetchShowsAndCalendar = React.useCallback(() => {
+    fetchShows();
+    fetchCalendar();
+  }, [fetchShows, fetchCalendar]);
+
+  React.useEffect(() => {
+    const pollEvents = () => {
+      fetch("/api/events?limit=10")
+        .then((r) => r.json())
+        .then((events: { id: number; type: string }[]) => {
+          const triggerEvent = events.find(
+            e => (e.type === 'sync' || e.type === 'delete' || e.type === 'scan') && e.id > lastTriggerEventId.current,
+          );
+          if (triggerEvent) {
+            lastTriggerEventId.current = triggerEvent.id;
+            fetchShowsAndCalendar();
+          }
+        })
+        .catch(() => {});
+    };
+    pollEvents();
+    const id = setInterval(pollEvents, 15_000);
+    return () => clearInterval(id);
+  }, [fetchShowsAndCalendar]);
 
   // Fetch episodes with expanding range
   const ensureRange = React.useCallback((needPast: number, needFuture: number) => {

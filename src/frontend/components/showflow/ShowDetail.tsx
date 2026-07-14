@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, Columns2, DownloadIcon, Loader2Icon, MoreHorizontal, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -54,7 +54,7 @@ interface SearchTarget {
   episode?: number;
 }
 
-function ShowDetail({ show, onBack, modal = false }: { show: ShowSummary; onBack: () => void; modal?: boolean }) {
+function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: { show: ShowSummary; onBack: () => void; modal?: boolean; onToggleExpand?: () => void; expanded?: boolean }) {
   const [seasons, setSeasons] = React.useState<SeasonStat[] | null>(null);
   const [activeSeason, setActiveSeason] = React.useState<number | null>(null);
   const [episodes, setEpisodes] = React.useState<EpisodeData[] | null>(null);
@@ -363,6 +363,18 @@ function ShowDetail({ show, onBack, modal = false }: { show: ShowSummary; onBack
     });
   }
 
+  async function handleScanDir() {
+    flashStatus("Scanning...");
+    try {
+      const res = await fetch(`/api/shows/${show.id}/scan`, { method: "POST" });
+      if (!res.ok) throw new Error("Scan failed");
+      loadEpisodes();
+      flashStatus("Scan complete.");
+    } catch (err) {
+      flashStatus("Scan failed.", false);
+    }
+  }
+
   async function removeShow() {
     if (!confirm(`Are you sure you want to remove ${show.title} from your library?`)) return;
     try {
@@ -456,9 +468,23 @@ function ShowDetail({ show, onBack, modal = false }: { show: ShowSummary; onBack
                 </SelectContent>
               </Select>
             </div>
+          <button onClick={handleScanDir} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
+            <FolderSearch className="size-3.5" />
+            Scan
+          </button>
           <button onClick={removeShow} className="text-muted-foreground hover:text-red-400 text-sub font-mono tracking-wider uppercase transition-colors">
             Remove
           </button>
+          {onToggleExpand && (
+            <button onClick={onToggleExpand} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors" title={expanded ? "Minimize" : "Expand"}>
+              {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
+          )}
+          {modal && (
+            <button onClick={onBack} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors">
+              <XIcon className="size-4" />
+            </button>
+          )}
         </div>
 
         {/* Mobile header menu */}

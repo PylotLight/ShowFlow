@@ -1,3 +1,7 @@
+// IMPORTANT: proxy-patch MUST be the first import — it patches globalThis.fetch
+// during module evaluation, before any code that makes network calls can run.
+import "./proxy-patch";
+
 import { serve, type ServerWebSocket } from "bun";
 type RouteReq = Request & { params: Record<string, string> };
 import fs from "node:fs";
@@ -53,6 +57,7 @@ function loadConfig(): Config {
     db.setSetting("defaultProvider", "tvdb");
     db.setSetting("onCollision", "skip");
     db.setSetting("dryRun", false);
+    db.setSetting("seasonFolderFormat", "Season {season}");
     db.setSetting("apiKeys", {});
     db.setSetting("downloadClient", { type: "blackhole" });
     return loadConfig();
@@ -461,7 +466,8 @@ const routeDefinitions = {
   "/api/tasks/:name": {
     async PATCH(req: RouteReq) {
       try {
-        const { name } = req.params;
+        const name = req.params.name!;
+        if (!name) return errorResponse("Task name is required", 400);
         const body = await req.json();
         
         scheduler.updateTaskConfig(name, {
@@ -476,7 +482,8 @@ const routeDefinitions = {
     },
     async POST(req: RouteReq) {
       try {
-        const { name } = req.params;
+        const name = req.params.name!;
+        if (!name) return errorResponse("Task name is required", 400);
         const result = await scheduler.runTaskNow(name);
         return json(result);
       } catch (err) {
@@ -776,6 +783,17 @@ const routeDefinitions = {
         if (!Array.isArray(ids) || ids.length === 0) {
           return errorResponse("ids array is required.");
         }
+        for (const id of ids) {
+          const show = db.getShow(id);
+          if (show) {
+            db.logEvent({
+              type: 'delete',
+              entityType: 'show',
+              entityId: id,
+              message: `Removed show "${show.title}"`,
+            });
+          }
+        }
         db.removeShows(ids);
         return json({ ok: true });
       } catch (err) {
@@ -819,7 +837,14 @@ const routeDefinitions = {
     },
     async DELETE(req: RouteReq) {
       try {
+        const show = db.getShow(req.params.id!);
         db.removeShow(req.params.id!);
+        db.logEvent({
+          type: 'delete',
+          entityType: 'show',
+          entityId: req.params.id!,
+          message: `Removed show "${show?.title ?? 'unknown'}"`,
+        });
         return json({ ok: true });
       } catch (err) {
         return errorResponse(err, 500);
@@ -1137,6 +1162,8 @@ const routeDefinitions = {
   // Grabs a specific release the person picked from `/api/search` results
   // (interactive search), as opposed to GrabberService's fully-automatic
   // "find and grab the best one" flow used by the per-episode grab route.
+  // When TorBox is configured, releases go directly to it instead of writing
+  // .torrent/.magnet files to a blackhole folder.
   "/api/search/grab": {
     async POST(req: RouteReq) {
       try {
@@ -1146,22 +1173,31 @@ const routeDefinitions = {
         }
 
         let ok = false;
-        const prowlarr = getProwlarrIndexer();
-        if (prowlarr) {
-          ok = await prowlarr.grab(release);
-        }
-        if (!ok) {
-          const natives = getNativeIndexers();
-          const match = natives.find(n => release.indexerName === n.instance.name)?.instance;
-          if (match) {
-            ok = await match.grab(release);
+        let message: string | undefined;
+
+        const torbox = systemManager.getWatcher()?.getTorboxClient();
+        if (torbox) {
+          const result = await torbox.submitReleaseBackground(release);
+          ok = result.ok;
+          message = result.message;
+        } else {
+          const prowlarr = getProwlarrIndexer();
+          if (prowlarr) {
+            ok = await prowlarr.grab(release);
+          }
+          if (!ok) {
+            const natives = getNativeIndexers();
+            const match = natives.find(n => release.indexerName === n.instance.name)?.instance;
+            if (match) {
+              ok = await match.grab(release);
+            }
           }
         }
 
         if (ok) {
-          db.logEvent({ type: "grab", entityType: "release", message: `Grabbed ${release.title}` });
+          db.logEvent({ type: "grab", entityType: "release", message: message || `Grabbed ${release.title}` });
         }
-        return json({ success: ok, message: ok ? `Grabbed ${release.title}` : `Grab failed for "${release.title}". Check that a Download Client is configured.` });
+        return json({ success: ok, message: message || (ok ? `Grabbed ${release.title}` : `Grab failed for "${release.title}". Check that a Download Client is configured.`) });
       } catch (err) {
         return errorResponse(err, 502);
       }
@@ -1174,6 +1210,25 @@ const routeDefinitions = {
         const show = db.getShow(req.params.id!);
         if (!show) return errorResponse("Show not found.", 404);
         await new SyncManager(loadConfig()).syncShow(req.params.id!);
+        return json({ ok: true });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/shows/:id/scan": {
+    async POST(req: RouteReq) {
+      try {
+        const show = db.getShow(req.params.id!);
+        if (!show) return errorResponse("Show not found.", 404);
+        await systemManager.scanShow(req.params.id!);
+        db.logEvent({
+          type: 'scan',
+          entityType: 'show',
+          entityId: req.params.id!,
+          message: `Scanned show "${show.title}"`,
+        });
         return json({ ok: true });
       } catch (err) {
         return errorResponse(err, 500);
@@ -1854,6 +1909,70 @@ const routeDefinitions = {
 
         const issue = await res.json();
         return json({ url: issue.html_url, number: issue.number });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  // ---- Manual Import ----------------------------------------------------
+  // Lists files sitting in the watch folder that haven't been imported yet,
+  // and allows force-importing them while bypassing the upgrade check.
+
+  "/api/manual-import/list": {
+    async GET() {
+      try {
+        const files = await systemManager.listManualImportFiles();
+        return json(files);
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/manual-import/import": {
+    async POST(req: RouteReq) {
+      try {
+        const body = (await req.json()) as { files: string[] };
+        if (!Array.isArray(body.files) || body.files.length === 0) {
+          return errorResponse('files array is required');
+        }
+        const results = [];
+        for (const filename of body.files) {
+          const result = await systemManager.forceImportFile(filename);
+          results.push({ filename, ...result });
+        }
+        return json({ results });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/manual-import/delete": {
+    async POST(req: RouteReq) {
+      try {
+        const body = (await req.json()) as { files: string[] };
+        if (!Array.isArray(body.files) || body.files.length === 0) {
+          return errorResponse('files array is required');
+        }
+        const results = [];
+        for (const filename of body.files) {
+          const result = await systemManager.deleteWatchFile(filename);
+          results.push({ filename, ...result });
+        }
+        return json({ results });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+  },
+
+  "/api/manual-import/count": {
+    async GET() {
+      try {
+        const count = await systemManager.countWatchFiles();
+        return json({ count });
       } catch (err) {
         return errorResponse(err, 500);
       }

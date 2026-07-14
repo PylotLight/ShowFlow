@@ -15,6 +15,7 @@ interface ActivityEvent {
 
 const EVENT_BADGES: Record<string, string> = {
   grab: "bg-signal/15 text-signal font-semibold border border-signal/10",
+  download: "bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/10",
   error: "bg-destructive/15 text-destructive font-semibold border border-destructive/10",
   import: "bg-accent-amber/15 text-accent-amber font-semibold border border-accent-amber/10",
   scan: "bg-blue-500/15 text-blue-400 font-semibold border border-blue-500/10",
@@ -86,8 +87,16 @@ function QueuePage() {
   }
 
   const grabEvents = React.useMemo(
-    () => (events ?? []).filter((e) => ["grab", "import", "upgrade"].includes(e.type)),
+    () => (events ?? []).filter((e) => ["grab", "download", "import", "upgrade", "error"].includes(e.type)),
     [events],
+  );
+  const successCount = React.useMemo(
+    () => grabEvents.filter((e) => e.type !== "error").length,
+    [grabEvents],
+  );
+  const errorCount = React.useMemo(
+    () => grabEvents.filter((e) => e.type === "error").length,
+    [grabEvents],
   );
 
   return (
@@ -122,9 +131,10 @@ function QueuePage() {
       </GlassPanel>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Currently Processing" value={processing === null ? "—" : processing.length} accent="signal" />
-        <StatTile label="Recent Grabs" value={grabEvents.length} accent="amber" />
+        <StatTile label="Recent Successes" value={successCount} accent="amber" />
+        <StatTile label="Recent Failures" value={errorCount} />
         <StatTile label="Watcher Status" value={watching === null ? "—" : watching ? "Online" : "Offline"} />
       </div>
 

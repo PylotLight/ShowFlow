@@ -11,6 +11,7 @@ import { DebugPage } from "@frontend/components/showflow/DebugPage";
 import { QueuePage } from "@frontend/components/showflow/QueuePage";
 import { MissingPage } from "@frontend/components/showflow/MissingPage";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
+import { ManualImport } from "@frontend/components/showflow/ManualImport";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { SearchIcon } from "lucide-react";
@@ -132,6 +133,8 @@ export function App() {
                 setActiveNav("settings");
               }}
             />
+          ) : activeNav === "manual-import" ? (
+            <ManualImport />
           ) : (
             <div className="glass-plane rounded-xl p-8 text-center text-muted-foreground">
               <h3 className="font-display text-lg font-bold text-white mb-2 uppercase">
