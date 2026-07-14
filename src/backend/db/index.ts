@@ -44,6 +44,18 @@ export const ProwlarrConfigSchema = z.object({
 
 export type ProwlarrConfig = z.infer<typeof ProwlarrConfigSchema>;
 
+export const SonarrConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().default('').refine(
+    v => v === '' || /^https?:\/\/.+/.test(v),
+    { message: "Sonarr URL must be a valid URL (e.g. http://localhost:8989)" },
+  ),
+  apiKey: z.string().default(''),
+  apiVersion: z.enum(['v3', 'v5']).default('v3'),
+});
+
+export type SonarrConfig = z.infer<typeof SonarrConfigSchema>;
+
 const NativeIndexerIdSchema = z.enum(['nyaa', 'subsplease', 'tpb', 'knaben', 'rarbg']);
 
 export const NativeIndexerConfigSchema = z.object({

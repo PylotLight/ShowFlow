@@ -21,6 +21,9 @@ import { NATIVE_INDEXER_META, type NativeIndexerConfig, type NativeIndexerId } f
 import { runBackup, listBackups, uploadBackup, restoreBackup } from "../../scripts/backup";
 import { createApiDebugLog, subscribeDebugLogs, getDebugLogs, clearDebugLogs, isDebugEnabled } from "./core/debug";
 import { GITHUB_TOKEN, GITHUB_REPO } from "./feedback/config";
+import { SonarrClient } from "./providers/sonarr/client";
+import { SonarrImporter } from "./providers/sonarr/import";
+import { SonarrConfigSchema } from "./db";
 
 // ---- Config -----------------------------------------------------------
 // Migrated from config.json to database settings.
@@ -156,6 +159,20 @@ function getProwlarrIndexer() {
     return IndexerFactory.create('prowlarr', config);
   } catch (err) {
     console.error('[api] Prowlarr is configured but invalid:', err);
+    return null;
+  }
+}
+
+function getSonarrClient(): SonarrClient | null {
+  const raw = db.getSetting('sonarr');
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const config = SonarrConfigSchema.parse(parsed);
+    if (!config.enabled || !config.baseUrl || !config.apiKey) return null;
+    return new SonarrClient(config.baseUrl, config.apiKey, config.apiVersion);
+  } catch (err) {
+    console.error('[api] Sonarr is configured but invalid:', err);
     return null;
   }
 }
@@ -320,6 +337,23 @@ const routeDefinitions = {
             } catch { }
           }
           const result = ProwlarrConfigSchema.safeParse(merged);
+          if (!result.success) {
+            return errorResponse(result.error.issues.map(i => i.message).join("; "));
+          }
+          db.setSetting(key, result.data);
+          invalidateConfigCache();
+          return json({ ok: true });
+        }
+        if (key === "sonarr") {
+          const existing = db.getSetting('sonarr');
+          let merged = value;
+          if (existing) {
+            try {
+              const parsed = typeof existing === 'string' ? JSON.parse(existing) : existing;
+              merged = { ...parsed, ...value };
+            } catch { }
+          }
+          const result = SonarrConfigSchema.safeParse(merged);
           if (!result.success) {
             return errorResponse(result.error.issues.map(i => i.message).join("; "));
           }
@@ -1114,6 +1148,109 @@ const routeDefinitions = {
         return json(result);
       } catch (err) {
         return errorResponse(err, 502);
+      }
+    },
+  },
+
+  // ---- Sonarr Import ----------------------------------------------------
+
+  "/api/sonarr/settings": {
+    async GET() {
+      try {
+        const raw = db.getSetting('sonarr');
+        if (!raw) return json({ enabled: false, baseUrl: '', apiKey: '' });
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const config = SonarrConfigSchema.parse(parsed);
+        return json({ ...config, apiKey: config.apiKey ? '********' : '' });
+      } catch (err) {
+        return errorResponse(err, 500);
+      }
+    },
+    async POST(req: RouteReq) {
+      try {
+        const body = await req.json() as Record<string, any>;
+        const existing = db.getSetting('sonarr');
+        let merged = body;
+        if (existing) {
+          try {
+            const parsed = typeof existing === 'string' ? JSON.parse(existing) : existing;
+            merged = { ...parsed, ...body };
+          } catch { }
+        }
+        const result = SonarrConfigSchema.safeParse(merged);
+        if (!result.success) {
+          return errorResponse(result.error.issues.map(i => i.message).join("; "));
+        }
+        db.setSetting('sonarr', result.data);
+        invalidateConfigCache();
+        return json({ ok: true });
+      } catch (err) {
+        return errorResponse(err);
+      }
+    },
+  },
+
+  "/api/sonarr/test": {
+    async GET() {
+      try {
+        const client = getSonarrClient();
+        if (!client) return json({ ok: false, message: "Sonarr not configured" });
+        const result = await client.test();
+        return json(result);
+      } catch (err) {
+        return errorResponse(err, 502);
+      }
+    },
+  },
+
+  "/api/sonarr/series": {
+    async GET() {
+      try {
+        const client = getSonarrClient();
+        if (!client) return json({ ok: false, message: "Sonarr not configured" });
+        const series = await client.getSeries();
+        return json(series);
+      } catch (err) {
+        return errorResponse(err, 502);
+      }
+    },
+  },
+
+  "/api/sonarr/import": {
+    async POST(req: RouteReq) {
+      try {
+        const raw = db.getSetting('sonarr');
+        if (!raw) return errorResponse("Sonarr not configured", 400);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const config = SonarrConfigSchema.parse(parsed);
+        if (!config.enabled || !config.baseUrl || !config.apiKey) {
+          return errorResponse("Sonarr is not fully configured", 400);
+        }
+
+        const body = await req.json() as { seriesIds?: number[] } | undefined;
+        const appConfig = loadConfig();
+        const importer = new SonarrImporter(config.baseUrl, config.apiKey, config.apiVersion ?? 'v3', appConfig);
+
+        // Run import in background, return immediately
+        const importPromise = importer.importSeries(body?.seriesIds);
+
+        // For small imports, wait for result; for large ones, fire and forget
+        const series = body?.seriesIds;
+        if (!series || series.length <= 5) {
+          const results = await importPromise;
+          return json({ results });
+        }
+
+        // Fire and forget for large imports
+        importPromise.then(results => {
+          console.log(`[sonarr] Import completed: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`);
+        }).catch(err => {
+          console.error('[sonarr] Import failed:', err);
+        });
+
+        return json({ message: `Import started for ${series.length} series. Check server logs for results.` });
+      } catch (err) {
+        return errorResponse(err, 500);
       }
     },
   },

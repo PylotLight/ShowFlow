@@ -18,6 +18,7 @@ const SETTINGS_TABS = [
   { id: "appearance", label: "Appearance" },
   { id: "providers", label: "Providers" },
   { id: "indexers", label: "Indexers" },
+  { id: "sonarr", label: "Sonarr" },
   { id: "quality", label: "Quality" },
   { id: "downloads", label: "Downloads" },
   { id: "tasks", label: "Tasks" },
@@ -34,6 +35,9 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
   const [config, setConfig] = React.useState<any>({});
   const [prowlarr, setProwlarr] = React.useState({ enabled: true, baseUrl: "", apiKey: "", syncLevel: "full", tags: [] as number[] });
 
+  const [sonarr, setSonarr] = React.useState({ enabled: false, baseUrl: "", apiKey: "", apiVersion: "v3" as "v3" | "v5" });
+  const [showSonarrKey, setShowSonarrKey] = React.useState(false);
+
   const [showProwlarrKey, setShowProwlarrKey] = React.useState(false);
   const [showTmdbKey, setShowTmdbKey] = React.useState(false);
   const [showTvdbKey, setShowTvdbKey] = React.useState(false);
@@ -42,6 +46,15 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
 
   const [accent, setAccent] = React.useState(loadAccent);
   const [theme, setTheme] = React.useState<ThemeConfig | null>(null);
+
+  const [sonarrTesting, setSonarrTesting] = React.useState(false);
+  const [sonarrStatus, setSonarrStatus] = React.useState<{ ok: boolean; message?: string; version?: string } | null>(null);
+  const [sonarrSeries, setSonarrSeries] = React.useState<any[] | null>(null);
+  const [sonarrSeriesLoading, setSonarrSeriesLoading] = React.useState(false);
+  const [sonarrImporting, setSonarrImporting] = React.useState(false);
+  const [sonarrImportResults, setSonarrImportResults] = React.useState<any[]>([]);
+  const [sonarrImportTotal, setSonarrImportTotal] = React.useState(0);
+  const [selectedSonarrSeries, setSelectedSonarrSeries] = React.useState<Set<number>>(new Set());
 
   const [prowlarrTesting, setProwlarrTesting] = React.useState(false);
   const [prowlarrStatus, setProwlarrStatus] = React.useState<{ ok: boolean; message?: string } | null>(null);
@@ -71,6 +84,14 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
       setTheme(loadedTheme);
       setNativeMeta(Array.isArray(nativeMetaData) ? nativeMetaData : []);
       setTasks(Array.isArray(tasksData) ? tasksData : []);
+      const sonarrRaw = settings.find((s: any) => s.key === "sonarr");
+      if (sonarrRaw) {
+        try {
+          const s = JSON.parse(sonarrRaw.value);
+          setSonarr({ enabled: !!s.enabled, baseUrl: s.baseUrl || "", apiKey: s.apiKey || "", apiVersion: s.apiVersion === "v5" ? "v5" : "v3" });
+        } catch {}
+      }
+
       const prowlarrRaw = settings.find((s: any) => s.key === "prowlarr");
       if (prowlarrRaw) {
         try {
@@ -615,6 +636,282 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
               </GlassPanel>
             </>
           )}
+
+        {tab === "sonarr" && (
+          <>
+            <GlassPanel className="p-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Sonarr Connection</h3>
+                  <p className="text-muted-foreground text-xs mt-0.5">Connect to Sonarr to import existing series and tracking data</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {sonarr.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  <Switch
+                    checked={sonarr.enabled}
+                    onCheckedChange={v => setSonarr(prev => ({ ...prev, enabled: v }))}
+                  />
+                </div>
+              </div>
+              {sonarr.enabled && (
+              <>
+                <FieldRow label="Sonarr URL" description="e.g. http://localhost:8989">
+                  <Input
+                    value={sonarr.baseUrl}
+                    onChange={e => setSonarr(prev => ({ ...prev, baseUrl: e.target.value }))}
+                    placeholder="http://localhost:8989"
+                  />
+                </FieldRow>
+                <FieldRow label="API Key" description="Found in Sonarr Settings > General">
+                  <div className="relative">
+                    <Input
+                      type={showSonarrKey ? "text" : "password"}
+                      value={sonarr.apiKey}
+                      onChange={e => setSonarr(prev => ({ ...prev, apiKey: e.target.value }))}
+                      placeholder="Sonarr API key"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSonarrKey(!showSonarrKey)}
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+                    >
+                      {showSonarrKey ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                    </button>
+                  </div>
+                </FieldRow>
+                <FieldRow label="API Version" description="Sonarr v3/v4 use v3, v5 uses v5">
+                  <Select
+                    value={sonarr.apiVersion}
+                    onValueChange={v => setSonarr(prev => ({ ...prev, apiVersion: v as "v3" | "v5" }))}
+                  >
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="v3">v3</SelectItem>
+                      <SelectItem value="v5">v5</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FieldRow>
+                <div className="flex items-center gap-2 pt-1">
+                  <Button size="sm" onClick={() => {
+                    setSaving("sonarr");
+                    setSaveMsg(null);
+                    fetch("/api/settings", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ key: "sonarr", value: sonarr }),
+                    }).then(r => {
+                      setSaveMsg(r.ok ? { ok: true, text: "Saved" } : { ok: false, text: "Failed to save" });
+                    }).catch(() => setSaveMsg({ ok: false, text: "Network error" }))
+                    .finally(() => setSaving(null));
+                  }} disabled={saving === "sonarr"}>
+                    {saving === "sonarr" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                    Save Sonarr Settings
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSonarrTesting(true);
+                      setSonarrStatus(null);
+                      fetch("/api/sonarr/test").then(r => r.json()).then(res => {
+                        setSonarrStatus(res);
+                      }).catch(() => setSonarrStatus({ ok: false, message: "Connection failed" }))
+                      .finally(() => setSonarrTesting(false));
+                    }}
+                    disabled={sonarrTesting || !sonarr.baseUrl}
+                  >
+                    {sonarrTesting ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                    Test Connection
+                  </Button>
+                </div>
+                {sonarrStatus && (
+                  <div className={cn(
+                    "flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs",
+                    sonarrStatus.ok ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400",
+                  )}>
+                    {sonarrStatus.ok ? <CheckIcon className="size-3.5 shrink-0" /> : <XIcon className="size-3.5 shrink-0" />}
+                    {sonarrStatus.message || (sonarrStatus.ok ? `Connected v${sonarrStatus.version}` : "Failed")}
+                  </div>
+                )}
+              </>
+              )}
+            </GlassPanel>
+
+            {sonarr.enabled && sonarr.baseUrl && sonarr.apiKey && (
+              <>
+              <GlassPanel className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Import Series</h3>
+                    <p className="text-muted-foreground text-xs mt-0.5">Select series from Sonarr to import into ShowFlow</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSonarrSeriesLoading(true);
+                        setSonarrSeries(null);
+                        setSonarrImportResults([]);
+                        setSonarrImportTotal(0);
+                        setSelectedSonarrSeries(new Set());
+                        fetch("/api/sonarr/series").then(r => r.json()).then(res => {
+                          setSonarrSeries(Array.isArray(res) ? res : []);
+                        }).catch(() => setSonarrSeries([]))
+                        .finally(() => setSonarrSeriesLoading(false));
+                      }}
+                      disabled={sonarrSeriesLoading}
+                    >
+                      {sonarrSeriesLoading ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                      Fetch Series
+                    </Button>
+                    {sonarrSeries && sonarrSeries.length > 0 && sonarrImportResults.length === 0 && (
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          const ids = [...selectedSonarrSeries];
+                          const toImport = ids.length > 0
+                            ? sonarrSeries.filter((s: any) => ids.includes(s.id))
+                            : sonarrSeries;
+                          setSonarrImporting(true);
+                          setSonarrImportResults([]);
+                          setSonarrImportTotal(toImport.length);
+
+                          for (const s of toImport) {
+                            try {
+                              const res = await fetch("/api/sonarr/import", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ seriesIds: [s.id] }),
+                              });
+                              const data = await res.json();
+                              const result = data.results?.[0] || { title: s.title, status: 'error', message: 'No result' };
+                              setSonarrImportResults(prev => [...prev, result]);
+                            } catch {
+                              setSonarrImportResults(prev => [...prev, { title: s.title, status: 'error' as const, message: 'Import request failed' }]);
+                            }
+                            await new Promise(r => setTimeout(r, 150));
+                          }
+
+                          setSonarrImporting(false);
+                          setSonarrSeries(null);
+                          setSelectedSonarrSeries(new Set());
+                        }}
+                        disabled={sonarrImporting}
+                      >
+                        {sonarrImporting ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                        Import {selectedSonarrSeries.size > 0 ? `(${selectedSonarrSeries.size})` : `All ${sonarrSeries.length}`}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {sonarrImportResults.length > 0 || sonarrImporting ? (
+                  <div className="rounded-lg border border-white/10 overflow-hidden">
+                    <div className="h-1 bg-white/5">
+                      <div
+                        className="h-full bg-signal transition-all duration-300"
+                        style={{ width: `${sonarrImportTotal > 0 ? (sonarrImportResults.length / sonarrImportTotal) * 100 : 0}%` }}
+                      />
+                    </div>
+                    <div className="flex flex-col divide-y divide-white/5 max-h-80 overflow-y-auto">
+                      {sonarrImportResults.map((r: any, i: number) => (
+                        <div key={i} className="flex items-center gap-3 p-3">
+                          {r.status === "imported" || r.status === "existing" ? (
+                            <CheckIcon className="size-4 text-emerald-500 shrink-0" />
+                          ) : r.status === "error" ? (
+                            <XIcon className="size-4 text-red-400 shrink-0" />
+                          ) : (
+                            <Loader2Icon className="size-4 text-muted-foreground animate-spin shrink-0" />
+                          )}
+                          <span className="text-sm font-mono truncate flex-1">{r.title}</span>
+                          {r.status === "error" && r.message && (
+                            <span className="text-[10px] text-red-400 font-mono truncate max-w-[160px] shrink-0">{r.message}</span>
+                          )}
+                          {r.status === "existing" && (
+                            <span className="text-[10px] text-blue-400 font-mono shrink-0">Already in library</span>
+                          )}
+                          {r.status === "imported" && r.message && (
+                            <span className="text-[10px] text-emerald-400 font-mono shrink-0">{r.message}</span>
+                          )}
+                        </div>
+                      ))}
+                      {sonarrImporting && (
+                        <div className="flex items-center gap-3 p-3">
+                          <Loader2Icon className="size-4 text-muted-foreground animate-spin shrink-0" />
+                          <span className="text-sm font-mono text-muted-foreground">Processing next series...</span>
+                        </div>
+                      )}
+                    </div>
+                    {!sonarrImporting && sonarrImportResults.length > 0 && (
+                      <div className="border-t border-white/5 px-3 py-2 text-xs font-mono text-muted-foreground">
+                        {sonarrImportResults.filter((r: any) => r.status === "imported" || r.status === "existing").length} of {sonarrImportResults.length} imported
+                      </div>
+                    )}
+                  </div>
+                ) : sonarrSeries === null && !sonarrSeriesLoading ? (
+                  <p className="text-muted-foreground text-sm">Click "Fetch Series" to load series from Sonarr.</p>
+                ) : sonarrSeriesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : sonarrSeries && sonarrSeries.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No series found in Sonarr.</p>
+                ) : sonarrSeries && sonarrSeries.length > 0 && (
+                  <div className="max-h-96 overflow-y-auto space-y-1.5">
+                    {sonarrSeries.map((s: any) => {
+                      const selected = selectedSonarrSeries.has(s.id);
+                      return (
+                        <div
+                          key={s.id}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg px-4 py-3 cursor-pointer transition-colors",
+                            selected ? "bg-signal/10 ring-1 ring-signal/30" : "bg-white/[0.03] hover:bg-white/[0.06]",
+                          )}
+                          onClick={() => {
+                            setSelectedSonarrSeries(prev => {
+                              const next = new Set(prev);
+                              if (next.has(s.id)) next.delete(s.id);
+                              else next.add(s.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          <div className={cn(
+                            "size-4 shrink-0 rounded border-2 transition-colors flex items-center justify-center",
+                            selected ? "border-signal bg-signal" : "border-white/20",
+                          )}>
+                            {selected && <CheckIcon className="size-3 text-white" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-mono text-sm truncate">{s.title}</div>
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                              {s.year > 0 && <span>{s.year}</span>}
+                              <span className={cn(
+                                "uppercase tracking-wider font-mono",
+                                s.status === "continuing" ? "text-emerald-400" : s.status === "ended" ? "text-amber-400" : "text-muted-foreground",
+                              )}>{s.status}</span>
+                              {s.network && <span>{s.network}</span>}
+                              {s.seasons && <span>{s.seasons.length} seasons</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono text-[10px] text-muted-foreground">TVDB: {s.tvdbId}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </GlassPanel>
+              </>
+            )}
+          </>
+        )}
 
         {tab === "appearance" && theme && (
           <>
