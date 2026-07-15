@@ -20,6 +20,14 @@ export const ADMIN_PORT = Number(process.env.SHOWFLOW_ADMIN_PORT ?? 9090);
 
 export type Phase = "stable" | "quiescing" | "stopped" | "starting" | "restoring";
 
+/**
+ * Baked in at compile time via `bun build --compile --define SUPERVISOR_VERSION="0.1.0"`.
+ * The Dockerfile sets this from the Git tag at image-build time, so the
+ * supervisor knows its own version and can reject release manifests that
+ * require a newer version than what's running.
+ */
+export const SUPERVISOR_VERSION: string = "0.0.0";
+
 export interface Manifest {
   releaseId: string;
   version: string;

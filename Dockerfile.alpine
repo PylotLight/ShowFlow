@@ -16,7 +16,7 @@ COPY . .
 RUN bun run build.ts
 
 # Supervisor — musl target to match the Alpine runtime base.
-RUN bun build --compile --linux-x64-musl supervisor/index.ts --outfile=dist/supervisor
+RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${GITHUB_REF_NAME}"'"' --linux-x64-musl supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 alpine:3.20

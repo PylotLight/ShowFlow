@@ -12,6 +12,7 @@ import {
   verifyArtifact,
   releasePath,
   readState,
+  SUPERVISOR_VERSION,
 } from "./state";
 
 export async function ensureDataDirs(): Promise<void> {
@@ -45,6 +46,13 @@ export async function ensureBootstrapInstalled(): Promise<string | null> {
   }
 
   const manifest = await bootstrapManifestFile.json();
+  if (manifest.minimumSupervisorVersion && compareVersions(SUPERVISOR_VERSION, manifest.minimumSupervisorVersion) < 0) {
+    console.error(
+      `[supervisor] bootstrap release requires supervisor ${manifest.minimumSupervisorVersion}, ` +
+      `but this supervisor is version ${SUPERVISOR_VERSION}. The image is too old to run its own bundled release — rebuild the image with a newer supervisor.`,
+    );
+    return null;
+  }
   const dir = releasePath(manifest.releaseId);
   await mkdir(dir, { recursive: true });
   await Bun.write(`${dir}/${manifest.artifact.name}`, bootstrapAppFile);
@@ -64,4 +72,17 @@ export async function ensureBootstrapInstalled(): Promise<string | null> {
 
   console.log(`[supervisor] installed bootstrap release "${manifest.releaseId}" as lastKnownGood.`);
   return manifest.releaseId;
+}
+
+/** Simple semver comparison. Returns <0, 0, or >0. Handles "0.1.0" and "v0.1.0" formats. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.replace(/^v/i, "").split(".").map(Number);
+  const pb = b.replace(/^v/i, "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (isNaN(na) || isNaN(nb)) continue; // non-semver strings (e.g. "development") compare equal
+    if (na !== nb) return na - nb;
+  }
+  return 0;
 }

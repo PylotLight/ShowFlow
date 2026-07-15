@@ -31,7 +31,7 @@ RUN bun run build.ts
 # Output goes to dist/ rather than ./supervisor — the latter collides with
 # the supervisor/ *source* directory (supervisor/index.ts) and Bun refuses
 # to overwrite a directory with a file.
-RUN bun build --compile --linux-x64 supervisor/index.ts --outfile=dist/supervisor
+RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${GITHUB_REF_NAME}"'"' --linux-x64 supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot

@@ -1511,21 +1511,89 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
 }
 
 function UpdatesPanel() {
-  const [loading, setLoading] = React.useState(true);
+  const [token, setToken] = React.useState(() => {
+    try { return localStorage.getItem("showflow:adminToken") || ""; } catch { return ""; }
+  });
   const [status, setStatus] = React.useState<any>(null);
+  const [releases, setReleases] = React.useState<any[] | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [actionLoading, setActionLoading] = React.useState<string | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    fetch("/api/system/status")
-      .then(r => r.json())
-      .then(d => setStatus(d))
-      .catch(() => {})
+  function headers() {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  function fetchAll() {
+    setLoading(true);
+    setErr(null);
+    Promise.all([
+      fetch("/api/admin/updates/status", { headers: headers() }).then(r => r.ok ? r.json() : Promise.reject(r.status)),
+      fetch("/api/admin/updates/available", { headers: headers() }).then(r => r.ok ? r.json() : r.status === 401 ? { releases: [] } : Promise.reject(r.status)),
+    ])
+      .then(([s, a]) => { setStatus(s); setReleases(a.releases ?? []); })
+      .catch(e => setErr(typeof e === "number" ? (e === 401 ? "Invalid or missing admin token" : `Server returned ${e}`) : String(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }
 
-  if (loading) {
+  React.useEffect(() => { if (token) fetchAll(); else { setLoading(false); setStatus(null); setReleases(null); } }, [token]);
+
+  function saveToken(t: string) {
+    setToken(t);
+    try { localStorage.setItem("showflow:adminToken", t); } catch {}
+  }
+
+  async function doInstall(githubReleaseId: number) {
+    setActionLoading(`install-${githubReleaseId}`);
+    setErr(null);
+    setInstalledReleaseId(null);
+    try {
+      const res = await fetch("/api/admin/updates/install", {
+        method: "POST",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ githubReleaseId }),
+      });
+      const data = await res.json();
+      if (!data.ok) { setErr(data.message || "Install failed"); return; }
+      if (data.releaseId) setInstalledReleaseId(data.releaseId);
+      fetchAll();
+    } catch (e) { setErr(String(e)); }
+    finally { setActionLoading(null); }
+  }
+
+  async function doActivate(releaseId: string) {
+    setActionLoading(`activate-${releaseId}`);
+    setErr(null);
+    try {
+      const { markPendingRelease } = await import("@frontend/register-sw");
+      markPendingRelease(releaseId);
+      const res = await fetch("/api/admin/updates/activate", {
+        method: "POST",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ releaseId }),
+      });
+      const data = await res.json();
+      if (data.timedOut) return;
+      if (!data.ok) { setErr(data.message || "Activation failed"); }
+    } catch (e) { setErr(String(e)); }
+    finally { setActionLoading(null); }
+  }
+
+  if (!token) {
     return (
-      <GlassPanel className="p-6 flex items-center justify-center">
-        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+      <GlassPanel className="p-6 space-y-4">
+        <div>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Release Management</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">Enter your admin token to manage updates</p>
+        </div>
+        <Input
+          type="password"
+          placeholder="SHOWFLOW_ADMIN_TOKEN"
+          value={token}
+          onChange={e => saveToken(e.target.value)}
+          className="font-mono text-xs"
+        />
       </GlassPanel>
     );
   }
@@ -1533,34 +1601,122 @@ function UpdatesPanel() {
   return (
     <div className="space-y-6">
       <GlassPanel className="p-6 space-y-4">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Current Release</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">The version of ShowFlow currently running</p>
-        </div>
-        <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3 border border-white/5">
+        <div className="flex items-center justify-between">
           <div>
-            <span className="font-mono text-xs text-white/90">Version</span>
-            <p className="font-mono text-sm text-signal mt-0.5">{status?.version || "—"}</p>
+            <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Update Status</h3>
+            <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
           </div>
-          <div className="text-right">
-            <span className="font-mono text-xs text-white/90">Build</span>
-            <p className="font-mono text-xs text-muted-foreground mt-0.5">{(status?.releaseId || "—").slice(0, 12)}</p>
-          </div>
+          <Button variant="ghost" size="sm" onClick={fetchAll} disabled={loading}>
+            <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+          </Button>
         </div>
+        {status && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">Active</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.activeReleaseId ? status.activeReleaseId.slice(0, 12) : "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">Phase</span>
+              <p className="font-mono text-xs text-signal mt-0.5 capitalize">{status.phase || "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">App Version</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.appVersion || "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">lastKnownGood</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.lastKnownGood ? status.lastKnownGood.slice(0, 12) : "—"}</p>
+            </div>
+          </div>
+        )}
+        {!status && !loading && (
+          <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
+            <p className="font-mono text-xs text-muted-foreground">Could not reach supervisor status</p>
+          </div>
+        )}
+        {installedReleaseId && (
+          <div className="rounded-lg bg-signal/10 border border-signal/30 p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-signal font-medium">Release installed</p>
+              <p className="font-mono text-[10px] text-white/60 mt-0.5">{installedReleaseId}</p>
+            </div>
+            <Button
+              variant="default"
+              size="sm"
+              disabled={actionLoading !== null}
+              onClick={() => doActivate(installedReleaseId)}
+            >
+              {actionLoading === `activate-${installedReleaseId}` ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                "Activate"
+              )}
+            </Button>
+          </div>
+        )}
       </GlassPanel>
+
+      {err && (
+        <div className="rounded-lg bg-red-900/20 border border-red-500/30 p-3">
+          <p className="font-mono text-xs text-red-400">{err}</p>
+        </div>
+      )}
 
       <GlassPanel className="p-6 space-y-4">
         <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Updates</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">
-            New releases are installed through the supervisor. Check back for update availability.
-          </p>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Releases</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">Published GitHub releases with showflow + manifest.json assets</p>
         </div>
-        <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
-          <p className="font-mono text-xs text-muted-foreground">
-            Release discovery not configured
-          </p>
-        </div>
+        {loading && (
+          <div className="flex items-center justify-center py-6">
+            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {!loading && releases !== null && releases.length === 0 && (
+          <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
+            <p className="font-mono text-xs text-muted-foreground">
+              No installable releases found. Check that GITHUB_TOKEN and GITHUB_REPO environment variables are set on the server.
+            </p>
+          </div>
+        )}
+        {!loading && releases !== null && releases.length > 0 && (
+          <div className="space-y-2">
+            {releases.map((r: any) => {
+              const isCurrent = r.isLikelyCurrent;
+              return (
+                <div key={r.githubReleaseId} className="flex items-start justify-between rounded-lg bg-white/[0.03] p-3 border border-white/5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-white/90 truncate">{r.tagName}</span>
+                      {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded">current</span>}
+                      {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">pre</span>}
+                      {!r.hasRequiredAssets && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded">missing assets</span>}
+                    </div>
+                    {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{r.publishedAt ? new Date(r.publishedAt).toLocaleDateString() : "—"}</p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3 shrink-0">
+                    {r.hasRequiredAssets && !isCurrent && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={actionLoading !== null}
+                        onClick={() => doInstall(r.githubReleaseId)}
+                      >
+                        {actionLoading === `install-${r.githubReleaseId}` ? (
+                          <Loader2Icon className="size-3 animate-spin" />
+                        ) : (
+                          <DownloadIcon className="size-3" />
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </GlassPanel>
     </div>
   );
