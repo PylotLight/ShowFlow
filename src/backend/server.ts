@@ -54,6 +54,9 @@ const offlineAsset = offlineAssetRaw as unknown as string;
 // build step, so the define substitution never happens there).
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
+
+
+
 import { db, ConfigSchema, ProwlarrConfigSchema, type Config } from "./db";
 import * as schema from "./db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -74,8 +77,18 @@ import { SonarrImporter, type SonarrTypeMapping } from "./providers/sonarr/impor
 import { SonarrConfigSchema, JellyfinConfigSchema } from "./db";
 import { JellyfinClient } from "./providers/jellyfin/client";
 import { JellyfinSync } from "./providers/jellyfin/sync";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, randomUUID } from "node:crypto";
 import { listReleases, downloadAndInstall, triggerActivate, getSupervisorStatus } from "./core/updates_manager";
+
+const ADMIN_TOKEN = initAdminToken();
+
+function initAdminToken(): string {
+  const existing = db.getSetting("admin_token");
+  if (existing) return existing;
+  const token = randomUUID();
+  db.setSetting("admin_token", token);
+  return token;
+}
 
 // ---- Config -----------------------------------------------------------
 
@@ -162,11 +175,9 @@ function errorResponse(err: unknown, status = 400) {
 // arbitrary binary fetched from GitHub and can trigger a process restart.
 // Gated separately behind its own token rather than piggybacking on
 // anything user-facing, since there's no broader auth system to hook into
-// yet. Fails closed: an unset token disables these routes entirely rather
-// than defaulting to "open".
+// yet. Generated once on first boot and persisted to the database.
 function checkAdminAuth(req: Request): boolean {
-  const token = process.env.SHOWFLOW_ADMIN_TOKEN;
-  if (!token) return false;
+  const token = ADMIN_TOKEN;
   const header = req.headers.get("authorization") ?? "";
   const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
   // timingSafeEqual throws on mismatched lengths rather than returning
@@ -2416,12 +2427,19 @@ const routeDefinitions = {
     },
   },
 
+  // ---- Admin token (unauthenticated - exposes the persisted token to the
+  // frontend so it never needs manual entry) --------------------------------
+  "/api/admin/token": {
+    GET() {
+      return json({ token: ADMIN_TOKEN });
+    },
+  },
+
   // ---- Updates / Release management --------------------------------------
   // Bridges the supervisor's loopback-only admin API (127.0.0.1:9090, no
   // auth of its own — see supervisor/index.ts) out to a public, token-
-  // authenticated surface. Every route here requires SHOWFLOW_ADMIN_TOKEN;
-  // see checkAdminAuth() above for why this is gated separately from the
-  // rest of the (currently unauthenticated) API.
+  // authenticated surface. The admin token is generated once on first boot
+  // and persisted to the database — see checkAdminAuth() above.
 
   "/api/admin/updates/available": {
     async GET(req: RouteReq) {

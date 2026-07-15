@@ -76,7 +76,7 @@ export async function readState(): Promise<State> {
  * SIGTERM handler racing with an in-progress activation) queue rather than
  * silently overwriting each other's writes.
  */
-let stateWriteLock: Promise<void> = Promise.resolve();
+let stateWriteLock: Promise<State> = Promise.resolve<State>(undefined as unknown as State);
 
 export async function writeStateAtomic(state: Partial<State>): Promise<State> {
   await stateWriteLock;

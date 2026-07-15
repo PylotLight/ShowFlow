@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 
 // Cross-compile target. Default: bun-linux-x64 (glibc/Debian).
 // Set BUILD_TARGET=bun-linux-x64-musl for Alpine runtime.
-const TARGET = process.env.BUILD_TARGET ?? "bun-linux-x64";
+const TARGET = (process.env.BUILD_TARGET ?? "bun-linux-x64") as "bun-linux-x64" | "bun-linux-x64-musl";
 const OUTFILE = "showflow";
 const ARTIFACT_PATH = OUTFILE;
 

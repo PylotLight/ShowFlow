@@ -1511,9 +1511,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
 }
 
 function UpdatesPanel() {
-  const [token, setToken] = React.useState(() => {
-    try { return localStorage.getItem("showflow:adminToken") || ""; } catch { return ""; }
-  });
+  const [token, setToken] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<any>(null);
   const [releases, setReleases] = React.useState<any[]>([]);
   const [hasMore, setHasMore] = React.useState(false);
@@ -1524,8 +1522,8 @@ function UpdatesPanel() {
   const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
   const pageRef = React.useRef(1);
 
-  function headers() {
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  function headers(): Record<string, string> {
+    return { Authorization: `Bearer ${token}` };
   }
 
   function fetchAll() {
@@ -1534,10 +1532,10 @@ function UpdatesPanel() {
     pageRef.current = 1;
     Promise.all([
       fetch("/api/admin/updates/status", { headers: headers() }).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-      fetch("/api/admin/updates/available?page=1", { headers: headers() }).then(r => r.ok ? r.json() : r.status === 401 ? { releases: [], hasMore: false } : Promise.reject(r.status)),
+      fetch("/api/admin/updates/available?page=1", { headers: headers() }).then(r => r.ok ? r.json() : { releases: [], hasMore: false }),
     ])
       .then(([s, a]) => { setStatus(s); setReleases(a.releases ?? []); setHasMore(a.hasMore ?? false); })
-      .catch(e => setErr(typeof e === "number" ? (e === 401 ? "Invalid or missing admin token" : `Server returned ${e}`) : String(e)))
+      .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   }
 
@@ -1559,12 +1557,13 @@ function UpdatesPanel() {
     }
   }
 
-  React.useEffect(() => { if (token) fetchAll(); else { setLoading(false); setStatus(null); setReleases([]); setHasMore(false); } }, [token]);
-
-  function saveToken(t: string) {
-    setToken(t);
-    try { localStorage.setItem("showflow:adminToken", t); } catch {}
-  }
+  React.useEffect(() => {
+    fetch("/api/admin/token")
+      .then(r => r.json())
+      .then(d => { setToken(d.token); fetchAll(); })
+      .catch(e => setErr(String(e)))
+      .finally(() => setLoading(false));
+  }, []);
 
   async function doInstall(githubReleaseId: number) {
     setActionLoading(`install-${githubReleaseId}`);
@@ -1605,29 +1604,6 @@ function UpdatesPanel() {
     finally { setActionLoading(null); }
   }
 
-  if (!token) {
-    return (
-      <GlassPanel className="p-6 space-y-4">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Release Management</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Enter your admin token to manage updates</p>
-        </div>
-        <Input
-          type="password"
-          placeholder="SHOWFLOW_ADMIN_TOKEN"
-          value={token}
-          onChange={e => saveToken(e.target.value)}
-          className="font-mono text-xs"
-        />
-      </GlassPanel>
-    );
-  }
-
-  function clearToken() {
-    saveToken("");
-    try { localStorage.removeItem("showflow:adminToken"); } catch {}
-  }
-
   return (
     <div className="space-y-6">
       <GlassPanel className="p-6 space-y-4">
@@ -1637,7 +1613,6 @@ function UpdatesPanel() {
             <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={clearToken} className="text-[10px] text-muted-foreground hover:text-white/70 underline transition-colors">clear token</button>
             <Button variant="ghost" size="sm" onClick={fetchAll} disabled={loading}>
               <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>

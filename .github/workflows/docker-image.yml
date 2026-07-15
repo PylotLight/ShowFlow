@@ -56,9 +56,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # On every published GitHub Release, build the standalone binary and upload
-  # it plus its manifest.json as release assets. These are what the app-side
-  # updates_manager.ts downloads and hands to the supervisor.
+  # On every published GitHub Release, build the standalone binary, package it
+  # with manifest.json into a single tarball (showflow-<sha>.tar.gz), and upload
+  # that as the release asset.
   publish-release-assets:
     needs: build-and-push
     if: github.event_name == 'release'
@@ -78,7 +78,10 @@ jobs:
       - name: Build release binary + manifest
         run: GITHUB_SHA=${{ github.sha }} GITHUB_REF_NAME=${{ github.ref_name }} BUILD_TARGET=bun-linux-x64 bun run build.ts
 
-      - name: Upload assets to release
-        run: gh release upload ${{ github.ref_name }} showflow manifest.json
+      - name: Package release assets
+        run: tar -czf showflow-${{ github.sha }}.tar.gz showflow manifest.json
+
+      - name: Upload release asset
+        run: gh release upload ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

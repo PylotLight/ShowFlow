@@ -14,8 +14,7 @@ docker run -d \
   -p 3000:3000 \
   -v /path/to/data:/data \
   -v /path/to/media:/media \
-  -e SHOWFLOW_ADMIN_TOKEN=<your-token> \
-  ghcr.io/lwragg002/showflow:latest
+  ghcr.io/PylotLight/showflow:latest
 ```
 
 Open `http://localhost:3000` — the wizard walks through basic setup (media paths, indexer, API keys).
@@ -26,11 +25,12 @@ Configured via environment variables or the settings UI:
 
 | Variable | Purpose |
 |---|---|
-| `SHOWFLOW_ADMIN_TOKEN` | API & web UI auth |
-| `PROWLARR_API_KEY` | Indexer integration |
+| `SHOWFLOW_DATA_DIR` | Database & state storage (default: `/data`) |
+| `SHOWFLOW_DEBUG` | Enable debug logging (`true` / unset) |
 | `TMDB_API_KEY` | Metadata & poster images |
-| `DATA_DIR` | Database & state storage |
-| `LIBRARY_PATH` | Root media folder |
+| `TVDB_API_KEY` | TV metadata (TheTVDB) |
+| `TVDB_PIN` | TVDB API PIN (if required) |
+| `http_proxy` / `https_proxy` / `all_proxy` / `no_proxy` | HTTP proxy configuration |
 
 ## Architecture
 
@@ -42,6 +42,6 @@ See [docs/arch.md](docs/arch.md) for the full architecture and API reference.
 
 ## Caveats
 
-- **TV shows only** — movie support is not planned.
+- **TV shows only** — movie support is planned for a future release.
 - **Single-user** — no multi-user or permission system.
 - **Beta quality** — the release/update pipeline is still hardening; manual image pulls are the stable path.
