@@ -1,72 +1,47 @@
-# ShowFlow Documentation
+# ShowFlow
 
-ShowFlow is an automated media library manager inspired by Sonarr/Radarr.
+**Automated media library manager.** Track shows, define quality preferences, and let ShowFlow find, download, and upgrade episodes — similar to Sonarr/Radarr but self-contained in a single Docker image.
 
-## Core Architecture
+## Status
 
-### Quality & Profile Engine
-ShowFlow uses a scoring system to determine the "best" version of a media file.
-- **Quality Definitions**: Defined ranks (e.g., 1080p > 720p).
-- **Custom Formats**: Regex-based patterns that add/subtract scores (e.g., "Dual Audio" +100).
-- **Profiles**: Groups of Custom Formats and a quality cutoff.
+Automatic episode grabbing and blackhole importing are functional. Quality engine with custom formats, upgrade logic, and profile management is in place. The release/supervisor pipeline (Docker deployment with over-the-air updates) is pending refinement and testing.
 
-### Import Pipeline (Blackhole)
-The `BlackholeClient` watches a folder for new files:
-1. **Resolution**: Uses the `Oracle` to determine which show/episode the file belongs to.
-2. **Upgrade Check**: Compares the new file's score against the existing file in the library.
-3. **Action**:
-   - If it's an **upgrade**: Existing file is removed, new file is moved to library.
-   - If it's **not an upgrade**: File is moved to `manualReviewPath` (if configured) for manual intervention.
-   - Otherwise: File is skipped.
+## Quick Start
 
-### Automated Grabber
-The `GrabberService` automates the search and acquisition of missing or upgradable episodes:
-1. **Search**: Queries indexers (e.g., Prowlarr) for the specific episode.
-2. **Scoring**: Ranks all results using the `QualityEngine`.
-3. **Decision**: Checks if the best result is better than what we already have.
-4. **Action**: Triggers the indexer's `grab` command to start the download.
+```sh
+docker run -d \
+  --name showflow \
+  -p 3000:3000 \
+  -v /path/to/data:/data \
+  -v /path/to/media:/media \
+  -e SHOWFLOW_ADMIN_TOKEN=<your-token> \
+  ghcr.io/lwragg002/showflow:latest
+```
 
----
+Open `http://localhost:3000` — the wizard walks through basic setup (media paths, indexer, API keys).
 
-## API Reference
+## Configuration
 
-### Configuration & Settings
-- `GET /api/config`: Get current validated system configuration.
-- `PATCH /api/config`: Update specific configuration fields.
-- `GET /api/settings`: List all raw database settings.
-- `POST /api/settings`: Set a raw configuration key/value pair.
-- `DELETE /api/settings`: Remove a configuration key.
+Configured via environment variables or the settings UI:
 
-### System Management
-- `POST /api/system/scan`: Trigger a manual library scan.
-- `POST /api/system/watch/start`: Start the Blackhole import watcher.
-- `POST /api/system/watch/stop`: Stop the Blackhole import watcher.
+| Variable | Purpose |
+|---|---|
+| `SHOWFLOW_ADMIN_TOKEN` | API & web UI auth |
+| `PROWLARR_API_KEY` | Indexer integration |
+| `TMDB_API_KEY` | Metadata & poster images |
+| `DATA_DIR` | Database & state storage |
+| `LIBRARY_PATH` | Root media folder |
 
-### Quality Management
-- `GET /api/qualities`: List all quality definitions.
-- `POST /api/qualities`: Create/Update a quality definition.
-- `GET /api/profiles`: List all quality profiles.
-- `POST /api/profiles`: Create/Update a quality profile.
-- `GET /api/profiles/:id/formats`: List custom formats for a profile.
-- `POST /api/profiles/:id/formats`: Add a custom format to a profile.
-- `DELETE /api/profiles/:id/formats`: Remove a custom format from a profile.
-- `GET /api/custom-formats`: List all custom format definitions.
-- `POST /api/custom-formats`: Create/Update a custom format definition.
+## Architecture
 
-### Library & Shows
-- `GET /api/shows`: List all tracked shows.
-- `POST /api/shows`: Add a show to the library.
-- `GET /api/shows/:id`: Get details for a specific show.
-- `PATCH /api/shows/:id`: Update show profile or title.
-- `DELETE /api/shows/:id`: Remove a show.
-- `POST /api/shows/:id/sync`: Force a metadata sync for a show.
+- **Backend**: Bun + SQLite — quality engine, show resolution, indexer integration
+- **Frontend**: React (single HTML import) — show management, calendar, settings
+- **Supervisor**: Standalone binary — port proxy, graceful handoff, over-the-air updates
 
-### Episodes & Automation
-- `GET /api/shows/:id/seasons`: List seasons for a show.
-- `GET /api/shows/:id/seasons/:season/episodes`: List episodes in a season.
-- `PATCH /api/shows/:id/seasons/:season/episodes/:episode/tracked`: Toggle tracking status.
-- `POST /api/shows/:id/seasons/:season/episodes/:episode/grab`: Search for and grab the best available release for an episode.
+See [docs/arch.md](docs/arch.md) for the full architecture and API reference.
 
-### Utility
-- `GET /api/calendar`: Get upcoming episodes for the next X days.
-- `GET /api/images/poster/:source/:id`: Proxy for show posters.
+## Caveats
+
+- **TV shows only** — movie support is not planned.
+- **Single-user** — no multi-user or permission system.
+- **Beta quality** — the release/update pipeline is still hardening; manual image pulls are the stable path.
