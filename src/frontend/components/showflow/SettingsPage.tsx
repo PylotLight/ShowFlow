@@ -1515,11 +1515,14 @@ function UpdatesPanel() {
     try { return localStorage.getItem("showflow:adminToken") || ""; } catch { return ""; }
   });
   const [status, setStatus] = React.useState<any>(null);
-  const [releases, setReleases] = React.useState<any[] | null>(null);
+  const [releases, setReleases] = React.useState<any[]>([]);
+  const [hasMore, setHasMore] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
+  const pageRef = React.useRef(1);
 
   function headers() {
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -1528,16 +1531,35 @@ function UpdatesPanel() {
   function fetchAll() {
     setLoading(true);
     setErr(null);
+    pageRef.current = 1;
     Promise.all([
       fetch("/api/admin/updates/status", { headers: headers() }).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-      fetch("/api/admin/updates/available", { headers: headers() }).then(r => r.ok ? r.json() : r.status === 401 ? { releases: [] } : Promise.reject(r.status)),
+      fetch("/api/admin/updates/available?page=1", { headers: headers() }).then(r => r.ok ? r.json() : r.status === 401 ? { releases: [], hasMore: false } : Promise.reject(r.status)),
     ])
-      .then(([s, a]) => { setStatus(s); setReleases(a.releases ?? []); })
+      .then(([s, a]) => { setStatus(s); setReleases(a.releases ?? []); setHasMore(a.hasMore ?? false); })
       .catch(e => setErr(typeof e === "number" ? (e === 401 ? "Invalid or missing admin token" : `Server returned ${e}`) : String(e)))
       .finally(() => setLoading(false));
   }
 
-  React.useEffect(() => { if (token) fetchAll(); else { setLoading(false); setStatus(null); setReleases(null); } }, [token]);
+  async function loadMore() {
+    setLoadingMore(true);
+    setErr(null);
+    const next = pageRef.current + 1;
+    try {
+      const res = await fetch(`/api/admin/updates/available?page=${next}`, { headers: headers() });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const a = await res.json();
+      setReleases(prev => [...prev, ...(a.releases ?? [])]);
+      setHasMore(a.hasMore ?? false);
+      pageRef.current = next;
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  React.useEffect(() => { if (token) fetchAll(); else { setLoading(false); setStatus(null); setReleases([]); setHasMore(false); } }, [token]);
 
   function saveToken(t: string) {
     setToken(t);
@@ -1673,14 +1695,14 @@ function UpdatesPanel() {
             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        {!loading && releases !== null && releases.length === 0 && (
+        {!loading && releases.length === 0 && (
           <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
             <p className="font-mono text-xs text-muted-foreground">
-              No installable releases found. Check that GITHUB_TOKEN and GITHUB_REPO environment variables are set on the server.
+              No releases found. Check that GITHUB_TOKEN and GITHUB_REPO environment variables are set on the server.
             </p>
           </div>
         )}
-        {!loading && releases !== null && releases.length > 0 && (
+        {!loading && releases.length > 0 && (
           <div className="space-y-2">
             {releases.map((r: any) => {
               const isCurrent = r.isLikelyCurrent;
@@ -1715,6 +1737,19 @@ function UpdatesPanel() {
                 </div>
               );
             })}
+            {hasMore && (
+              <div className="pt-2 text-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={loadingMore}
+                  onClick={loadMore}
+                >
+                  {loadingMore ? <Loader2Icon className="size-3.5 animate-spin mr-1.5" /> : null}
+                  Load older releases
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </GlassPanel>

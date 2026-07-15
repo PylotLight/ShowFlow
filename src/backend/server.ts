@@ -2427,8 +2427,10 @@ const routeDefinitions = {
     async GET(req: RouteReq) {
       if (!checkAdminAuth(req)) return unauthorized();
       try {
-        const releases = await listReleases(BUILD_VERSION);
-        return json({ current: { releaseId: BUILD_COMMIT, version: BUILD_VERSION }, releases });
+        const url = new URL(req.url);
+        const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+        const result = await listReleases(BUILD_VERSION, page);
+        return json({ current: { releaseId: BUILD_COMMIT, version: BUILD_VERSION }, ...result });
       } catch (err) {
         return errorResponse(err, 502);
       }

@@ -83,17 +83,19 @@ function githubHeaders(token: string, accept = "application/vnd.github+json"): H
 
 // ---- Release discovery -----------------------------------------------
 
-export async function listReleases(currentVersion: string): Promise<ReleaseSummary[]> {
+const RELEASES_PER_PAGE = 100;
+
+export async function listReleases(currentVersion: string, page = 1): Promise<{ releases: ReleaseSummary[]; hasMore: boolean }> {
   const { token, repo } = githubConfig();
-  const res = await fetch(`${GITHUB_API}/repos/${repo}/releases?per_page=20`, {
+  const res = await fetch(`${GITHUB_API}/repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`, {
     headers: githubHeaders(token),
   });
   if (!res.ok) {
     throw new Error(`GitHub releases API returned ${res.status}: ${await res.text()}`);
   }
-  const releases = (await res.json()) as any[];
+  const raw = (await res.json()) as any[];
 
-  return releases
+  const releases = raw
     .filter((r) => !r.draft)
     .map((r): ReleaseSummary => {
       const assets = (r.assets ?? []) as any[];
@@ -110,6 +112,8 @@ export async function listReleases(currentVersion: string): Promise<ReleaseSumma
         assets: assets.map((a) => ({ id: a.id, name: a.name, sizeBytes: a.size })),
       };
     });
+
+  return { releases, hasMore: raw.length === RELEASES_PER_PAGE };
 }
 
 // ---- Download + local install (writes to /data/downloads/<releaseId>) -
