@@ -148,6 +148,8 @@ const TASKS: Record<TaskName, TaskDefinition> = {
 };
 
 export class Scheduler {
+  private intervalHandle: ReturnType<typeof setInterval> | null = null;
+
   constructor(private config: Config) {}
 
   /**
@@ -288,8 +290,21 @@ export class Scheduler {
   start() {
     this.initializeTasks();
     // Check every minute
-    setInterval(() => this.runPendingTasks(), 60 * 1000);
+    this.intervalHandle = setInterval(() => this.runPendingTasks(), 60 * 1000);
     // Run once at startup
     this.runPendingTasks();
+  }
+
+  /**
+   * Stop the scheduler's interval timer. Called during graceful shutdown so
+   * SIGTERM handling doesn't race a task against process exit — this only
+   * stops new runs from being scheduled, it doesn't cancel a task that's
+   * already mid-execution.
+   */
+  async stop() {
+    if (this.intervalHandle) {
+      clearInterval(this.intervalHandle);
+      this.intervalHandle = null;
+    }
   }
 }

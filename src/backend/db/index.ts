@@ -104,6 +104,21 @@ export class DatabaseManager {
     this.init();
   }
 
+  /**
+   * Checkpoint WAL and close the underlying connection. Called from the
+   * SIGTERM handler as the last step before process.exit() — this is what
+   * makes the stop-start handoff safe: the candidate process for the next
+   * release isn't allowed to open showflow.db until this has completed.
+   */
+  close() {
+    try {
+      this.db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch {
+      // best-effort — closing still proceeds even if checkpointing fails
+    }
+    this.db.close();
+  }
+
   private init() {
     // ---- New schema tables (managed by Drizzle) ---------------------------
 

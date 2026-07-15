@@ -7,6 +7,35 @@ type RouteReq = Request & { params: Record<string, string> };
 import fs from "node:fs";
 import path from "node:path";
 import index from "../frontend/index.html";
+
+// favicon.svg is linked from index.html; logo.svg is only ever referenced
+// as a runtime string (`<img src="/assets/logo.svg">` in Sidebar.tsx), so
+// Bun's bundler can't discover it through static analysis of the HTML/JS
+// graph. Embedding both explicitly with `with { type: "file" }` bakes them
+// into the compiled binary itself, so no separate dist/assets folder needs
+// to exist on disk at runtime — see the /assets/:file route below.
+import faviconAsset from "../frontend/assets/favicon.svg" with { type: "file" };
+import logoAsset from "../frontend/assets/logo.svg" with { type: "file" };
+
+const embeddedAssets: Record<string, string> = {
+  "favicon.svg": faviconAsset,
+  "logo.svg": logoAsset,
+};
+
+// The service worker and its offline fallback page must be served from
+// fixed top-level paths (a SW's own scope is the directory it's served
+// from) — Bun's HTML-import bundler would otherwise fingerprint/hash them
+// like any other asset, which breaks `navigator.serviceWorker.register("/sw.js")`.
+// Embedding as `{ type: "file" }` keeps them out of that bundling path and
+// bakes them into the compiled binary like the other embedded assets above.
+import swAsset from "../frontend/sw.js" with { type: "file" };
+import offlineAsset from "../frontend/offline.html" with { type: "file" };
+
+// Compiled in by build.ts's `define` block — see bun-env.d.ts for why these
+// are typed as possibly-undefined (dev mode via `bun --hot` never runs the
+// build step, so the define substitution never happens there).
+const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
+const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
 import { db, ConfigSchema, ProwlarrConfigSchema, type Config } from "./db";
 import * as schema from "./db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -22,7 +51,6 @@ import type { IndexerResult } from "./providers/indexers/types";
 import { NATIVE_INDEXER_META, type NativeIndexerConfig, type NativeIndexerId } from "./providers/indexers/native/types";
 import { runBackup, listBackups, uploadBackup, restoreBackup } from "../../scripts/backup";
 import { createApiDebugLog, subscribeDebugLogs, getDebugLogs, clearDebugLogs, isDebugEnabled } from "./core/debug";
-import { GITHUB_TOKEN, GITHUB_REPO } from "./feedback/config";
 import { SonarrClient } from "./providers/sonarr/client";
 import { SonarrImporter, type SonarrTypeMapping } from "./providers/sonarr/import";
 import { SonarrConfigSchema, JellyfinConfigSchema } from "./db";
@@ -30,7 +58,6 @@ import { JellyfinClient } from "./providers/jellyfin/client";
 import { JellyfinSync } from "./providers/jellyfin/sync";
 
 // ---- Config -----------------------------------------------------------
-// Migrated from config.json to database settings.
 
 let cachedConfig: Config | null = null;
 let cachedConfigTime = 0;
@@ -52,14 +79,6 @@ function loadConfig(): Config {
 
   if (Object.keys(configObj).length === 0) {
     // Auto-init with defaults for a fresh database
-    const configPath = path.join(process.cwd(), "config.json");
-    if (fs.existsSync(configPath)) {
-      const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      for (const [k, v] of Object.entries(raw)) {
-        db.setSetting(k, v);
-      }
-      return loadConfig();
-    }
     console.info("[config] No config found — applying defaults for fresh database");
     db.setSetting("defaultProvider", "tvdb");
     db.setSetting("onCollision", "skip");
@@ -230,6 +249,12 @@ const NO_SIGNAL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="500" heigh
 // Track WebSocket clients for debug log streaming
 const debugWsClients = new Set<WebSocket>();
 
+// Set by the SIGTERM handler below. /internal/ready checks this first and
+// immediately returns 503 once it's set, so the supervisor's readiness
+// polling and the shutdown-drain window use the exact same signal instead
+// of two independently-maintained notions of "still up."
+let shuttingDown = false;
+
 function wrapWithDebug(path: string, method: string, handler: Function): Function {
   return async function (...args: any[]) {
     if (!isDebugEnabled()) return (handler as any)(...args);
@@ -259,17 +284,45 @@ function wrapWithDebug(path: string, method: string, handler: Function): Functio
 }
 
 const routeDefinitions = {
+  // Previously read from `dist/assets` on disk via an `import.meta.dir`-
+  // relative path, which depended on a separate `bun run build` output
+  // being copied into the image at a matching location. Now served from
+  // the embedded files imported above — no disk dependency, works
+  // identically whether run via `bun src/backend/server.ts` in dev or as
+  // the compiled `showflow` binary in production.
   "/assets/:file": {
     GET(req: RouteReq) {
       const file = req.params.file!;
+      const embedded = embeddedAssets[file];
+      if (!embedded) return new Response("", { status: 404 });
       const ext = file.split(".").pop() ?? '';
       const types: Record<string, string> = { svg: "image/svg+xml", png: "image/png", css: "text/css", js: "application/javascript" };
-      const p = path.join(import.meta.dir, "../../dist/assets", file);
-      if (fs.existsSync(p)) {
-        return new Response(Bun.file(p), { headers: { "Content-Type": types[ext] || "application/octet-stream" } });
-      }
-      return new Response("", { status: 404 });
+      return new Response(Bun.file(embedded), { headers: { "Content-Type": types[ext] || "application/octet-stream" } });
     }
+  },
+
+  // Served at the fixed top-level path a SW registration/scope requires.
+  // No-cache: browsers only check for a new SW script periodically (~24h)
+  // otherwise, and a stale cached SW after a release update is exactly the
+  // kind of mismatch this whole mechanism exists to avoid.
+  "/sw.js": {
+    GET() {
+      return new Response(Bun.file(swAsset), {
+        headers: {
+          "Content-Type": "application/javascript",
+          "Cache-Control": "no-cache",
+          "Service-Worker-Allowed": "/",
+        },
+      });
+    },
+  },
+
+  "/offline.html": {
+    GET() {
+      return new Response(Bun.file(offlineAsset), {
+        headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
+      });
+    },
   },
 
   // Serves the bundled React app for any path that isn't an /api/* route
@@ -2164,8 +2217,12 @@ const routeDefinitions = {
           return errorResponse("Message is required");
         }
 
-        const token = GITHUB_TOKEN;
-        const repo = GITHUB_REPO;
+        const token = process.env.GITHUB_TOKEN;
+        const repo = process.env.GITHUB_REPO;
+
+        if (!token || !repo) {
+          return errorResponse("Feedback is not configured — set GITHUB_TOKEN and GITHUB_REPO environment variables", 501);
+        }
 
         const lines = [
           `**Description**`,
@@ -2304,12 +2361,35 @@ const routeDefinitions = {
       return new Response("Upgrade failed", { status: 400 });
     },
   },
+
+  // ---- Readiness ---------------------------------------------------------
+  // Proves DB health, not just process-up. The supervisor requires this to
+  // pass several times in a row (see supervisor/index.ts) before treating a
+  // release as stable — a process can answer once and then wedge.
+  "/internal/ready": {
+    async GET() {
+      if (shuttingDown) {
+        return json({ ready: false, error: "shutting down" }, { status: 503 });
+      }
+      try {
+        db.drizz.get(sql`select 1`);
+        return json({
+          ready: true,
+          releaseId: BUILD_COMMIT,
+          version: BUILD_VERSION,
+          database: "ready",
+        });
+      } catch (err) {
+        return json({ ready: false, error: String(err) }, { status: 503 });
+      }
+    },
+  },
 };
 
 function wrapRouteHandlers(defs: Record<string, any>): any {
   for (const [path, handlers] of Object.entries(defs)) {
     if (typeof handlers === 'object' && handlers !== null && !(handlers instanceof Response)) {
-      if (path === "/*" || path.startsWith('/assets/') || path.startsWith('/api/debug')) continue;
+      if (path === "/*" || path === "/sw.js" || path === "/offline.html" || path.startsWith('/assets/') || path.startsWith('/api/debug') || path.startsWith('/internal/')) continue;
       for (const [method, handler] of Object.entries(handlers)) {
         if (typeof handler === 'function') {
           (handlers as Record<string, any>)[method] = wrapWithDebug(path, method.toUpperCase(), handler);
@@ -2350,4 +2430,36 @@ scheduler.start();
 
 const systemManager = new SystemManager(config);
 
-console.log(`🚀 Server running at ${server.url}`);
+console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, version ${BUILD_VERSION})`);
+
+// ---- Graceful shutdown -------------------------------------------------
+// `Subprocess.kill()` from the supervisor's side gives no drain guarantee
+// on its own — this is the app's half of the stop-start handoff contract.
+// The supervisor waits for the process to exit (or force-kills after its
+// own deadline) before starting the candidate release, so db.close() below
+// is what actually enforces single-writer ownership of showflow.db.
+let sigtermReceived = false;
+process.on("SIGTERM", async () => {
+  if (sigtermReceived) return; // ignore repeat signals mid-shutdown
+  sigtermReceived = true;
+
+  shuttingDown = true; // 1. mark unready — /internal/ready now returns 503
+
+  // 2. stop accepting new WebSocket subscribers implicitly (server keeps
+  //    listening until process.exit, but…)
+  // 3. …close existing debug WebSocket connections so clients reconnect
+  //    against whatever comes up next rather than hanging on a dead pipe.
+  for (const ws of debugWsClients) {
+    try { (ws as any).close(1012, "server restarting"); } catch { }
+  }
+
+  // 6. stop background jobs/timers so nothing fires mid-teardown
+  await scheduler.stop?.();
+
+  // 7. checkpoint/close SQLite — must complete before this process exits,
+  //    since the supervisor won't start the candidate until it does.
+  db.close?.();
+
+  // 8. exit
+  process.exit(0);
+});

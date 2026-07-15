@@ -17,3 +17,10 @@ declare module "*.module.css" {
   const classes: { readonly [key: string]: string };
   export = classes;
 }
+
+// Injected by build.ts's `define` block at compile time. In dev (`bun
+// --hot src/backend/server.ts`, no build step) these are never substituted,
+// so server.ts must fall back to "development" rather than assume they
+// exist.
+declare const __BUILD_COMMIT__: string | undefined;
+declare const __BUILD_VERSION__: string | undefined;

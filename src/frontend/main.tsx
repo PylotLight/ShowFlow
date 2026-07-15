@@ -8,6 +8,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { registerServiceWorker } from "./register-sw";
+
+// Keeps the tab alive (offline fallback + auto-reconnect) across the
+// supervisor's stop/start release handoff. See sw.js for details.
+registerServiceWorker();
 
 const elem = document.getElementById("root")!;
 const app = (

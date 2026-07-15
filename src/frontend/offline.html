@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ShowFlow — reconnecting…</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    background: #0b0c10;
+    color: #e5e7eb;
+    text-align: center;
+    padding: 1.5rem;
+  }
+  .card { max-width: 28rem; }
+  h1 { font-size: 1.25rem; margin-bottom: .5rem; font-weight: 600; }
+  p { opacity: .75; line-height: 1.5; }
+  .dot {
+    display: inline-block;
+    width: .5rem; height: .5rem;
+    border-radius: 999px;
+    background: #f59e0b;
+    margin-right: .4rem;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: .25; } }
+  #status { font-size: .85rem; margin-top: 1rem; opacity: .6; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span>ShowFlow is updating</h1>
+    <p>The app is briefly restarting to apply an update. This page will
+       reconnect automatically — no need to refresh manually.</p>
+    <p id="status">Waiting for server…</p>
+  </div>
+  <script>
+    (function () {
+      var statusEl = document.getElementById('status');
+      var attempt = 0;
+      var pending = null;
+      try {
+        pending = localStorage.getItem('showflow:pendingReleaseId');
+      } catch (e) { /* localStorage unavailable, fall back to "any 200" */ }
+
+      function backoffDelay(n) {
+        var base = Math.min(1000 * Math.pow(1.6, n), 8000);
+        var jitter = base * (0.3 * Math.random());
+        return Math.round(base + jitter);
+      }
+
+      function poll() {
+        attempt += 1;
+        fetch('/internal/ready', { cache: 'no-store' })
+          .then(function (res) {
+            if (!res.ok) throw new Error('not ready: ' + res.status);
+            return res.json();
+          })
+          .then(function (body) {
+            var releaseId = body && body.releaseId;
+            if (!pending || releaseId === pending) {
+              statusEl.textContent = 'Back online — reloading…';
+              try { localStorage.removeItem('showflow:pendingReleaseId'); } catch (e) {}
+              setTimeout(function () { window.location.reload(); }, 250);
+              return;
+            }
+            // Server answered but it's still the old (or rolled-back) release.
+            statusEl.textContent = 'Still switching over…';
+            setTimeout(poll, backoffDelay(attempt));
+          })
+          .catch(function () {
+            statusEl.textContent = 'Waiting for server… (attempt ' + attempt + ')';
+            setTimeout(poll, backoffDelay(attempt));
+          });
+      }
+
+      setTimeout(poll, backoffDelay(0));
+    })();
+  </script>
+</body>
+</html>

@@ -54,18 +54,28 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+          # Liveness only confirms the supervisor process itself is up —
+          # it answers on :3000 (with a 503) throughout the stop-start
+          # handoff between releases, so a TCP check here won't restart the
+          # pod during a normal, expected sub-second-to-low-seconds cutover
+          # window. An HTTP check against /internal/ready would.
           livenessProbe:
-            httpGet:
-              path: /api/config
+            tcpSocket:
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 30
+          # Readiness proxies through to the active release's own DB-backed
+          # /internal/ready and gates traffic on it. Expected to fail
+          # briefly during Quiescing/Starting — that's k8s correctly pulling
+          # the pod out of the Service's endpoints for the handoff window,
+          # not a crash.
           readinessProbe:
             httpGet:
-              path: /api/config
+              path: /internal/ready
               port: 3000
             initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m
