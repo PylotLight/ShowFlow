@@ -52,6 +52,7 @@ jobs:
           build-args: |
             GITHUB_SHA=${{ github.sha }}
             GITHUB_REF_NAME=${{ github.ref_name }}
+            SUPERVISOR_VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -59,6 +60,7 @@ jobs:
   # it plus its manifest.json as release assets. These are what the app-side
   # updates_manager.ts downloads and hands to the supervisor.
   publish-release-assets:
+    needs: build-and-push
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:

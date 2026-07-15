@@ -2,7 +2,7 @@
 // overlap: the old process fully exits (closing its own DB connection)
 // before the candidate ever opens showflow.db.
 
-import { readManifest, verifyArtifact, releasePath, writeStateAtomic, readState, SUPERVISOR_VERSION, type Phase } from "./state";
+import { readManifest, verifyArtifact, releasePath, writeStateAtomic, readState, SUPERVISOR_VERSION, compareVersions, type Phase } from "./state";
 
 interface RunningChild {
   process: Bun.Subprocess;
@@ -22,6 +22,11 @@ export class ReleaseManager {
 
   get activeReleaseId(): string | null {
     return this.current?.releaseId ?? null;
+  }
+
+  /** The currently active child process, if any. Used by the SIGTERM handler to forward the signal. */
+  get activeProcess(): Bun.Subprocess | null {
+    return this.current?.process ?? null;
   }
 
   /**
@@ -176,15 +181,4 @@ export class ReleaseManager {
   }
 }
 
-/** Simple semver comparison. Returns <0, 0, or >0. Handles "0.1.0" and "v0.1.0" formats. */
-function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/i, "").split(".").map(Number);
-  const pb = b.replace(/^v/i, "").split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0;
-    const nb = pb[i] ?? 0;
-    if (isNaN(na) || isNaN(nb)) continue; // non-semver strings (e.g. "development") compare equal
-    if (na !== nb) return na - nb;
-  }
-  return 0;
-}
+

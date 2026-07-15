@@ -1588,7 +1588,7 @@ function UpdatesPanel() {
     setActionLoading(`activate-${releaseId}`);
     setErr(null);
     try {
-      const { markPendingRelease } = await import("@frontend/register-sw");
+      const { markPendingRelease, clearPendingRelease } = await import("@frontend/register-sw");
       markPendingRelease(releaseId);
       const res = await fetch("/api/admin/updates/activate", {
         method: "POST",
@@ -1597,8 +1597,11 @@ function UpdatesPanel() {
       });
       const data = await res.json();
       if (data.timedOut) return;
-      if (!data.ok) { setErr(data.message || "Activation failed"); }
-    } catch (e) { setErr(String(e)); }
+      if (!data.ok) { setErr(data.message || "Activation failed"); clearPendingRelease(); }
+    } catch {
+      // Connection dropped = supervisor is quiescing (killing this process).
+      // Activation is proceeding normally — the SW offline page handles reconnection.
+    }
     finally { setActionLoading(null); }
   }
 
@@ -1620,6 +1623,11 @@ function UpdatesPanel() {
     );
   }
 
+  function clearToken() {
+    saveToken("");
+    try { localStorage.removeItem("showflow:adminToken"); } catch {}
+  }
+
   return (
     <div className="space-y-6">
       <GlassPanel className="p-6 space-y-4">
@@ -1628,9 +1636,12 @@ function UpdatesPanel() {
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Update Status</h3>
             <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
           </div>
-          <Button variant="ghost" size="sm" onClick={fetchAll} disabled={loading}>
-            <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+          <div className="flex items-center gap-1">
+            <button onClick={clearToken} className="text-[10px] text-muted-foreground hover:text-white/70 underline transition-colors">clear token</button>
+            <Button variant="ghost" size="sm" onClick={fetchAll} disabled={loading}>
+              <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
         {status && (
           <div className="grid grid-cols-2 gap-3">

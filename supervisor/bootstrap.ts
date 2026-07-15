@@ -13,6 +13,7 @@ import {
   releasePath,
   readState,
   SUPERVISOR_VERSION,
+  compareVersions,
 } from "./state";
 
 export async function ensureDataDirs(): Promise<void> {
@@ -74,15 +75,4 @@ export async function ensureBootstrapInstalled(): Promise<string | null> {
   return manifest.releaseId;
 }
 
-/** Simple semver comparison. Returns <0, 0, or >0. Handles "0.1.0" and "v0.1.0" formats. */
-function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/i, "").split(".").map(Number);
-  const pb = b.replace(/^v/i, "").split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0;
-    const nb = pb[i] ?? 0;
-    if (isNaN(na) || isNaN(nb)) continue; // non-semver strings (e.g. "development") compare equal
-    if (na !== nb) return na - nb;
-  }
-  return 0;
-}
+

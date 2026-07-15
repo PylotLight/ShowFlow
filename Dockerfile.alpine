@@ -3,8 +3,10 @@ WORKDIR /app
 
 ARG GITHUB_SHA=development
 ARG GITHUB_REF_NAME=development
+ARG SUPERVISOR_VERSION=development
 ENV GITHUB_SHA=${GITHUB_SHA}
 ENV GITHUB_REF_NAME=${GITHUB_REF_NAME}
+ENV SUPERVISOR_VERSION=${SUPERVISOR_VERSION}
 ENV BUILD_TARGET=bun-linux-x64-musl
 
 COPY package.json bun.lock ./
@@ -16,7 +18,7 @@ COPY . .
 RUN bun run build.ts
 
 # Supervisor — musl target to match the Alpine runtime base.
-RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${GITHUB_REF_NAME}"'"' --linux-x64-musl supervisor/index.ts --outfile=dist/supervisor
+RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${SUPERVISOR_VERSION}"'"' --linux-x64-musl supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 alpine:3.20

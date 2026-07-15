@@ -70,9 +70,9 @@ async function runCli(argv: string[]): Promise<void> {
         process.exit(res.ok && body.ok ? 0 : 1);
       }
       case "install-archive": {
-        if (!arg) return fail("Usage: supervisor install-archive <releaseId> <tarballPath>");
-        const [id, path] = arg.split(" ");
-        if (!path) return fail("Usage: supervisor install-archive <releaseId> <tarballPath>");
+        const id = argv[1];
+        const path = argv[2];
+        if (!id || !path) return fail("Usage: supervisor install-archive <releaseId> <tarballPath>");
         const res = await fetch(`http://127.0.0.1:${ADMIN_PORT}/admin/install-archive`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -182,9 +182,15 @@ async function runDaemon(): Promise<void> {
   // The supervisor itself also needs a clean-exit path for pod termination
   // (SIGTERM from kubelet during a rolling restart of the *pod*, distinct
   // from the stop-start handoff between releases). Forward it to whatever
-  // child is currently running, then exit.
+  // child is currently running, then exit — the app process has its own
+  // SIGTERM handler that closes DB, stops scheduler, and exits cleanly.
   process.on("SIGTERM", async () => {
     console.log("[supervisor] received SIGTERM, shutting down.");
+    const child = manager.activeProcess;
+    if (child) {
+      child.kill("SIGTERM");
+      await Promise.race([child.exited, Bun.sleep(10_000)]);
+    }
     await writeStateAtomic({ phase: manager.phase });
     publicServer.stop(true);
     adminServer.stop(true);

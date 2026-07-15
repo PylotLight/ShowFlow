@@ -224,7 +224,7 @@ async function callSupervisor(pathname: string, body: unknown): Promise<{ ok: bo
  */
 export async function triggerActivate(releaseId: string): Promise<{ ok: boolean; message: string; timedOut?: boolean }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const res = await fetch(`${ADMIN_BASE}/admin/activate`, {
       method: "POST",
@@ -235,7 +235,10 @@ export async function triggerActivate(releaseId: string): Promise<{ ok: boolean;
     const body = await res.json().catch(() => ({}));
     return { ok: res.ok && body.ok === true, message: body.message ?? `Supervisor returned ${res.status}` };
   } catch (err) {
-    if ((err as any)?.name === "AbortError") {
+    // Both a timeout and a connection-reset (supervisor killed us during
+    // quiescing) mean activation passed pre-flight checks — the supervisor
+    // is now in control and the outcome is observable via /internal/ready.
+    if ((err as any)?.name === "AbortError" || (err as any)?.type === "system") {
       return {
         ok: true,
         timedOut: true,

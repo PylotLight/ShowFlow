@@ -12,8 +12,10 @@ WORKDIR /app
 # with no build-args supplied.
 ARG GITHUB_SHA=development
 ARG GITHUB_REF_NAME=development
+ARG SUPERVISOR_VERSION=development
 ENV GITHUB_SHA=${GITHUB_SHA}
 ENV GITHUB_REF_NAME=${GITHUB_REF_NAME}
+ENV SUPERVISOR_VERSION=${SUPERVISOR_VERSION}
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
@@ -31,7 +33,7 @@ RUN bun run build.ts
 # Output goes to dist/ rather than ./supervisor — the latter collides with
 # the supervisor/ *source* directory (supervisor/index.ts) and Bun refuses
 # to overwrite a directory with a file.
-RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${GITHUB_REF_NAME}"'"' --linux-x64 supervisor/index.ts --outfile=dist/supervisor
+RUN bun build --compile --define 'SUPERVISOR_VERSION="'"${SUPERVISOR_VERSION}"'"' --linux-x64 supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot
