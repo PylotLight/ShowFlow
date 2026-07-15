@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   FolderOpen,
+  ExternalLink,
 } from "lucide-react";
 import * as React from "react";
 
@@ -30,6 +31,8 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   const [manualCount, setManualCount] = React.useState(0);
   const [isHealthy, setIsHealthy] = React.useState<boolean | null>(null);
   const [seriesCount, setSeriesCount] = React.useState(0);
+  const [appVersion, setAppVersion] = React.useState("");
+  const [releaseId, setReleaseId] = React.useState("");
 
   React.useEffect(() => {
     // Poll processing queue count
@@ -39,11 +42,15 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         .then((files: string[]) => setQueueCount(files.length))
         .catch(() => {});
 
-    // Poll watcher status for health indicator
+    // Poll system status for health + version info
     const pollHealth = () =>
       fetch("/api/system/status")
         .then((r) => r.json())
-        .then((d) => setIsHealthy(d.watching !== null))
+        .then((d) => {
+          setIsHealthy(d.watching !== null);
+          if (d.version) setAppVersion(d.version);
+          if (d.releaseId) setReleaseId(d.releaseId);
+        })
         .catch(() => setIsHealthy(false));
 
     // Poll library series count
@@ -105,11 +112,13 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
     { id: "appearance", label: "Appearance" },
     { id: "providers", label: "Providers" },
     { id: "indexers", label: "Indexers" },
+    { id: "integrations", label: "Integrations" },
     { id: "quality", label: "Quality" },
     { id: "downloads", label: "Downloads" },
     { id: "tasks", label: "Tasks" },
     { id: "backup", label: "Backup" },
     { id: "debug", label: "Debug" },
+    { id: "updates", label: "Updates" },
   ];
 
   return (
@@ -303,6 +312,17 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
                   <span className="font-sans text-xs text-white/70 hidden lg:inline">{seriesCount} series</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-white/50 hidden lg:inline">
+                    v{appVersion || "—"}
+                  </span>
+                  <button
+                    onClick={() => { onChange("settings"); onSettingsTab?.("updates"); }}
+                    className="font-mono text-[10px] text-signal hover:text-signal/80 transition-colors hidden lg:inline"
+                  >
+                    Updates
+                  </button>
                 </div>
               </div>
             </div>

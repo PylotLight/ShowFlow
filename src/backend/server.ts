@@ -28,8 +28,26 @@ const embeddedAssets: Record<string, string> = {
 // like any other asset, which breaks `navigator.serviceWorker.register("/sw.js")`.
 // Embedding as `{ type: "file" }` keeps them out of that bundling path and
 // bakes them into the compiled binary like the other embedded assets above.
-import swAsset from "../frontend/sw.js" with { type: "file" };
-import offlineAsset from "../frontend/offline.html" with { type: "file" };
+//
+// Both resolve to a raw file-path string at runtime (that's what Bun's
+// `type: "file"` attribute does), but TypeScript's *static* type for each
+// disagrees, for two different reasons:
+//  - sw.js is a real, TS-resolvable .js file — with `allowJs` on, TS finds
+//    the actual module (no default export) before it ever consults an
+//    ambient `declare module "*.js"`-style fallback, so a wildcard
+//    declaration here wouldn't even be consulted.
+//  - offline.html matches bun-types' generic `"*.html" -> HTMLBundle`
+//    ambient declaration, the shape meant for index.html's very different
+//    SPA-bundling import below — not a bare string.
+// The `type: "file"` import attribute changes Bun's runtime behavior, but
+// TypeScript's resolver doesn't key off import attributes at all, so
+// neither inferred type matches what's actually returned. Casting at the
+// source is more robust than an ambient-declaration workaround that either
+// gets ignored (sw.js) or would be fragile to rely on (offline.html).
+import swAssetRaw from "../frontend/sw.js" with { type: "file" };
+import offlineAssetRaw from "../frontend/offline.html" with { type: "file" };
+const swAsset = swAssetRaw as unknown as string;
+const offlineAsset = offlineAssetRaw as unknown as string;
 
 // Compiled in by build.ts's `define` block — see bun-env.d.ts for why these
 // are typed as possibly-undefined (dev mode via `bun --hot` never runs the
@@ -56,6 +74,8 @@ import { SonarrImporter, type SonarrTypeMapping } from "./providers/sonarr/impor
 import { SonarrConfigSchema, JellyfinConfigSchema } from "./db";
 import { JellyfinClient } from "./providers/jellyfin/client";
 import { JellyfinSync } from "./providers/jellyfin/sync";
+import { timingSafeEqual } from "node:crypto";
+import { listReleases, downloadAndInstall, triggerActivate, getSupervisorStatus } from "./core/updates_manager";
 
 // ---- Config -----------------------------------------------------------
 
@@ -133,6 +153,36 @@ function errorResponse(err: unknown, status = 400) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[api] ${message}`);
   return json({ error: message }, { status });
+}
+
+// ---- Admin auth (updates routes only) -----------------------------------
+// Nothing else in this API requires auth today (self-hosted, single-user,
+// expected to sit behind the operator's own network boundary) — but the
+// updates routes are uniquely dangerous: they download and execute an
+// arbitrary binary fetched from GitHub and can trigger a process restart.
+// Gated separately behind its own token rather than piggybacking on
+// anything user-facing, since there's no broader auth system to hook into
+// yet. Fails closed: an unset token disables these routes entirely rather
+// than defaulting to "open".
+function checkAdminAuth(req: Request): boolean {
+  const token = process.env.SHOWFLOW_ADMIN_TOKEN;
+  if (!token) return false;
+  const header = req.headers.get("authorization") ?? "";
+  const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
+  // timingSafeEqual throws on mismatched lengths rather than returning
+  // false, and needs equal-length buffers regardless — pad the shorter one
+  // so a length mismatch doesn't leak via that exception path either.
+  const a = Buffer.from(provided);
+  const b = Buffer.from(token);
+  if (a.length !== b.length) {
+    timingSafeEqual(b, b); // constant-time-ish no-op, avoids an early return that could be timed
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
+
+function unauthorized() {
+  return json({ error: "Unauthorized" }, { status: 401 });
 }
 
 // ---- Poster resolution --------------------------------------------------
@@ -528,7 +578,11 @@ const routeDefinitions = {
   "/api/system/status": {
     async GET() {
       try {
-        return json({ watching: systemManager.isWatching() });
+        return json({
+          watching: systemManager.isWatching(),
+          releaseId: BUILD_COMMIT,
+          version: BUILD_VERSION,
+        });
       } catch (err) {
         return errorResponse(err, 500);
       }
@@ -2359,6 +2413,78 @@ const routeDefinitions = {
     GET(req: RouteReq, server: any) {
       if (server.upgrade(req)) return;
       return new Response("Upgrade failed", { status: 400 });
+    },
+  },
+
+  // ---- Updates / Release management --------------------------------------
+  // Bridges the supervisor's loopback-only admin API (127.0.0.1:9090, no
+  // auth of its own — see supervisor/index.ts) out to a public, token-
+  // authenticated surface. Every route here requires SHOWFLOW_ADMIN_TOKEN;
+  // see checkAdminAuth() above for why this is gated separately from the
+  // rest of the (currently unauthenticated) API.
+
+  "/api/admin/updates/available": {
+    async GET(req: RouteReq) {
+      if (!checkAdminAuth(req)) return unauthorized();
+      try {
+        const releases = await listReleases(BUILD_VERSION);
+        return json({ current: { releaseId: BUILD_COMMIT, version: BUILD_VERSION }, releases });
+      } catch (err) {
+        return errorResponse(err, 502);
+      }
+    },
+  },
+
+  "/api/admin/updates/install": {
+    async POST(req: RouteReq) {
+      if (!checkAdminAuth(req)) return unauthorized();
+      try {
+        const { githubReleaseId } = (await req.json()) as { githubReleaseId?: number };
+        if (!githubReleaseId) return errorResponse("githubReleaseId is required");
+        const result = await downloadAndInstall(githubReleaseId);
+        db.logEvent({
+          type: result.ok ? "update" : "error",
+          entityType: "system",
+          message: result.ok ? `Installed release "${result.releaseId}" \u2014 ready to activate` : `Install failed: ${result.message}`,
+        });
+        return json(result, { status: result.ok ? 200 : 400 });
+      } catch (err) {
+        db.logEvent({ type: "error", entityType: "system", message: `Update install failed: ${err instanceof Error ? err.message : String(err)}` });
+        return errorResponse(err, 502);
+      }
+    },
+  },
+
+  // Fire-and-forget from this process's point of view — see the extensive
+  // comment on triggerActivate() in core/updates_manager.ts for why: this
+  // app process is what gets replaced, so it structurally cannot await the
+  // supervisor's full activation response on the success path. The
+  // frontend's job after calling this is polling /internal/ready per the
+  // documented reconnect contract, not trusting this response as final.
+  "/api/admin/updates/activate": {
+    async POST(req: RouteReq) {
+      if (!checkAdminAuth(req)) return unauthorized();
+      try {
+        const { releaseId } = (await req.json()) as { releaseId?: string };
+        if (!releaseId) return errorResponse("releaseId is required");
+        db.logEvent({ type: "update", entityType: "system", message: `Activation triggered for release "${releaseId}"` });
+        const result = await triggerActivate(releaseId);
+        return json(result, { status: result.ok ? 200 : 400 });
+      } catch (err) {
+        return errorResponse(err, 502);
+      }
+    },
+  },
+
+  "/api/admin/updates/status": {
+    async GET(req: RouteReq) {
+      if (!checkAdminAuth(req)) return unauthorized();
+      try {
+        const supervisor = await getSupervisorStatus();
+        return json({ ...supervisor, appReleaseId: BUILD_COMMIT, appVersion: BUILD_VERSION });
+      } catch (err) {
+        return errorResponse(err, 502);
+      }
     },
   },
 

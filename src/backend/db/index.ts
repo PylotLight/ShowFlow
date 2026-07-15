@@ -349,7 +349,12 @@ export class DatabaseManager {
     this.seedDefaults();
     // Migrate old quality IDs (q1/q2/q3) to the current schema
     this.migrateQualityIds();
-    this.backfillShowTitles();
+    // Only backfill titles on the first run after the schema migration;
+    // subsequent restarts skip this since the table is already populated.
+    const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;
+    if (!titleCount || titleCount.c === 0) {
+      this.backfillShowTitles();
+    }
   }
 
   private migrateQualityIds() {

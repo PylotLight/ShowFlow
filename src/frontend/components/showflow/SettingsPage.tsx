@@ -18,13 +18,13 @@ const SETTINGS_TABS = [
   { id: "appearance", label: "Appearance" },
   { id: "providers", label: "Providers" },
   { id: "indexers", label: "Indexers" },
-  { id: "sonarr", label: "Sonarr" },
-  { id: "jellyfin", label: "Jellyfin" },
+  { id: "integrations", label: "Integrations" },
   { id: "quality", label: "Quality" },
   { id: "downloads", label: "Downloads" },
   { id: "tasks", label: "Tasks" },
   { id: "backup", label: "Backup" },
   { id: "debug", label: "Debug" },
+  { id: "updates", label: "Updates" },
 ];
 
 export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => void; initialTab?: string }) {
@@ -678,7 +678,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
             </>
           )}
 
-        {tab === "sonarr" && (
+        {tab === "integrations" && (
           <>
             <GlassPanel className="p-6 space-y-5">
               <div className="flex items-center justify-between">
@@ -1052,127 +1052,13 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
               </GlassPanel>
               </>
             )}
-          </>
-        )}
 
-        {tab === "appearance" && theme && (
-          <>
-            <GlassPanel className="p-6 space-y-5">
-              <div>
-                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Colors</h3>
-                <p className="text-muted-foreground text-xs mt-0.5">Accent colors used throughout the interface</p>
-              </div>
-              <FieldRow label="Signal / Accent" description="Primary accent color for highlights and active states">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={theme.signal}
-                    onChange={e => updateTheme({ signal: e.target.value })}
-                    className="size-8 rounded cursor-pointer bg-transparent border border-white/10"
-                  />
-                  <span className="font-mono text-xs text-muted-foreground">{theme.signal}</span>
-                </div>
-              </FieldRow>
-              <FieldRow label="Warn / Amber" description="Warning and pending state color">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={theme.accentAmber}
-                    onChange={e => updateTheme({ accentAmber: e.target.value })}
-                    className="size-8 rounded cursor-pointer bg-transparent border border-white/10"
-                  />
-                  <span className="font-mono text-xs text-muted-foreground">{theme.accentAmber}</span>
-                </div>
-              </FieldRow>
-              <div className="border-t border-white/5 pt-4">
-                <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Presets</span>
-                <ColorDock current={accent} onChange={(color) => { setAccent(color); saveAccent(color); applyAccent(color); }} />
-              </div>
-            </GlassPanel>
+            {/* ---- Jellyfin ---- */}
 
-            <GlassPanel className="p-6 space-y-5">
-              <div>
-                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Typography</h3>
-                <p className="text-muted-foreground text-xs mt-0.5">Font families and base sizes for the interface</p>
-              </div>
-              <FieldRow label="Display Font" description="Headings and display text (e.g. 'Barlow Condensed')">
-                <Input
-                  value={theme.fontDisplay}
-                  onChange={e => updateTheme({ fontDisplay: e.target.value })}
-                  placeholder='"Barlow Condensed", sans-serif'
-                />
-              </FieldRow>
-              <FieldRow label="Mono Font" description="Code, episode chips, stats (e.g. 'JetBrains Mono')">
-                <Input
-                  value={theme.fontMono}
-                  onChange={e => updateTheme({ fontMono: e.target.value })}
-                  placeholder='"JetBrains Mono", monospace'
-                />
-              </FieldRow>
-              <FieldRow label="Sans Font" description="Body text (e.g. 'Inter')">
-                <Input
-                  value={theme.fontSans}
-                  onChange={e => updateTheme({ fontSans: e.target.value })}
-                  placeholder='"Inter", sans-serif'
-                />
-              </FieldRow>
-            </GlassPanel>
-
-            <GlassPanel className="p-6 space-y-5">
-              <div>
-                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Sizes &amp; Spacing</h3>
-                <p className="text-muted-foreground text-xs mt-0.5">Font size scale and corner rounding</p>
-              </div>
-              <FieldRow label="Caption Size" description="Smallest text (labels, timestamps)">
-                <Input
-                  value={theme.fontSizeCaption}
-                  onChange={e => updateTheme({ fontSizeCaption: e.target.value })}
-                  placeholder="0.75rem"
-                  className="w-32 font-mono"
-                />
-              </FieldRow>
-              <FieldRow label="Sub Size" description="Secondary text">
-                <Input
-                  value={theme.fontSizeSub}
-                  onChange={e => updateTheme({ fontSizeSub: e.target.value })}
-                  placeholder="0.8125rem"
-                  className="w-32 font-mono"
-                />
-              </FieldRow>
-              <FieldRow label="Small Size" description="Small body text">
-                <Input
-                  value={theme.fontSizeSm}
-                  onChange={e => updateTheme({ fontSizeSm: e.target.value })}
-                  placeholder="0.9375rem"
-                  className="w-32 font-mono"
-                />
-              </FieldRow>
-              <FieldRow label="Base Size" description="Standard body text">
-                <Input
-                  value={theme.fontSizeBase}
-                  onChange={e => updateTheme({ fontSizeBase: e.target.value })}
-                  placeholder="1rem"
-                  className="w-32 font-mono"
-                />
-              </FieldRow>
-              <FieldRow label="Border Radius" description="Corner rounding for panels and cards">
-                <Input
-                  value={theme.radius}
-                  onChange={e => updateTheme({ radius: e.target.value })}
-                  placeholder="0.625rem"
-                  className="w-32 font-mono"
-                />
-              </FieldRow>
-            </GlassPanel>
-          </>
-        )}
-
-        {tab === "jellyfin" && (
-          <>
             <GlassPanel className="p-6 space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Jellyfin Connection</h3>
+                  <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Jellyfin</h3>
                   <p className="text-muted-foreground text-xs mt-0.5">Connect to Jellyfin to sync watched state to ShowFlow</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1308,6 +1194,119 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
                 )}
               </GlassPanel>
             )}
+
+          </>
+        )}
+
+        {tab === "appearance" && theme && (
+          <>
+            <GlassPanel className="p-6 space-y-5">
+              <div>
+                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Colors</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">Accent colors used throughout the interface</p>
+              </div>
+              <FieldRow label="Signal / Accent" description="Primary accent color for highlights and active states">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={theme.signal}
+                    onChange={e => updateTheme({ signal: e.target.value })}
+                    className="size-8 rounded cursor-pointer bg-transparent border border-white/10"
+                  />
+                  <span className="font-mono text-xs text-muted-foreground">{theme.signal}</span>
+                </div>
+              </FieldRow>
+              <FieldRow label="Warn / Amber" description="Warning and pending state color">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={theme.accentAmber}
+                    onChange={e => updateTheme({ accentAmber: e.target.value })}
+                    className="size-8 rounded cursor-pointer bg-transparent border border-white/10"
+                  />
+                  <span className="font-mono text-xs text-muted-foreground">{theme.accentAmber}</span>
+                </div>
+              </FieldRow>
+              <div className="border-t border-white/5 pt-4">
+                <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Presets</span>
+                <ColorDock current={accent} onChange={(color) => { setAccent(color); saveAccent(color); applyAccent(color); }} />
+              </div>
+            </GlassPanel>
+
+            <GlassPanel className="p-6 space-y-5">
+              <div>
+                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Typography</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">Font families and base sizes for the interface</p>
+              </div>
+              <FieldRow label="Display Font" description="Headings and display text (e.g. 'Barlow Condensed')">
+                <Input
+                  value={theme.fontDisplay}
+                  onChange={e => updateTheme({ fontDisplay: e.target.value })}
+                  placeholder='"Barlow Condensed", sans-serif'
+                />
+              </FieldRow>
+              <FieldRow label="Mono Font" description="Code, episode chips, stats (e.g. 'JetBrains Mono')">
+                <Input
+                  value={theme.fontMono}
+                  onChange={e => updateTheme({ fontMono: e.target.value })}
+                  placeholder='"JetBrains Mono", monospace'
+                />
+              </FieldRow>
+              <FieldRow label="Sans Font" description="Body text (e.g. 'Inter')">
+                <Input
+                  value={theme.fontSans}
+                  onChange={e => updateTheme({ fontSans: e.target.value })}
+                  placeholder='"Inter", sans-serif'
+                />
+              </FieldRow>
+            </GlassPanel>
+
+            <GlassPanel className="p-6 space-y-5">
+              <div>
+                <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Sizes &amp; Spacing</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">Font size scale and corner rounding</p>
+              </div>
+              <FieldRow label="Caption Size" description="Smallest text (labels, timestamps)">
+                <Input
+                  value={theme.fontSizeCaption}
+                  onChange={e => updateTheme({ fontSizeCaption: e.target.value })}
+                  placeholder="0.75rem"
+                  className="w-32 font-mono"
+                />
+              </FieldRow>
+              <FieldRow label="Sub Size" description="Secondary text">
+                <Input
+                  value={theme.fontSizeSub}
+                  onChange={e => updateTheme({ fontSizeSub: e.target.value })}
+                  placeholder="0.8125rem"
+                  className="w-32 font-mono"
+                />
+              </FieldRow>
+              <FieldRow label="Small Size" description="Small body text">
+                <Input
+                  value={theme.fontSizeSm}
+                  onChange={e => updateTheme({ fontSizeSm: e.target.value })}
+                  placeholder="0.9375rem"
+                  className="w-32 font-mono"
+                />
+              </FieldRow>
+              <FieldRow label="Base Size" description="Standard body text">
+                <Input
+                  value={theme.fontSizeBase}
+                  onChange={e => updateTheme({ fontSizeBase: e.target.value })}
+                  placeholder="1rem"
+                  className="w-32 font-mono"
+                />
+              </FieldRow>
+              <FieldRow label="Border Radius" description="Corner rounding for panels and cards">
+                <Input
+                  value={theme.radius}
+                  onChange={e => updateTheme({ radius: e.target.value })}
+                  placeholder="0.625rem"
+                  className="w-32 font-mono"
+                />
+              </FieldRow>
+            </GlassPanel>
           </>
         )}
 
@@ -1505,7 +1504,64 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
         {tab === "tasks" && <TasksPanel tasks={tasks} loading={tasksLoading} onRunTask={runTaskNow} onUpdateTask={updateTaskConfig} taskRunning={taskRunning} saving={saving} />}
         {tab === "backup" && <BackupPanel />}
         {tab === "debug" && <DebugSettings />}
+        {tab === "updates" && <UpdatesPanel />}
       </div>
+    </div>
+  );
+}
+
+function UpdatesPanel() {
+  const [loading, setLoading] = React.useState(true);
+  const [status, setStatus] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    fetch("/api/system/status")
+      .then(r => r.json())
+      .then(d => setStatus(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <GlassPanel className="p-6 flex items-center justify-center">
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+      </GlassPanel>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <GlassPanel className="p-6 space-y-4">
+        <div>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Current Release</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">The version of ShowFlow currently running</p>
+        </div>
+        <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3 border border-white/5">
+          <div>
+            <span className="font-mono text-xs text-white/90">Version</span>
+            <p className="font-mono text-sm text-signal mt-0.5">{status?.version || "—"}</p>
+          </div>
+          <div className="text-right">
+            <span className="font-mono text-xs text-white/90">Build</span>
+            <p className="font-mono text-xs text-muted-foreground mt-0.5">{(status?.releaseId || "—").slice(0, 12)}</p>
+          </div>
+        </div>
+      </GlassPanel>
+
+      <GlassPanel className="p-6 space-y-4">
+        <div>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Updates</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            New releases are installed through the supervisor. Check back for update availability.
+          </p>
+        </div>
+        <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
+          <p className="font-mono text-xs text-muted-foreground">
+            Release discovery not configured
+          </p>
+        </div>
+      </GlassPanel>
     </div>
   );
 }

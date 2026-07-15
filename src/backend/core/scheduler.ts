@@ -289,10 +289,10 @@ export class Scheduler {
    */
   start() {
     this.initializeTasks();
-    // Check every minute
+    // Check every minute — the first run happens after the first interval
+    // (60 seconds), not synchronously at boot, so heavy tasks (scan-library,
+    // sync-shows, backup, etc.) don't block startup.
     this.intervalHandle = setInterval(() => this.runPendingTasks(), 60 * 1000);
-    // Run once at startup
-    this.runPendingTasks();
   }
 
   /**
