@@ -67,7 +67,7 @@ import { GrabberService } from "./core/grabber_service";
 import { IndexerFactory } from "./providers/indexers/factory";
 import type { IndexerResult } from "./providers/indexers/types";
 import { NATIVE_INDEXER_META, type NativeIndexerConfig, type NativeIndexerId } from "./providers/indexers/native/types";
-import { runBackup, listBackups, uploadBackup, restoreBackup } from "../../scripts/backup";
+import { runBackup, listBackups, uploadBackup, restoreBackup } from "./core/backup";
 import { createApiDebugLog, subscribeDebugLogs, getDebugLogs, clearDebugLogs, isDebugEnabled } from "./core/debug";
 import { SonarrClient } from "./providers/sonarr/client";
 import { SonarrImporter, type SonarrTypeMapping } from "./providers/sonarr/import";

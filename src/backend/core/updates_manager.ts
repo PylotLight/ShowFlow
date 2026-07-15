@@ -9,7 +9,7 @@
 // The supervisor keys everything (download dir, releases dir, readiness
 // cross-check) off a single `releaseId` string, and its own readiness check
 // (waitReadyRepeated in supervisor/activate.ts) requires the *running app's*
-// compiled-in BUILD_COMMIT to equal `manifest.commit`. scripts/release-manifest.ts
+// compiled-in BUILD_COMMIT to equal `manifest.commit`. build.ts
 // sets `manifest.releaseId === manifest.commit`, so the only string that can
 // ever satisfy that invariant is the one baked into the manifest itself.
 // We never derive releaseId from a GitHub tag_name (e.g. "v0.3.0") — we

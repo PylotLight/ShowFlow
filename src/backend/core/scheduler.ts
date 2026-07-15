@@ -2,7 +2,7 @@ import { db, type Config, JellyfinConfigSchema } from '../db';
 import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
-import { runBackup } from '../../../scripts/backup';
+import { runBackup } from "./backup";
 import { GrabberService } from './grabber_service';
 import { JellyfinSync } from '../providers/jellyfin/sync';
 

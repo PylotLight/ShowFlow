@@ -20,7 +20,7 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
-# App binary (single-binary artifact, assets embedded).
+# App binary + manifest.json baked into the same build step.
 RUN bun run build.ts
 
 # Supervisor is its own compiled executable — a distroless image with no
@@ -31,12 +31,8 @@ RUN bun run build.ts
 # Output goes to dist/ rather than ./supervisor — the latter collides with
 # the supervisor/ *source* directory (supervisor/index.ts) and Bun refuses
 # to overwrite a directory with a file.
-RUN bun build --compile --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor
+RUN bun build --compile --linux-x64 supervisor/index.ts --outfile=dist/supervisor
 
-# The manifest for the bootstrap release baked into this image, so a fresh
-# PVC has something the supervisor can verify and install as lastKnownGood
-# on cold start.
-RUN bun run scripts/release-manifest.ts showflow > manifest.json
 
 FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot
 WORKDIR /data

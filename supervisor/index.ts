@@ -69,8 +69,21 @@ async function runCli(argv: string[]): Promise<void> {
         console.log(body.message);
         process.exit(res.ok && body.ok ? 0 : 1);
       }
+      case "install-archive": {
+        if (!arg) return fail("Usage: supervisor install-archive <releaseId> <tarballPath>");
+        const [id, path] = arg.split(" ");
+        if (!path) return fail("Usage: supervisor install-archive <releaseId> <tarballPath>");
+        const res = await fetch(`http://127.0.0.1:${ADMIN_PORT}/admin/install-archive`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ releaseId: id, tarball: path }),
+        });
+        const body = await res.json();
+        console.log(body.message);
+        process.exit(res.ok && body.ok ? 0 : 1);
+      }
       default:
-        return fail(`Unknown command "${command}". Expected: status | install <releaseId> | activate <releaseId>`);
+        return fail(`Unknown command "${command}". Expected: status | install <releaseId> | install-archive <releaseId> <tarball> | activate <releaseId>`);
     }
   } catch (err) {
     console.error(`[supervisor] could not reach the running daemon on 127.0.0.1:${ADMIN_PORT}: ${String(err)}`);
@@ -137,6 +150,16 @@ async function runDaemon(): Promise<void> {
         }
       }
 
+      if (url.pathname === "/admin/install-archive" && req.method === "POST") {
+        try {
+          const { releaseId, tarball } = await req.json();
+          const result = await installArchive(releaseId, tarball);
+          return Response.json(result, { status: result.ok ? 200 : 400 });
+        } catch (err) {
+          return Response.json({ ok: false, message: String(err) }, { status: 500 });
+        }
+      }
+
       if (url.pathname === "/admin/activate" && req.method === "POST") {
         try {
           const { releaseId } = await req.json();
@@ -196,4 +219,24 @@ async function installRelease(releaseId: string): Promise<{ ok: boolean; message
   await chmod(`${dest}/${manifest.artifact.name}`, 0o755);
 
   return { ok: true, message: `Installed release "${releaseId}". Run "activate ${releaseId}" to switch to it.` };
+}
+
+async function installArchive(releaseId: string, tarballPath: string): Promise<{ ok: boolean; message: string }> {
+  if (!releaseId) return { ok: false, message: "releaseId is required." };
+  if (!tarballPath) return { ok: false, message: "tarball path is required." };
+
+  const tarballFile = Bun.file(tarballPath);
+  if (!(await tarballFile.exists())) {
+    return { ok: false, message: `Tarball not found at "${tarballPath}".` };
+  }
+  const src = `${DOWNLOADS_DIR}/${releaseId}`;
+  await mkdir(src, { recursive: true });
+
+  const archive = new Bun.Archive(await tarballFile.arrayBuffer());
+  const entryCount = await archive.extract(src);
+  if (entryCount === 0) {
+    return { ok: false, message: `Archive "${tarballPath}" extracted 0 entries — nothing to install.` };
+  }
+
+  return installRelease(releaseId);
 }
