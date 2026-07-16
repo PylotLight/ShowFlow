@@ -1,0 +1,322 @@
+import { watch } from 'node:fs';
+import { mkdir, readdir, unlink } from 'node:fs/promises';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { db } from '../../db';
+import type { Config } from '../../db';
+import { TorboxService } from '../../providers/torbox/services';
+import type { DownloadClient } from './types';
+
+export interface TorboxClientConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  inputFolder?: string;
+  outputFolder?: string;
+  concurrency?: number;
+}
+
+export function resolveTorboxConfig(config: Config): Config {
+  const dc = config.downloadClient;
+  if (!dc?.torbox || dc.torbox.outputFolder) return config;
+
+  return {
+    ...config,
+    downloadClient: {
+      ...dc,
+      torbox: {
+        ...dc.torbox,
+        outputFolder: dc.blackhole?.watchFolder,
+      },
+    },
+  };
+}
+
+export class TorboxDownloadClient implements DownloadClient {
+  name = 'TorBox';
+
+  private service: TorboxService;
+  private config: TorboxClientConfig;
+  private processing = new Set<string>();
+  private activeTitles = new Set<string>();
+  private watchHandle: ReturnType<typeof watch> | null = null;
+
+  constructor(config: Config) {
+    const raw = config.downloadClient?.torbox;
+    this.config = {
+      apiKey: raw?.apiKey || '',
+      baseUrl: raw?.baseUrl || 'https://api.torbox.app',
+      inputFolder: raw?.inputFolder || './hotio',
+      outputFolder: raw?.outputFolder || './downloads',
+      concurrency: raw?.concurrency || 3,
+    };
+    this.service = new TorboxService({
+      apiKey: this.config.apiKey!,
+      baseUrl: this.config.baseUrl!,
+    });
+  }
+
+  async start() {
+    if (!this.config.apiKey) {
+      console.log(`[${this.name}] No API key configured. Skipping.`);
+      return;
+    }
+
+    await mkdir(this.config.inputFolder!, { recursive: true });
+    await mkdir(this.config.outputFolder!, { recursive: true });
+
+    console.log(`[${this.name}] Watching ${this.config.inputFolder} for torrent/magnet files`);
+    console.log(`[${this.name}] Output folder: ${this.config.outputFolder}`);
+
+    try {
+      const files = await readdir(this.config.inputFolder!);
+      for (const file of files) {
+        if (file.endsWith('.torrent') || file.endsWith('.magnet') || file.endsWith('.txt')) {
+          this.processFile(path.join(this.config.inputFolder!, file));
+        }
+      }
+    } catch { }
+
+    this.watchHandle = watch(this.config.inputFolder!, (eventType, filename) => {
+      if (eventType !== 'rename' || !filename) return;
+      const fullPath = path.join(this.config.inputFolder!, filename);
+      if (!existsSync(fullPath)) return;
+      if (!filename.endsWith('.torrent') && !filename.endsWith('.magnet') && !filename.endsWith('.txt')) return;
+      this.processFile(fullPath);
+    });
+
+    console.log(`[${this.name}] Running.`);
+  }
+
+  async stop() {
+    if (this.watchHandle) {
+      this.watchHandle.close();
+      this.watchHandle = null;
+    }
+  }
+
+  async submitMagnet(magnet: string, label?: string): Promise<boolean> {
+    const addRes = await this.service.addTorrent({ magnet, name: label });
+    if (!addRes.success) {
+      console.error(`[${this.name}] Failed to submit magnet:`, addRes.error);
+      return false;
+    }
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+      console.error(`[${this.name}] No torrent ID from magnet submit:`, JSON.stringify(addRes));
+      return false;
+    }
+    return this.waitForDownload(torrentId, label || 'magnet');
+  }
+
+  async submitTorrentUrl(url: string, label?: string): Promise<boolean> {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`[${this.name}] Failed to fetch torrent from ${url}: ${res.status}`);
+      return false;
+    }
+    const blob = await res.blob();
+    const addRes = await this.service.addTorrent({ file: blob, name: label || 'torrent' });
+    if (!addRes.success) {
+      console.error(`[${this.name}] Failed to submit torrent:`, addRes.error);
+      return false;
+    }
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+      console.error(`[${this.name}] No torrent ID from torrent submit:`, JSON.stringify(addRes));
+      return false;
+    }
+    return this.waitForDownload(torrentId, label || url);
+  }
+
+  async submitRelease(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<boolean> {
+    const { magnetUrl, downloadUrl, infoHash, title } = release;
+
+    if (magnetUrl?.startsWith('magnet:')) {
+      return this.submitMagnet(magnetUrl, title);
+    }
+
+    if (downloadUrl) {
+      return this.submitTorrentUrl(downloadUrl, title);
+    }
+
+    if (infoHash) {
+      const magnet = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}`;
+      return this.submitMagnet(magnet, title);
+    }
+
+    console.error(`[${this.name}] Release "${title}" has no magnetUrl, downloadUrl, or infoHash`);
+    return false;
+  }
+
+  getActiveDownloads(): string[] {
+    return [...this.activeTitles];
+  }
+
+  async submitReleaseBackground(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<{ ok: boolean; message: string }> {
+    const { magnetUrl, downloadUrl, infoHash, title } = release;
+
+    let addRes: Awaited<ReturnType<TorboxService['addTorrent']>>;
+
+    if (magnetUrl?.startsWith('magnet:')) {
+      addRes = await this.service.addTorrent({ magnet: magnetUrl, name: title });
+    } else if (downloadUrl) {
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        return { ok: false, message: `Failed to fetch release file for "${title}": HTTP ${res.status}` };
+      }
+      const blob = await res.blob();
+      addRes = await this.service.addTorrent({ file: blob, name: title });
+    } else if (infoHash) {
+      const magnet = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(title)}`;
+      addRes = await this.service.addTorrent({ magnet, name: title });
+    } else {
+      return { ok: false, message: `Release "${title}" has no magnetUrl, downloadUrl, or infoHash` };
+    }
+
+    if (!addRes.success) {
+      const errMsg = addRes.error instanceof Error ? addRes.error.message : String(addRes.error ?? 'unknown error');
+      return { ok: false, message: `TorBox rejected "${title}": ${errMsg}` };
+    }
+
+    const data = addRes.result?.data || addRes.result;
+    const torrentId = String(data?.torrent_id || data?.id || '');
+    if (!torrentId || torrentId === 'undefined') {
+      return { ok: false, message: `TorBox returned no torrent ID for "${title}"` };
+    }
+
+    this.activeTitles.add(title);
+
+    this.waitForDownload(torrentId, title)
+      .then((ok) => {
+        db.logEvent({
+          type: ok ? 'download' : 'error',
+          entityType: 'release',
+          message: ok
+            ? `Downloaded "${title}" from TorBox and handed off for import`
+            : `TorBox download failed or timed out for "${title}"`,
+        });
+      })
+      .catch((err) => {
+        db.logEvent({
+          type: 'error',
+          entityType: 'release',
+          message: `TorBox download error for "${title}": ${err instanceof Error ? err.message : String(err)}`,
+        });
+      })
+      .finally(() => {
+        this.activeTitles.delete(title);
+      });
+
+    return { ok: true, message: `Submitted "${title}" to TorBox` };
+  }
+
+  private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
+    console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
+
+    const maxAttempts = 600;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      const status = await this.service.getStatus(torrentId);
+      if (status.success && status.result) {
+        let torrent = status.result.data || status.result;
+        if (Array.isArray(torrent)) {
+          torrent = torrent.find((t: any) => String(t.id) === torrentId);
+        }
+        if (!torrent) {
+          attempts++;
+          await new Promise(r => setTimeout(r, 10_000));
+          continue;
+        }
+        if (torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true) {
+          const files = (torrent.files || []).filter((f: any) => {
+            const name = (f.name || '').toLowerCase();
+            return ['.mkv', '.mp4', '.avi', '.mov'].some(ext => name.endsWith(ext));
+          });
+
+          if (files.length === 0) {
+            console.warn(`[${this.name}] No video files in torrent ${torrentId}`);
+            return false;
+          }
+
+          for (const file of files) {
+            const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
+            if (!dl.success) {
+              console.warn(`[${this.name}] Failed to get link for ${file.short_name || file.id}: ${JSON.stringify(dl.error)}`);
+              continue;
+            }
+            const url = dl.result?.data || dl.result?.download_link || (typeof dl.result === 'string' ? dl.result : null);
+            if (!url) {
+              console.warn(`[${this.name}] No download URL for ${file.short_name || file.id}`);
+              continue;
+            }
+
+            const outputPath = path.join(this.config.outputFolder!, file.short_name || `file_${file.id}.mkv`);
+            const res = await fetch(url);
+            if (!res.ok) {
+              console.warn(`[${this.name}] Download failed for ${file.short_name || file.id}: ${res.statusText}`);
+              continue;
+            }
+            await Bun.write(outputPath, res);
+            console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
+          }
+
+          return true;
+        }
+      }
+
+      attempts++;
+      await new Promise(r => setTimeout(r, 10_000));
+    }
+
+    console.error(`[${this.name}] Torrent ${torrentId} did not complete within time limit`);
+    return false;
+  }
+
+  private async processFile(filePath: string) {
+    if (this.processing.has(filePath)) return;
+    this.processing.add(filePath);
+
+    try {
+      const fileName = path.basename(filePath);
+      const isTorrent = filePath.endsWith('.torrent');
+      const isMagnet = filePath.endsWith('.magnet') || filePath.endsWith('.txt');
+
+      if (!isTorrent && !isMagnet) return;
+
+      const isTxtMagnet = isMagnet && !fileName.endsWith('.txt');
+      const rawText = isMagnet ? await Bun.file(filePath).text() : '';
+      const isContentMagnet = rawText.trim().startsWith('magnet:');
+
+      if (isContentMagnet) {
+        const ok = await this.submitMagnet(rawText.trim(), fileName);
+        if (ok) try { await unlink(filePath); } catch { }
+      } else if (isTorrent) {
+        const file = Bun.file(filePath);
+        const addRes = await this.service.addTorrent({ file, name: fileName });
+        if (!addRes.success) throw addRes.error || new Error('Failed to add torrent');
+        const data = addRes.result?.data || addRes.result;
+        const torrentId = String(data?.torrent_id || data?.id || '');
+        if (!torrentId || torrentId === 'undefined' || torrentId === '') {
+          console.error(`[${this.name}] TorBox API response:`, JSON.stringify(addRes));
+          throw new Error('No torrent ID returned from TorBox');
+        }
+        const ok = await this.waitForDownload(torrentId, fileName);
+        if (ok) try { await unlink(filePath); } catch { }
+      } else {
+        console.log(`[${this.name}] Skipping unrecognized file: ${fileName}`);
+      }
+    } catch (err) {
+      console.error(`[${this.name}] Error processing ${path.basename(filePath)}:`, err);
+      db.logEvent({
+        type: 'error',
+        entityType: 'file',
+        message: `[${this.name}] Failed to process ${path.basename(filePath)}: ${err instanceof Error ? err.message : String(err)}`
+      });
+    } finally {
+      this.processing.delete(filePath);
+    }
+  }
+}
