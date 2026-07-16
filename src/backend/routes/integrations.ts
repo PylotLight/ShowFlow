@@ -1,0 +1,190 @@
+import { db, SonarrConfigSchema, JellyfinConfigSchema } from "../db";
+import { SonarrImporter, type SonarrTypeMapping } from "../providers/sonarr/import";
+import { JellyfinSync } from "../providers/jellyfin/sync";
+import { json, errorResponse, loadConfig, invalidateConfigCache, getSonarrClient, getJellyfinClient } from "./_shared";
+
+export function integrationRoutes() {
+  return {
+
+    "/api/sonarr/settings": {
+      async GET() {
+        try {
+          const raw = db.getSetting('sonarr');
+          if (!raw) return json({ enabled: false, baseUrl: '', apiKey: '' });
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const config = SonarrConfigSchema.parse(parsed);
+          return json({ ...config, apiKey: config.apiKey ? '********' : '' });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = await req.json() as Record<string, any>;
+          const existing = db.getSetting('sonarr');
+          let merged = body;
+          if (existing) {
+            try {
+              const parsed = typeof existing === 'string' ? JSON.parse(existing) : existing;
+              merged = { ...parsed, ...body };
+            } catch { }
+          }
+          const result = SonarrConfigSchema.safeParse(merged);
+          if (!result.success) {
+            return errorResponse(result.error.issues.map(i => i.message).join("; "));
+          }
+          db.setSetting('sonarr', result.data);
+          invalidateConfigCache();
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
+    "/api/sonarr/test": {
+      async GET() {
+        try {
+          const client = getSonarrClient();
+          if (!client) return json({ ok: false, message: "Sonarr not configured" });
+          const result = await client.test();
+          return json(result);
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
+    "/api/sonarr/series": {
+      async GET() {
+        try {
+          const client = getSonarrClient();
+          if (!client) return json({ ok: false, message: "Sonarr not configured" });
+          const series = await client.getSeries();
+          return json(series);
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
+    "/api/sonarr/import": {
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const raw = db.getSetting('sonarr');
+          if (!raw) return errorResponse("Sonarr not configured", 400);
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const config = SonarrConfigSchema.parse(parsed);
+          if (!config.enabled || !config.baseUrl || !config.apiKey) {
+            return errorResponse("Sonarr is not fully configured", 400);
+          }
+
+          const body = await req.json() as { seriesIds?: number[]; typeMapping?: SonarrTypeMapping } | undefined;
+          const appConfig = loadConfig();
+          const importer = new SonarrImporter(config.baseUrl, config.apiKey, config.apiVersion ?? 'v3', appConfig);
+
+          const importPromise = importer.importSeries(body?.seriesIds, body?.typeMapping);
+
+          const series = body?.seriesIds;
+          if (!series || series.length <= 5) {
+            const results = await importPromise;
+            return json({ results });
+          }
+
+          importPromise.then(results => {
+            console.log(`[sonarr] Import completed: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`);
+          }).catch(err => {
+            console.error('[sonarr] Import failed:', err);
+          });
+
+          return json({ message: `Import started for ${series.length} series. Check server logs for results.` });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/jellyfin/settings": {
+      async GET() {
+        try {
+          const raw = db.getSetting('jellyfin');
+          if (!raw) return json({ enabled: false, baseUrl: '', apiKey: '' });
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const config = JellyfinConfigSchema.parse(parsed);
+          return json({ ...config, apiKey: config.apiKey ? '********' : '' });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = await req.json() as Record<string, any>;
+          const existing = db.getSetting('jellyfin');
+          let merged = body;
+          if (existing) {
+            try {
+              const parsed = typeof existing === 'string' ? JSON.parse(existing) : existing;
+              merged = { ...parsed, ...body };
+            } catch { }
+          }
+          const result = JellyfinConfigSchema.safeParse(merged);
+          if (!result.success) {
+            return errorResponse(result.error.issues.map(i => i.message).join("; "));
+          }
+          db.setSetting('jellyfin', result.data);
+          invalidateConfigCache();
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
+    "/api/jellyfin/test": {
+      async GET() {
+        try {
+          const client = getJellyfinClient();
+          if (!client) return json({ ok: false, message: "Jellyfin not configured" });
+          const result = await client.test();
+          return json(result);
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
+    "/api/jellyfin/users": {
+      async GET() {
+        try {
+          const client = getJellyfinClient();
+          if (!client) return json({ ok: false, message: "Jellyfin not configured" });
+          const users = await client.getUsers();
+          return json(users.map(u => ({ id: u.Id, name: u.Name, isAdmin: u.IsAdministrator })));
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
+    "/api/jellyfin/sync": {
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const raw = db.getSetting('jellyfin');
+          if (!raw) return errorResponse("Jellyfin not configured", 400);
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const config = JellyfinConfigSchema.parse(parsed);
+          if (!config.enabled || !config.baseUrl || !config.apiKey) {
+            return errorResponse("Jellyfin is not fully configured", 400);
+          }
+
+          const syncer = new JellyfinSync(config.baseUrl, config.apiKey);
+          const result = await syncer.sync();
+          return json(result);
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+  };
+}
