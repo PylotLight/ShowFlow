@@ -19,3 +19,7 @@ All notable changes to this project will be documented in this file.
 - Updated `App.tsx` shell to wire in the new Sidebar router and workspace layout.
 - Styled global theme elements in `globals.css` with a custom dark background gradients recipe (`app-background`), a custom low-opacity satin glass recipe (`glass-panel`), and backdrop filter support.
 - Refactored `WatcherPanel.tsx` and agenda lists to use clean transparent row borders rather than competing glass card backgrounds.
+- **Refactored `src/backend/server.ts`**: 2,611 → 242 lines. Extracted 13 route handler modules into `src/backend/routes/`. Import path and call sites unchanged — `server.ts` wires routes without change.
+- **Refactored `src/frontend/components/showflow/SettingsPage.tsx`**: 2,531 → 192 lines. Extracted 15 tab components, tests, and Selenium scripts into dedicated modules. No change to App.tsx import.
+- **Refactored `src/backend/db/index.ts`**: 1,656 → 113 lines. Split into 6 domain modules (`schemas.ts`, `init.ts`, `shows.ts`, `config.ts`, `system.ts`, `index.ts`). All `db.methodName()` call sites work without change.
+- **Refactored `src/backend/core/download_clients.ts`**: 1,095 lines → `download_clients/` directory with `blackhole.ts`, `torbox.ts`, `types.ts`, `index.ts`. Import path `./download_clients` resolves transparently. No call site changes needed.
