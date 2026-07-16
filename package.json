@@ -8,8 +8,7 @@
     "start": "NODE_ENV=production bun src/backend/server.ts",
     "build": "bun run build.ts",
     "build:supervisor": "bun build --compile --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor",
-    "test": "bun test",
-    "cli": "bun src/cli/index.ts"
+    "test": "bun test"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.19",
@@ -25,7 +24,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "commander": "^15.0.0",
     "drizzle-orm": "^0.45.2",
     "fuse.js": "^7.5.0",
     "lucide-react": "^1.24.0",
