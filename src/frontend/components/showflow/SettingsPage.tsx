@@ -15,7 +15,6 @@ import { DownloadsTab } from "./DownloadsTab";
 import { TasksPanel } from "./TasksPanel";
 import { BackupPanel } from "./BackupPanel";
 import { DebugSettings } from "./DebugSettings";
-import { UpdatesPanel } from "./UpdatesPanel";
 import { cn } from "./SettingsShared";
 
 const SETTINGS_TABS = [
@@ -29,7 +28,6 @@ const SETTINGS_TABS = [
   { id: "tasks", label: "Tasks" },
   { id: "backup", label: "Backup" },
   { id: "debug", label: "Debug" },
-  { id: "updates", label: "Updates" },
 ];
 
 export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => void; initialTab?: string }) {
@@ -535,7 +533,6 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
 
         {tab === "backup" && <BackupPanel />}
         {tab === "debug" && <DebugSettings />}
-        {tab === "updates" && <UpdatesPanel />}
       </div>
     </div>
   );

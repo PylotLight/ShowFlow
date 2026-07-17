@@ -20,6 +20,16 @@ export interface ThemeConfig {
   fontSizeSm: string;
   fontSizeBase: string;
   radius: string;
+  background: string;
+  foreground: string;
+  surfaceGlass: string;
+  card: string;
+  cardForeground: string;
+  popover: string;
+  popoverForeground: string;
+  mutedForeground: string;
+  border: string;
+  input: string;
 }
 
 const DEFAULTS: ThemeConfig = {
@@ -33,6 +43,16 @@ const DEFAULTS: ThemeConfig = {
   fontSizeSm: '0.9375rem',
   fontSizeBase: '1rem',
   radius: '0.625rem',
+  background: '#0b0e1a',
+  foreground: '#f0f2f6',
+  surfaceGlass: '#181c2e',
+  card: '#131724',
+  cardForeground: '#f0f2f6',
+  popover: '#131724',
+  popoverForeground: '#f0f2f6',
+  mutedForeground: '#8b8fa3',
+  border: '#ffffff1a',
+  input: '#ffffff1f',
 };
 
 const CSS_VAR_MAP: Record<keyof ThemeConfig, string> = {
@@ -46,6 +66,16 @@ const CSS_VAR_MAP: Record<keyof ThemeConfig, string> = {
   fontSizeSm: '--text-sm',
   fontSizeBase: '--text-base',
   radius: '--radius',
+  background: '--background',
+  foreground: '--foreground',
+  surfaceGlass: '--surface-glass',
+  card: '--card',
+  cardForeground: '--card-foreground',
+  popover: '--popover',
+  popoverForeground: '--popover-foreground',
+  mutedForeground: '--muted-foreground',
+  border: '--border',
+  input: '--input',
 };
 
 export async function loadTheme(): Promise<ThemeConfig> {

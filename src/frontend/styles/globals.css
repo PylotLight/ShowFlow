@@ -55,6 +55,7 @@
   --radius: 0.625rem;
   --font-display: "Barlow Condensed", "Archivo Expanded", ui-sans-serif, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Inter", ui-sans-serif, sans-serif;
   /* Control Room palette - dark by default, this app doesn't really have a light mode */
   --background: oklch(0.13 0.02 265);
   --foreground: oklch(0.96 0.01 265);

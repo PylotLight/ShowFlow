@@ -3,6 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@frontend/components/ui/switch";
 import { ColorDock } from "./ColorDock";
 import { ShowProfileManager } from "./ShowProfileManager";
+import { UpdatesPanel } from "./UpdatesPanel";
 import { FieldRow } from "./SettingsShared";
 
 export function GeneralTab({ config, saveConfig, accent, setAccent }: {
@@ -71,6 +72,8 @@ export function GeneralTab({ config, saveConfig, accent, setAccent }: {
           />
         </FieldRow>
       </GlassPanel>
+
+      <UpdatesPanel />
     </>
   );
 }

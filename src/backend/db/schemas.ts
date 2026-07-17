@@ -6,8 +6,9 @@ export const ConfigSchema = z.object({
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
   dryRun: z.boolean().default(false),
   seasonFolderFormat: z.string().default('Season {season}'),
+  importFolder: z.string().optional(),
   downloadClient: z.object({
-    type: z.enum(['blackhole', 'torbox', 'none']).optional(),
+    type: z.enum(['blackhole', 'torbox', 'sabnzbd', 'none']).optional(),
     blackhole: z.object({
       outputFolder: z.string().optional(),
       watchFolder: z.string().optional(),
@@ -18,6 +19,10 @@ export const ConfigSchema = z.object({
       inputFolder: z.string().optional(),
       outputFolder: z.string().optional(),
       concurrency: z.number().optional(),
+    }).optional(),
+    sabnzbd: z.object({
+      url: z.string().optional(),
+      apiKey: z.string().optional(),
     }).optional(),
   }).default({}),
 });
