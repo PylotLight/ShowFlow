@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const ConfigSchema = z.object({
   apiKeys: z.record(z.string(), z.string()).optional(),
-  defaultProvider: z.enum(['tmdb', 'tvdb', 'anilist']),
+  defaultProvider: z.enum(['tmdb', 'tvdb', 'anilist']).default('tvdb'),
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
   dryRun: z.boolean().default(false),
   seasonFolderFormat: z.string().default('Season {season}'),
