@@ -5,6 +5,7 @@ import { debugLog } from './debug';
 import { runBackup } from "./backup";
 import { GrabberService } from './grabber_service';
 import { JellyfinSync } from '../providers/jellyfin/sync';
+import { pollSystemHealth } from './pipeline/health_poller';
 
 export type TaskName = 
   | 'sync-shows' 
@@ -12,6 +13,8 @@ export type TaskName =
   | 'backup' 
   | 'rss-scan'
   | 'housekeeping'
+  | 'pipeline-cleanup'
+  | 'health-check'
   | 'update-check'
   | 'watcher-monitor'
   | 'jellyfin-sync';
@@ -104,6 +107,32 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     defaultEnabled: true,
     action: async () => {
       debugLog('Task update-check complete: Update check performed');
+    },
+  },
+  'pipeline-cleanup': {
+    name: 'pipeline-cleanup',
+    displayName: 'Pipeline Event Cleanup',
+    description: 'Purge old pipeline event log entries (search/grab/rejection history) - this table is the highest-volume in the DB, so it gets its own daily cadence rather than waiting on weekly housekeeping',
+    category: 'maintenance',
+    intervalMinutes: 1440, // Daily
+    defaultEnabled: true,
+    action: async () => {
+      const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const result = db.cleanupOldPipelineEvents(cutoff);
+      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days`);
+    },
+  },
+  'health-check': {
+    name: 'health-check',
+    displayName: 'System Health Check',
+    description: 'Poll every configured indexer, download client, and import path and record current status - powers the unified health dashboard\'s "is everything fine" signal',
+    category: 'system',
+    intervalMinutes: 5, // Frequent - staleness matters more here than for most other tasks
+    defaultEnabled: true,
+    action: async (config) => {
+      await pollSystemHealth(config);
+      const snapshot = db.getHealthSnapshot();
+      debugLog(`Task health-check complete: overall ${snapshot.overallStatus}`);
     },
   },
   'watcher-monitor': {
@@ -207,9 +236,9 @@ export class Scheduler {
           const duration = Date.now() - startTime;
           
           // Calculate next execution
-          const nextDate = new Date(Date.now() + task.interval_minutes * 60 * 1000);
+          const nextDate = new Date(Date.now() + (task.interval_minutes ?? 1440) * 60 * 1000);
           db.updateTaskExecution(task.name, duration, nextDate.toISOString());
-          
+
           db.logEvent({
             type: 'scheduler',
             entityType: 'task',
@@ -219,7 +248,7 @@ export class Scheduler {
         } catch (err) {
           debugLog(`Scheduler error running task ${task.name}: ${err}`);
           // Still move next execution forward to avoid tight-looping on error
-          const nextDate = new Date(Date.now() + task.interval_minutes * 60 * 1000);
+          const nextDate = new Date(Date.now() + (task.interval_minutes ?? 1440) * 60 * 1000);
           db.updateTaskExecution(task.name, 0, nextDate.toISOString());
           
           db.logEvent({
@@ -242,11 +271,11 @@ export class Scheduler {
 
     db.saveTask({
       name: task.name,
-      intervalMinutes: updates.intervalMinutes ?? task.interval_minutes,
-      enabled: updates.enabled ?? task.enabled,
-      lastExecution: task.last_execution,
-      lastDurationMs: task.last_duration_ms,
-      nextExecution: task.next_execution,
+      intervalMinutes: updates.intervalMinutes ?? task.interval_minutes ?? 1440,
+      enabled: updates.enabled ?? task.enabled === 1,
+      lastExecution: task.last_execution ?? undefined,
+      lastDurationMs: task.last_duration_ms ?? undefined,
+      nextExecution: task.next_execution ?? undefined,
     });
   }
 
@@ -267,7 +296,7 @@ export class Scheduler {
       // Update execution time but keep the existing schedule
       const task = db.listTasks().find(t => t.name === name);
       if (task) {
-        db.updateTaskExecution(name, duration, task.next_execution || new Date(Date.now() + task.interval_minutes * 60 * 1000).toISOString());
+        db.updateTaskExecution(name, duration, task.next_execution ?? new Date(Date.now() + (task.interval_minutes ?? 1440) * 60 * 1000).toISOString());
       }
       
       db.logEvent({

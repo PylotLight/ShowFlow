@@ -83,4 +83,9 @@ export class TorboxClient {
       method: 'GET',
     });
   }
+
+  /** Lightweight credential/connectivity check - used by the health poller, not the download flow. */
+  async getUserInfo() {
+    return this.request<any>('/v1/api/user/me', { method: 'GET' });
+  }
 }

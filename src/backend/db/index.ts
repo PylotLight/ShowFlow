@@ -1,12 +1,17 @@
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
+import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema';
 
-import { createTables, seedDefaults, migrateQualityIds } from './init';
+import { seedDefaults, migrateQualityIds } from './init';
 import { backfillShowTitles } from './shows';
 import * as shows from './shows';
 import * as config from './config';
 import * as system from './system';
+import * as pipeline from './pipeline';
+import * as analytics from './analytics';
+import * as health from './health';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -19,8 +24,6 @@ export {
   DEFAULT_CACHE_TTL_MS,
 } from './schemas';
 
-const schemaModule = { ...schema };
-
 export class DatabaseManager {
   public db: Database;
   public drizz: ReturnType<typeof drizzle>;
@@ -30,7 +33,7 @@ export class DatabaseManager {
     this.dbPath = dbPath;
     this.db = new Database(this.dbPath);
     this.db.run('PRAGMA foreign_keys = ON');
-    this.drizz = drizzle(this.db, { schema: schemaModule });
+    this.drizz = drizzle(this.db, { schema });
     this.init();
   }
 
@@ -39,7 +42,7 @@ export class DatabaseManager {
     this.dbPath = altPath ?? this.dbPath;
     this.db = new Database(this.dbPath);
     this.db.run('PRAGMA foreign_keys = ON');
-    this.drizz = drizzle(this.db, { schema: schemaModule });
+    this.drizz = drizzle(this.db, { schema });
     this.init();
   }
 
@@ -52,9 +55,15 @@ export class DatabaseManager {
   }
 
   private init() {
-    createTables(this.db);
-    seedDefaults(this.db);
-    migrateQualityIds(this.db);
+    // Table creation/alteration lives entirely in Drizzle migrations now -
+    // this applies whatever hasn't been applied yet to this DB file. Run
+    // `bunx drizzle-kit generate` after changing schema.ts to produce a new
+    // migration, then just start the app - no separate `migrate` command
+    // to remember to run.
+    migrate(this.drizz, { migrationsFolder: new URL('./migrations', import.meta.url).pathname });
+
+    seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
+    migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
 
     const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;
     if (!titleCount || titleCount.c === 0) {
@@ -138,6 +147,28 @@ export class DatabaseManager {
   listRecentEvents(limit?: number) { return system.listRecentEvents(this, limit); }
   cleanupOldLogs(beforeDate: string) { return system.cleanupOldLogs(this, beforeDate); }
   cleanupExpiredCache() { return system.cleanupExpiredCache(this); }
+  getCacheStats() { return system.getCacheStats(this); }
+
+  // ---- Pipeline event log -------------------------------------------------
+
+  logPipelineEvent(event: Parameters<typeof pipeline.logPipelineEvent>[1]) { return pipeline.logPipelineEvent(this, event); }
+  listPipelineEvents(filter: Parameters<typeof pipeline.listPipelineEvents>[1]) { return pipeline.listPipelineEvents(this, filter); }
+  getLatestPipelineEvent(showId: string, seasonNumber?: number, episodeNumber?: number) { return pipeline.getLatestPipelineEvent(this, showId, seasonNumber, episodeNumber); }
+  listRecentPipelineEvents(limit?: number) { return pipeline.listRecentPipelineEvents(this, limit); }
+  cleanupOldPipelineEvents(beforeDate: string) { return pipeline.cleanupOldPipelineEvents(this, beforeDate); }
+  getPipelineEventStats() { return pipeline.getPipelineEventStats(this); }
+  getHourlyPipelineEventCounts(hours?: number) { return pipeline.getHourlyPipelineEventCounts(this, hours); }
+  getNoisiestShows(limit?: number) { return pipeline.getNoisiestShows(this, limit); }
+
+  // ---- Analytics / DB usage -----------------------------------------------
+
+  getTableStats() { return analytics.getTableStats(this); }
+
+  // ---- System health snapshot ---------------------------------------------
+
+  upsertHealthStatus(input: Parameters<typeof health.upsertHealthStatus>[1]) { return health.upsertHealthStatus(this, input); }
+  removeHealthComponent(componentType: Parameters<typeof health.removeHealthComponent>[1], componentId: string) { return health.removeHealthComponent(this, componentType, componentId); }
+  getHealthSnapshot() { return health.getHealthSnapshot(this); }
 
   // ---- Show Profiles -----------------------------------------------------
 

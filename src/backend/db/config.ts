@@ -1,3 +1,5 @@
+import { eq, and, asc, desc } from 'drizzle-orm';
+import * as schema from './schema';
 import type { DatabaseManager } from './index';
 
 function normalizeIndexers(v: unknown): string[] {
@@ -9,82 +11,98 @@ function normalizeIndexers(v: unknown): string[] {
 // ---- Show Profiles ----
 
 export function listShowProfiles(self: DatabaseManager): { id: string; name: string; root_folder_path: string }[] {
-  return self.db.query('SELECT * FROM show_profiles ORDER BY name ASC').all() as { id: string; name: string; root_folder_path: string }[];
+  return self.drizz.select().from(schema.showProfiles).orderBy(asc(schema.showProfiles.name)).all();
 }
 
 export function saveShowProfile(self: DatabaseManager, id: string, name: string, rootFolderPath: string) {
-  self.db.run('INSERT OR REPLACE INTO show_profiles (id, name, root_folder_path) VALUES (?, ?, ?)', [id, name, rootFolderPath]);
+  self.drizz
+    .insert(schema.showProfiles)
+    .values({ id, name, root_folder_path: rootFolderPath })
+    .onConflictDoUpdate({ target: schema.showProfiles.id, set: { name, root_folder_path: rootFolderPath } })
+    .run();
 }
 
 export function removeShowProfile(self: DatabaseManager, id: string) {
-  self.db.run('DELETE FROM show_profiles WHERE id = ?', [id]);
+  self.drizz.delete(schema.showProfiles).where(eq(schema.showProfiles.id, id)).run();
 }
 
 export function getShowProfileRootFolder(self: DatabaseManager, profileId: string): string | null {
-  const row = self.db.query('SELECT root_folder_path FROM show_profiles WHERE id = ?').get(profileId) as { root_folder_path: string } | undefined;
+  const row = self.drizz.select({ root_folder_path: schema.showProfiles.root_folder_path })
+    .from(schema.showProfiles)
+    .where(eq(schema.showProfiles.id, profileId))
+    .get();
   return row?.root_folder_path ?? null;
 }
 
 // ---- Settings ----
 
 export function getSetting(self: DatabaseManager, key: string) {
-  const row = self.db.query('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  const row = self.drizz.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key)).get();
   return row ? row.value : null;
 }
 
 export function setSetting(self: DatabaseManager, key: string, value: any) {
   const val = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  self.db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, val]);
+  self.drizz
+    .insert(schema.settings)
+    .values({ key, value: val })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: val } })
+    .run();
 }
 
 export function removeSetting(self: DatabaseManager, key: string) {
-  self.db.run('DELETE FROM settings WHERE key = ?', [key]);
+  self.drizz.delete(schema.settings).where(eq(schema.settings.key, key)).run();
 }
 
 export function getAllSettings(self: DatabaseManager) {
-  return self.db.query('SELECT * FROM settings').all() as { key: string; value: string }[];
+  return self.drizz.select().from(schema.settings).all();
 }
 
 // ---- Quality ----
 
 export function saveQuality(self: DatabaseManager, q: { id: string; name: string; rank: number; minSize?: number; maxSize?: number }) {
-  self.db.run(
-    'INSERT OR REPLACE INTO quality_definitions (id, name, rank, min_size, max_size) VALUES (?, ?, ?, ?, ?)',
-    [q.id, q.name, q.rank, q.minSize ?? null, q.maxSize ?? null]
-  );
+  const values = { id: q.id, name: q.name, rank: q.rank, min_size: q.minSize ?? null, max_size: q.maxSize ?? null };
+  self.drizz
+    .insert(schema.qualityDefinitions)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.qualityDefinitions.id, set: values })
+    .run();
 }
 
 export function getQuality(self: DatabaseManager, id: string) {
-  return self.db.query('SELECT * FROM quality_definitions WHERE id = ?').get(id) as any;
+  return self.drizz.select().from(schema.qualityDefinitions).where(eq(schema.qualityDefinitions.id, id)).get();
 }
 
 export function removeQuality(self: DatabaseManager, id: string) {
-  self.db.run('DELETE FROM quality_definitions WHERE id = ?', [id]);
+  self.drizz.delete(schema.qualityDefinitions).where(eq(schema.qualityDefinitions.id, id)).run();
 }
 
 export function listQualities(self: DatabaseManager) {
-  return self.db.query('SELECT * FROM quality_definitions ORDER BY rank DESC').all() as any[];
+  return self.drizz.select().from(schema.qualityDefinitions).orderBy(desc(schema.qualityDefinitions.rank)).all();
 }
 
 // ---- Quality Profiles ----
 
 export function saveProfile(self: DatabaseManager, p: { id: string; name: string; cutoffId?: string; indexers?: string }) {
   const indexersStr = p.indexers ?? '{}';
-  self.db.run(
-    'INSERT OR REPLACE INTO quality_profiles (id, name, cutoff_quality_id, indexers) VALUES (?, ?, ?, ?)',
-    [p.id, p.name, p.cutoffId ?? null, indexersStr]
-  );
+  const values = { id: p.id, name: p.name, cutoff_quality_id: p.cutoffId ?? null, indexers: indexersStr };
+  self.drizz
+    .insert(schema.qualityProfiles)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.qualityProfiles.id, set: values })
+    .run();
 }
 
 export function saveProfileIndexers(self: DatabaseManager, id: string, indexers: Record<string, string[]>) {
-  self.db.run(
-    'UPDATE quality_profiles SET indexers = ? WHERE id = ?',
-    [JSON.stringify(indexers), id]
-  );
+  self.drizz
+    .update(schema.qualityProfiles)
+    .set({ indexers: JSON.stringify(indexers) })
+    .where(eq(schema.qualityProfiles.id, id))
+    .run();
 }
 
 export function getProfileIndexers(self: DatabaseManager, id: string): string[] {
-  const row = self.db.query('SELECT indexers FROM quality_profiles WHERE id = ?').get(id) as any;
+  const row = self.drizz.select({ indexers: schema.qualityProfiles.indexers }).from(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).get();
   if (!row?.indexers) return [];
   try {
     return normalizeIndexers(JSON.parse(row.indexers));
@@ -96,87 +114,117 @@ export function getProfileIndexers(self: DatabaseManager, id: string): string[] 
 export function resolveProfileId(self: DatabaseManager, id: string | null | undefined): string | undefined {
   if (id && getProfile(self, id)) return id;
   const profiles = listProfiles(self);
-  return profiles.length > 0 ? profiles[0].id : undefined;
+  return profiles.length > 0 ? profiles[0]!.id : undefined;
 }
 
-export function getProfile(self: DatabaseManager, id: string) {
-  const row = self.db.query('SELECT * FROM quality_profiles WHERE id = ?').get(id) as any;
-  if (row?.indexers) {
-    try { row.indexers = normalizeIndexers(JSON.parse(row.indexers)); } catch { row.indexers = []; }
+export function getProfile(self: DatabaseManager, id: string): any {
+  const row = self.drizz.select().from(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).get();
+  if (!row) return row;
+  const result: any = { ...row };
+  if (result.indexers) {
+    try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
   }
-  return row;
+  return result;
 }
 
 export function removeProfile(self: DatabaseManager, id: string) {
-  self.db.run('DELETE FROM quality_profiles WHERE id = ?', [id]);
+  self.drizz.delete(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).run();
 }
 
-export function listProfiles(self: DatabaseManager) {
-  const rows = self.db.query('SELECT * FROM quality_profiles').all() as any[];
-  for (const row of rows) {
-    if (row.indexers) {
-      try { row.indexers = normalizeIndexers(JSON.parse(row.indexers)); } catch { row.indexers = []; }
+export function listProfiles(self: DatabaseManager): any[] {
+  const rows = self.drizz.select().from(schema.qualityProfiles).all();
+  return rows.map((row) => {
+    const result: any = { ...row };
+    if (result.indexers) {
+      try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
     }
-  }
-  return rows;
+    return result;
+  });
 }
 
 // ---- Custom Formats ----
 
 export function saveCustomFormat(self: DatabaseManager, f: { id: string; name: string; regex: string; score: number }) {
-  self.db.run(
-    'INSERT OR REPLACE INTO custom_formats (id, name, regex, score) VALUES (?, ?, ?, ?)',
-    [f.id, f.name, f.regex, f.score]
-  );
+  self.drizz
+    .insert(schema.customFormats)
+    .values(f)
+    .onConflictDoUpdate({ target: schema.customFormats.id, set: f })
+    .run();
 }
 
 export function getCustomFormat(self: DatabaseManager, id: string) {
-  return self.db.query('SELECT * FROM custom_formats WHERE id = ?').get(id) as any;
+  return self.drizz.select().from(schema.customFormats).where(eq(schema.customFormats.id, id)).get();
 }
 
 export function removeCustomFormat(self: DatabaseManager, id: string) {
-  self.db.run('DELETE FROM custom_formats WHERE id = ?', [id]);
+  self.drizz.delete(schema.customFormats).where(eq(schema.customFormats.id, id)).run();
 }
 
 export function listCustomFormats(self: DatabaseManager) {
-  return self.db.query('SELECT * FROM custom_formats').all() as any[];
+  return self.drizz.select().from(schema.customFormats).all();
 }
 
 // ---- Profile-Format mapping ----
 
 export function addProfileFormat(self: DatabaseManager, profileId: string, formatId: string, type: 'bonus' | 'required' | 'forbidden' = 'bonus') {
-  self.db.run('INSERT OR REPLACE INTO profile_formats (profile_id, format_id, type) VALUES (?, ?, ?)', [profileId, formatId, type]);
+  self.drizz
+    .insert(schema.profileFormats)
+    .values({ profile_id: profileId, format_id: formatId, type })
+    .onConflictDoUpdate({ target: [schema.profileFormats.profile_id, schema.profileFormats.format_id], set: { type } })
+    .run();
 }
 
 export function removeProfileFormat(self: DatabaseManager, profileId: string, formatId: string) {
-  self.db.run('DELETE FROM profile_formats WHERE profile_id = ? AND format_id = ?', [profileId, formatId]);
+  self.drizz
+    .delete(schema.profileFormats)
+    .where(and(eq(schema.profileFormats.profile_id, profileId), eq(schema.profileFormats.format_id, formatId)))
+    .run();
 }
 
 export function getProfileFormats(self: DatabaseManager, profileId: string) {
-  return self.db.query(`
-    SELECT cf.*, pf.type as profile_format_type
-    FROM custom_formats cf
-    JOIN profile_formats pf ON cf.id = pf.format_id
-    WHERE pf.profile_id = ?
-  `).all(profileId) as any[];
+  return self.drizz
+    .select({
+      id: schema.customFormats.id,
+      name: schema.customFormats.name,
+      regex: schema.customFormats.regex,
+      score: schema.customFormats.score,
+      profile_format_type: schema.profileFormats.type,
+    })
+    .from(schema.customFormats)
+    .innerJoin(schema.profileFormats, eq(schema.customFormats.id, schema.profileFormats.format_id))
+    .where(eq(schema.profileFormats.profile_id, profileId))
+    .all();
 }
 
 // ---- Profile-Quality mapping ----
 
 export function addProfileQuality(self: DatabaseManager, profileId: string, qualityId: string) {
-  self.db.run('INSERT OR IGNORE INTO profile_qualities (profile_id, quality_id) VALUES (?, ?)', [profileId, qualityId]);
+  self.drizz
+    .insert(schema.profileQualities)
+    .values({ profile_id: profileId, quality_id: qualityId })
+    .onConflictDoNothing()
+    .run();
 }
 
 export function removeProfileQuality(self: DatabaseManager, profileId: string, qualityId: string) {
-  self.db.run('DELETE FROM profile_qualities WHERE profile_id = ? AND quality_id = ?', [profileId, qualityId]);
+  self.drizz
+    .delete(schema.profileQualities)
+    .where(and(eq(schema.profileQualities.profile_id, profileId), eq(schema.profileQualities.quality_id, qualityId)))
+    .run();
 }
 
 export function getProfileQualities(self: DatabaseManager, profileId: string) {
-  return self.db.query(`
-    SELECT qd.*
-    FROM quality_definitions qd
-    JOIN profile_qualities pq ON qd.id = pq.quality_id
-    WHERE pq.profile_id = ?
-    ORDER BY qd.rank DESC
-  `).all(profileId) as any[];
+  return self.drizz
+    .select({
+      id: schema.qualityDefinitions.id,
+      name: schema.qualityDefinitions.name,
+      rank: schema.qualityDefinitions.rank,
+      min_size: schema.qualityDefinitions.min_size,
+      max_size: schema.qualityDefinitions.max_size,
+    })
+    .from(schema.qualityDefinitions)
+    .innerJoin(schema.profileQualities, eq(schema.qualityDefinitions.id, schema.profileQualities.quality_id))
+    .where(eq(schema.profileQualities.profile_id, profileId))
+    .orderBy(desc(schema.qualityDefinitions.rank))
+    .all();
 }
