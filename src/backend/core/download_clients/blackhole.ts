@@ -452,6 +452,14 @@ export class BlackholeClient implements DownloadClient {
         });
       }
 
+      for (const ep of episodes) {
+        db.logPipelineEvent({
+          showId, seasonNumber: ep.season, episodeNumber: ep.episode,
+          stage: 'IMPORTING', eventType: 'import_started',
+          message: `Processing "${filename}" for ${show.title}`,
+          releaseTitle: filename,
+        });
+      }
 
       const rootFolder = db.getShowRootFolder(showId);
       if (!rootFolder) {
@@ -461,6 +469,14 @@ export class BlackholeClient implements DownloadClient {
           entityType: 'file',
           message: `No root folder configured for ${show.title}. File ${filename} skipped.`
         });
+        for (const ep of episodes) {
+          db.logPipelineEvent({
+            showId, seasonNumber: ep.season, episodeNumber: ep.episode,
+            stage: 'FAILED', eventType: 'import_failed',
+            message: `No root folder configured for ${show.title}`,
+            releaseTitle: filename,
+          });
+        }
         return;
       }
       const finalPath = path.join(rootFolder, proposedPath);
@@ -497,6 +513,14 @@ export class BlackholeClient implements DownloadClient {
               entityType: 'file',
               message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
             });
+            if (firstEp) {
+              db.logPipelineEvent({
+                showId, seasonNumber: firstEp.season, episodeNumber: firstEp.episode,
+                stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
+                message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
+                releaseTitle: filename,
+              });
+            }
             return;
           } else {
             console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
@@ -552,6 +576,16 @@ export class BlackholeClient implements DownloadClient {
           absoluteNumber: ep.absoluteNumber,
           title: ep.title,
           filePath: movedTo,
+        });
+      }
+
+      for (const ep of episodes) {
+        db.logPipelineEvent({
+          showId, seasonNumber: ep.season, episodeNumber: ep.episode,
+          stage: 'AVAILABLE', eventType: 'import_completed',
+          message: `Imported "${filename}" for ${show.title}`,
+          releaseTitle: filename,
+          metadata: { filePath: movedTo },
         });
       }
     } catch (e) {
