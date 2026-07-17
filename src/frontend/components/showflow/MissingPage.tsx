@@ -6,6 +6,7 @@ import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
+import { TraceDialog } from "@frontend/components/showflow/TraceDialog";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
 
@@ -34,12 +35,14 @@ function EpisodeRow({
   ep,
   onSearch,
   onGrab,
+  onTrace,
   grabbing,
   grabbed,
 }: {
   ep: MissingEpisode;
   onSearch: () => void;
   onGrab: () => void;
+  onTrace: () => void;
   grabbing: boolean;
   grabbed: boolean;
 }) {
@@ -52,28 +55,31 @@ function EpisodeRow({
       <span className="shrink-0 font-mono text-caption text-muted-foreground w-16 text-right">
         {formatAirDate(ep.airDate)}
       </span>
-      <div className="flex items-center gap-1.5 shrink-0">
-        <Button
-          size="sm"
-          variant={grabbed ? "outline" : "default"}
-          onClick={onGrab}
-          disabled={grabbing}
-          className="h-7 px-2 text-xs"
-        >
-          {grabbing ? (
-            <Loader2Icon className="size-3 animate-spin" />
-          ) : grabbed ? (
-            <CheckIcon className="size-3" />
-          ) : (
-            <DownloadIcon className="size-3" />
-          )}
-          {grabbed ? "Grabbed" : "Auto"}
-        </Button>
-        <Button size="sm" variant="outline" onClick={onSearch} className="h-7 px-2 text-xs">
-          <SearchIcon className="size-3" />
-          Search
-        </Button>
-      </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            size="sm"
+            variant={grabbed ? "outline" : "default"}
+            onClick={onGrab}
+            disabled={grabbing}
+            className="h-7 px-2 text-xs"
+          >
+            {grabbing ? (
+              <Loader2Icon className="size-3 animate-spin" />
+            ) : grabbed ? (
+              <CheckIcon className="size-3" />
+            ) : (
+              <DownloadIcon className="size-3" />
+            )}
+            {grabbed ? "Grabbed" : "Auto"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onTrace} className="h-7 px-2 text-xs">
+            Trace
+          </Button>
+          <Button size="sm" variant="outline" onClick={onSearch} className="h-7 px-2 text-xs">
+            <SearchIcon className="size-3" />
+            Search
+          </Button>
+        </div>
     </div>
   );
 }
@@ -85,6 +91,7 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
   const [grabbedKeys, setGrabbedKeys] = React.useState<Set<string>>(new Set());
   const [grabMsg, setGrabMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [searchTarget, setSearchTarget] = React.useState<MissingEpisode | null>(null);
+  const [traceTarget, setTraceTarget] = React.useState<MissingEpisode | null>(null);
 
   const load = React.useCallback(() => {
     fetch("/api/missing")
@@ -201,6 +208,7 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
                         ep={ep}
                         onSearch={() => setSearchTarget(ep)}
                         onGrab={() => handleGrab(ep)}
+                        onTrace={() => setTraceTarget(ep)}
                         grabbing={grabbing === k}
                         grabbed={grabbedKeys.has(k)}
                       />
@@ -225,6 +233,17 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
             setGrabMsg({ ok: !message.toLowerCase().includes("fail"), text: message });
             setGrabbedKeys((prev) => new Set(prev).add(epKey(searchTarget)));
           }}
+        />
+      )}
+
+      {traceTarget && (
+        <TraceDialog
+          open={!!traceTarget}
+          onOpenChange={(open) => { if (!open) setTraceTarget(null); }}
+          showId={traceTarget.showId}
+          showTitle={traceTarget.showTitle}
+          season={traceTarget.season}
+          episode={traceTarget.episode}
         />
       )}
     </div>

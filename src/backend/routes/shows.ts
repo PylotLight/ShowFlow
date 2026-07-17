@@ -473,6 +473,33 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    "/api/shows/:id/seasons/:season/episodes/:episode/trace": {
+      async GET(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const season = parseInt(req.params.season!, 10);
+          const episode = parseInt(req.params.episode!, 10);
+          const events = db.listPipelineEvents({ showId, seasonNumber: season, episodeNumber: episode });
+          return json(
+            events.map((e: any) => ({
+              id: e.id,
+              stage: e.stage,
+              eventType: e.event_type,
+              reasonCode: e.reason_code,
+              reasonCategory: e.reason_category,
+              message: e.message,
+              releaseTitle: e.release_title,
+              indexerName: e.indexer_name,
+              metadata: e.metadata_json ? JSON.parse(e.metadata_json) : null,
+              createdAt: toIsoUtc(e.created_at),
+            })),
+          );
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/calendar": {
       async GET(req: RouteReq) {
         try {
