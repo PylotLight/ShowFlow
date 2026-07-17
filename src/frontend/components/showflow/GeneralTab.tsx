@@ -1,3 +1,4 @@
+import * as React from "react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
@@ -6,12 +7,21 @@ import { ShowProfileManager } from "./ShowProfileManager";
 import { UpdatesPanel } from "./UpdatesPanel";
 import { FieldRow } from "./SettingsShared";
 
-export function GeneralTab({ config, saveConfig, accent, setAccent }: {
+export function GeneralTab({ config, saveConfig, accent, setAccent, scrollToSection }: {
   config: any;
   saveConfig: (updates: Record<string, any>) => void;
   accent: string;
   setAccent: (c: string) => void;
+  scrollToSection?: string;
 }) {
+  const updatesRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (scrollToSection === "updates" && updatesRef.current) {
+      updatesRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [scrollToSection]);
+
   return (
     <>
       <GlassPanel className="p-6 space-y-5">
@@ -73,7 +83,9 @@ export function GeneralTab({ config, saveConfig, accent, setAccent }: {
         </FieldRow>
       </GlassPanel>
 
-      <UpdatesPanel />
+      <div ref={updatesRef} id="updates">
+        <UpdatesPanel />
+      </div>
     </>
   );
 }

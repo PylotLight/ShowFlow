@@ -55,6 +55,8 @@ const DEFAULTS: ThemeConfig = {
   input: '#ffffff1f',
 };
 
+export const THEME_DEFAULTS = DEFAULTS;
+
 const CSS_VAR_MAP: Record<keyof ThemeConfig, string> = {
   signal: '--signal',
   accentAmber: '--accent-amber',

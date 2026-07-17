@@ -20,7 +20,7 @@ export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" |
 interface SidebarProps {
   activeItem: NavItem;
   onChange: (item: NavItem) => void;
-  onSettingsTab?: (tab: string) => void;
+  onSettingsTab?: (tab: string, scrollTo?: string) => void;
   className?: string;
 }
 
@@ -118,7 +118,6 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
     { id: "tasks", label: "Tasks" },
     { id: "backup", label: "Backup" },
     { id: "debug", label: "Debug" },
-    { id: "updates", label: "Updates" },
   ];
 
   return (
@@ -318,7 +317,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                     v{appVersion || "—"}
                   </span>
                   <button
-                    onClick={() => { onChange("settings"); onSettingsTab?.("updates"); }}
+                    onClick={() => { onChange("settings"); onSettingsTab?.("general", "updates"); }}
                     className="font-mono text-[10px] text-signal hover:text-signal/80 transition-colors hidden lg:inline"
                   >
                     Updates

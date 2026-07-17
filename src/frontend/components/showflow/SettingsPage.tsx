@@ -30,7 +30,7 @@ const SETTINGS_TABS = [
   { id: "debug", label: "Debug" },
 ];
 
-export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => void; initialTab?: string }) {
+export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: { onDone: () => void; initialTab?: string; scrollToSection?: string }) {
   const [tab, setTab] = React.useState(initialTab || "general");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
@@ -420,6 +420,7 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
             saveConfig={saveConfig}
             accent={accent}
             setAccent={handleAccentChange}
+            scrollToSection={scrollToSection}
           />
         )}
 

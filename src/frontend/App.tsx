@@ -26,6 +26,7 @@ export function App() {
   const [selected, setSelected] = React.useState<ShowSummary | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
+  const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
 
   React.useEffect(() => {
     loadTheme().then((theme) => {
@@ -63,7 +64,7 @@ export function App() {
       <Sidebar 
         activeItem={activeNav} 
         onChange={(item) => { setActiveNav(item); setSelected(null); }}
-        onSettingsTab={(tab) => { setSettingsInitialTab(tab); setActiveNav("settings"); setSelected(null); }}
+        onSettingsTab={(tab, scrollTo) => { setSettingsInitialTab(tab); setSettingsScrollTo(scrollTo); setActiveNav("settings"); setSelected(null); }}
       />
 
       {/* Main Viewport Workspace */}
@@ -129,8 +130,9 @@ export function App() {
           ) : activeNav === "settings" ? (
             <SettingsPage
               key={settingsInitialTab}
-              onDone={() => setActiveNav("dashboard")}
+              onDone={() => { setActiveNav("dashboard"); setSettingsScrollTo(undefined); }}
               initialTab={settingsInitialTab}
+              scrollToSection={settingsScrollTo}
             />
           ) : activeNav === "queue" ? (
             <QueuePage key={refreshKey} />
