@@ -88,15 +88,11 @@ export function App() {
         <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-6 animate-page-enter">
           {activeNav === "dashboard" ? (
             <div className="h-full flex flex-col overflow-hidden">
-              <HeaderActions>
-                <div className="ml-auto flex items-center gap-4">
-                  <AddShowDialog onAdded={() => setRefreshKey((k) => k + 1)} />
-                </div>
-              </HeaderActions>
               <Dashboard
                 key={refreshKey}
                 onSelectShow={selectShow}
                 onShowCalendar={() => setActiveNav("agenda")}
+                onAddShow={() => setRefreshKey((k) => k + 1)}
               />
             </div>
           ) : activeNav === "agenda" ? (

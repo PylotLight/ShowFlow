@@ -6,6 +6,7 @@ import * as React from "react";
 import { Skeleton } from "@frontend/components/ui/skeleton";
 import { EventTicker, type TickerItem } from "@frontend/components/showflow/EventTicker";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { HeaderActions } from "@frontend/lib/header-actions";
 import { WatcherPanel, type ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
@@ -189,9 +190,11 @@ function DashboardSkeleton() {
 function Dashboard({
   onSelectShow,
   onShowCalendar,
+  onAddShow,
 }: {
   onSelectShow: (show: ShowSummary) => void;
   onShowCalendar: () => void;
+  onAddShow: () => void;
 }) {
   const [shows, setShows] = React.useState<ShowSummary[] | null>(null);
   const [upcoming, setUpcoming] = React.useState<UpcomingEpisode[] | null>(null);
@@ -318,7 +321,7 @@ function Dashboard({
   return (
     <div className="h-full flex flex-col gap-6">
       <HeaderActions>
-        <div className="relative ml-auto">
+        <div className="ml-auto flex items-center gap-3">
           <ActionsMenu
             syncingAll={syncingAll}
             syncProgress={syncProgress}
@@ -348,6 +351,7 @@ function Dashboard({
               }
             }}
           />
+          <AddShowDialog onAdded={onAddShow} />
         </div>
       </HeaderActions>
       {processingFiles.length > 0 && (
