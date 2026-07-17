@@ -1,5 +1,5 @@
 import {
-  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw,
+  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw, Menu,
 } from "lucide-react";
 import * as React from "react";
 
@@ -89,6 +89,60 @@ function getRowProximity(airDate: string): { color: string; dot: string } {
   if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
   if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
   return { color: "text-white/50", dot: "bg-white/30" };
+}
+
+function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, onMetadata }: {
+  syncingAll: boolean;
+  syncProgress: { synced: number; total: number; errors: number } | null;
+  onScan: () => void;
+  onRescan: () => void;
+  onUpgrades: () => void;
+  onMetadata: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
+      >
+        <Menu className="size-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-white/10 bg-[#181c2e] shadow-xl shadow-black/40 py-1.5 z-50 animate-fade-in [&>*]:px-3 [&>*]:py-2 [&>*]:text-xs [&>*]:font-medium [&>*]:text-white/80 [&>*]:flex [&>*]:items-center [&>*]:gap-2.5 [&>*]:w-full [&>*]:transition-colors">
+          <button onClick={() => { onScan(); setOpen(false); }} className="hover:bg-white/[0.04]">
+            <Scan className="size-4 text-signal" />
+            Scan
+          </button>
+          <button onClick={() => { onRescan(); setOpen(false); }} className="hover:bg-white/[0.04]">
+            <RotateCcw className="size-4 text-accent-amber" />
+            Rescan Watch Folder
+          </button>
+          <button onClick={() => { onUpgrades(); setOpen(false); }} className="hover:bg-white/[0.04]">
+            <RefreshCw className="size-4 text-blue-400" />
+            Check Upgrades
+          </button>
+          <div className="border-t border-white/5 my-1" />
+          <button onClick={() => { onMetadata(); setOpen(false); }} disabled={syncingAll} className="hover:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed">
+            <Activity className={`size-4 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
+            {syncingAll ? 'Syncing...' : 'Refresh Metadata'}
+            {syncProgress && <span className="ml-auto text-white/50">{syncProgress.synced}/{syncProgress.total}</span>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DashboardSkeleton() {
@@ -264,30 +318,14 @@ function Dashboard({
   return (
     <div className="h-full flex flex-col gap-6">
       <HeaderActions>
-        <div className="flex items-center gap-1.5 ml-auto">
-          <button
-            onClick={async () => { try { await fetch("/api/system/scan", { method: "POST" }); } catch {} }}
-            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
-          >
-            <Scan className="size-3.5 text-signal" />
-            <span>Scan</span>
-          </button>
-          <button
-            onClick={async () => { try { await fetch("/api/system/watch/rescan", { method: "POST" }); } catch {} }}
-            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
-          >
-            <RotateCcw className="size-3.5 text-accent-amber" />
-            <span>Rescan</span>
-          </button>
-          <button
-            onClick={async () => {}}
-            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
-          >
-            <RefreshCw className="size-3.5 text-blue-400" />
-            <span>Upgrades</span>
-          </button>
-          <button
-            onClick={async () => {
+        <div className="relative ml-auto">
+          <ActionsMenu
+            syncingAll={syncingAll}
+            syncProgress={syncProgress}
+            onScan={async () => { try { await fetch("/api/system/scan", { method: "POST" }); } catch {} }}
+            onRescan={async () => { try { await fetch("/api/system/watch/rescan", { method: "POST" }); } catch {} }}
+            onUpgrades={async () => {}}
+            onMetadata={async () => {
               if (syncingAll) return;
               setSyncingAll(true);
               setSyncProgress({ synced: 0, total: shows?.length || 0, errors: 0 });
@@ -309,13 +347,7 @@ function Dashboard({
                 setTimeout(() => setSyncProgress(null), 3000);
               }
             }}
-            disabled={syncingAll}
-            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Activity className={`size-3.5 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
-            <span>{syncingAll ? 'Syncing...' : 'Metadata'}</span>
-            {syncProgress && <span className="text-white/60">{syncProgress.synced}/{syncProgress.total}</span>}
-          </button>
+          />
         </div>
       </HeaderActions>
       {processingFiles.length > 0 && (

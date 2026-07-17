@@ -114,7 +114,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
         </Button>
       </div>
 
-      <div ref={listRef} className="flex flex-col-reverse divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
+      <div ref={listRef} className="flex flex-col divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
         {events === null ? (
           <div className="flex flex-col gap-2 py-3 px-1">
             {Array.from({ length: 3 }, (_, i) => (
