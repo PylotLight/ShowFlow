@@ -85,7 +85,7 @@ export function App() {
         )}
 
         {/* Dynamic Content Views */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-6 animate-page-enter">
           {activeNav === "dashboard" ? (
             <div className="h-full flex flex-col overflow-hidden">
               <HeaderActions>
