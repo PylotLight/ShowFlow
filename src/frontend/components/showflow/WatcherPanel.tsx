@@ -13,15 +13,21 @@ export interface ActivityEvent {
   timestamp: string;
 }
 
-/**
- * Watcher status + recent import activity. Polls rather than streaming -
- * file-drop events are bursty but not so time-critical that a 15s poll
- * feels stale, and it avoids a websocket for a v1 dashboard.
- */
+function LiveDot() {
+  return (
+    <span className="relative flex size-2 shrink-0">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75" />
+      <span className="relative inline-flex size-2 rounded-full bg-signal" />
+    </span>
+  );
+}
+
 function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEvent[]) => void; className?: string }) {
   const [watching, setWatching] = React.useState<boolean | null>(null);
   const [events, setEvents] = React.useState<ActivityEvent[] | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const prevCountRef = React.useRef(0);
 
   const refresh = React.useCallback(() => {
     fetch("/api/system/status")
@@ -29,7 +35,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
       .then((d) => setWatching(d.watching))
       .catch(() => setWatching(null));
 
-    fetch("/api/events?limit=6")
+    fetch("/api/events?limit=50")
       .then((r) => r.json())
       .then((data: ActivityEvent[]) => {
         setEvents(data);
@@ -44,6 +50,14 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
     return () => clearInterval(interval);
   }, [refresh]);
 
+  // Auto-scroll to latest event when new ones arrive
+  React.useEffect(() => {
+    if (events && events.length > prevCountRef.current && listRef.current) {
+      listRef.current.scrollTop = 0;
+    }
+    prevCountRef.current = events?.length ?? 0;
+  }, [events]);
+
   async function toggle() {
     setBusy(true);
     try {
@@ -53,6 +67,8 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
       setBusy(false);
     }
   }
+
+  const isLive = watching && events && events.length > 0 && Date.now() - new Date(events[0]!.timestamp).getTime() < 120_000;
 
   return (
     <GlassPanel className={cn("flex flex-col gap-4 p-5 min-h-0 overflow-hidden", className)}>
@@ -65,7 +81,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
             )}
           </div>
           <div>
-            <span className="font-display text-sm font-semibold tracking-wide block">Watcher Services</span>
+            <span className="font-display text-sm font-semibold tracking-wide block">Live Events</span>
             <div className="flex items-center gap-1.5 font-mono text-[9px] text-muted-foreground mt-0.5">
               <span
                 className={cn(
@@ -74,6 +90,15 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
                 )}
               />
               {watching === null ? "CHECKING STATUS" : watching ? "ACTIVE & WATCHING" : "SERVICE IDLE"}
+              {isLive && (
+                <>
+                  <span className="text-white/20">·</span>
+                  <span className="text-signal font-bold tracking-wider flex items-center gap-1">
+                    <LiveDot />
+                    LIVE
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -89,7 +114,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
         </Button>
       </div>
 
-      <div className="flex flex-col divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
+      <div ref={listRef} className="flex flex-col-reverse divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
         {events === null ? (
           <div className="flex flex-col gap-2 py-3 px-1">
             {Array.from({ length: 3 }, (_, i) => (
@@ -108,6 +133,8 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
           events.map((e) => {
             let badgeClass = "bg-white/5 text-white/60";
             let badgeLabel = e.type || "info";
+            const timeAgo = Date.now() - new Date(e.timestamp).getTime();
+            const isRecent = timeAgo < 30_000;
 
             if (e.type === "grab") {
               badgeClass = "bg-signal/15 text-signal font-semibold border border-signal/10";
@@ -139,14 +166,18 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
             }
 
             return (
-              <div key={e.id} className="flex items-start gap-3 py-2.5 hover:bg-white/[0.01] px-1 rounded transition-colors">
+              <div key={e.id} className={cn(
+                "flex items-start gap-3 py-2.5 px-1 rounded transition-colors",
+                isRecent ? "bg-signal/[0.02]" : "hover:bg-white/[0.01]",
+              )}>
                 <span className={cn("rounded px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider shrink-0 mt-0.5", badgeClass)}>
                   {badgeLabel}
                 </span>
                 <div className="flex flex-1 flex-col gap-0.5 min-w-0">
                   <span className="text-xs text-white/90 break-words leading-normal font-sans">{e.message}</span>
-                  <span className="text-muted-foreground font-mono text-[9px] tracking-tight">
-                    {new Date(e.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                  <span className="text-muted-foreground font-mono text-[9px] tracking-tight flex items-center gap-1.5">
+                    {new Date(e.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    {isRecent && <span className="size-1 rounded-full bg-signal/60" />}
                   </span>
                 </div>
               </div>

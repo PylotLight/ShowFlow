@@ -6,6 +6,7 @@ import * as React from "react";
 import { Skeleton } from "@frontend/components/ui/skeleton";
 import { EventTicker, type TickerItem } from "@frontend/components/showflow/EventTicker";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { HeaderActions } from "@frontend/lib/header-actions";
 import { WatcherPanel, type ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
@@ -262,6 +263,61 @@ function Dashboard({
 
   return (
     <div className="h-full flex flex-col gap-6">
+      <HeaderActions>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button
+            onClick={async () => { try { await fetch("/api/system/scan", { method: "POST" }); } catch {} }}
+            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
+          >
+            <Scan className="size-3.5 text-signal" />
+            <span>Scan</span>
+          </button>
+          <button
+            onClick={async () => { try { await fetch("/api/system/watch/rescan", { method: "POST" }); } catch {} }}
+            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
+          >
+            <RotateCcw className="size-3.5 text-accent-amber" />
+            <span>Rescan</span>
+          </button>
+          <button
+            onClick={async () => {}}
+            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98]"
+          >
+            <RefreshCw className="size-3.5 text-blue-400" />
+            <span>Upgrades</span>
+          </button>
+          <button
+            onClick={async () => {
+              if (syncingAll) return;
+              setSyncingAll(true);
+              setSyncProgress({ synced: 0, total: shows?.length || 0, errors: 0 });
+              try {
+                const res = await fetch("/api/shows/sync-all", { 
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ force: true })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                  setSyncProgress({ synced: data.syncedCount, total: data.syncedCount + data.skippedCount, errors: data.errorCount });
+                  fetchShowsAndCalendar();
+                }
+              } catch (err) {
+                console.error("Failed to sync all shows:", err);
+              } finally {
+                setSyncingAll(false);
+                setTimeout(() => setSyncProgress(null), 3000);
+              }
+            }}
+            disabled={syncingAll}
+            className="flex items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-white/[0.06] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Activity className={`size-3.5 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
+            <span>{syncingAll ? 'Syncing...' : 'Metadata'}</span>
+            {syncProgress && <span className="text-white/60">{syncProgress.synced}/{syncProgress.total}</span>}
+          </button>
+        </div>
+      </HeaderActions>
       {processingFiles.length > 0 && (
         <div className="glass-panel rounded-xl px-5 py-3 flex items-center gap-4 border-signal/15 shrink-0">
           <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -458,85 +514,8 @@ function Dashboard({
           )}
         </GlassPanel>
 
-        {/* RIGHT COLUMN: Context Rail */}
+        {/* RIGHT COLUMN: Live Events */}
         <div className="flex flex-col gap-4 w-[340px] min-w-[340px] shrink-0 min-h-0">
-
-          <GlassPanel className="p-4 space-y-3 shrink-0">
-            <div className="border-b border-white/5 pb-2">
-              <h3 className="font-display text-sm font-semibold text-white tracking-wide">
-                Quick Actions
-              </h3>
-            </div>
-            <div className="space-y-2">
-              <button
-                onClick={async () => {
-                  try {
-                    await fetch("/api/system/scan", { method: "POST" });
-                  } catch {}
-                }}
-                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
-              >
-                <Scan className="size-4 text-signal" />
-                <span>Run Full Scan</span>
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    await fetch("/api/system/watch/rescan", { method: "POST" });
-                  } catch {}
-                }}
-                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
-              >
-                <RotateCcw className="size-4 text-accent-amber" />
-                <span>Rescan Watch Folder</span>
-              </button>
-              <button
-                onClick={async () => {
-                  // Check Upgrades — placeholder for future integration
-                }}
-                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98]"
-              >
-                <RefreshCw className="size-4 text-blue-400" />
-                <span>Check Upgrades</span>
-              </button>
-              <button
-                onClick={async () => {
-                  if (syncingAll) return;
-                  setSyncingAll(true);
-                  setSyncProgress({ synced: 0, total: shows?.length || 0, errors: 0 });
-                  try {
-                    const res = await fetch("/api/shows/sync-all", { 
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ force: true }) // Force sync on manual refresh
-                    });
-                    const data = await res.json();
-                    if (data.ok) {
-                      setSyncProgress({ synced: data.syncedCount, total: data.syncedCount + data.skippedCount, errors: data.errorCount });
-                      // Refresh shows data after sync completes
-                      fetchShowsAndCalendar();
-                    }
-                  } catch (err) {
-                    console.error("Failed to sync all shows:", err);
-                  } finally {
-                    setSyncingAll(false);
-                    setTimeout(() => setSyncProgress(null), 3000);
-                  }
-                }}
-                disabled={syncingAll}
-                className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 text-xs font-medium text-white hover:bg-white/[0.06] transition-all duration-150 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Activity className={`size-4 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
-                <span>{syncingAll ? 'Syncing...' : 'Refresh Metadata'}</span>
-                {syncProgress && (
-                  <span className="text-white/50 ml-auto">
-                    {syncProgress.synced}/{syncProgress.total}
-                  </span>
-                )}
-              </button>
-            </div>
-          </GlassPanel>
-
           <WatcherPanel onEvents={setRecentEvents} className="flex-1 min-h-0" />
         </div>
       </div>
