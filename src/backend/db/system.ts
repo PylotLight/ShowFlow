@@ -1,40 +1,50 @@
+import { eq, lt, desc, sql } from 'drizzle-orm';
+import * as schema from './schema';
 import { DEFAULT_CACHE_TTL_MS } from './schemas';
 import type { DatabaseManager } from './index';
 
 // ---- Processed files (dedup) ----
 
 export function logProcessedFile(self: DatabaseManager, hash: string, original: string, final: string) {
-  self.db.run(
-    'INSERT OR REPLACE INTO processed_files (file_hash, original_path, final_path) VALUES (?, ?, ?)',
-    [hash, original, final]
-  );
+  self.drizz
+    .insert(schema.processedFiles)
+    .values({ file_hash: hash, original_path: original, final_path: final })
+    .onConflictDoUpdate({
+      target: schema.processedFiles.file_hash,
+      set: { original_path: original, final_path: final },
+    })
+    .run();
 }
 
 export function isProcessed(self: DatabaseManager, hash: string): boolean {
-  const row = self.db.query('SELECT file_hash FROM processed_files WHERE file_hash = ?').get(hash);
+  const row = self.drizz.select({ file_hash: schema.processedFiles.file_hash })
+    .from(schema.processedFiles)
+    .where(eq(schema.processedFiles.file_hash, hash))
+    .get();
   return !!row;
 }
 
 export function removeProcessedFile(self: DatabaseManager, hash: string) {
-  self.db.run('DELETE FROM processed_files WHERE file_hash = ?', [hash]);
+  self.drizz.delete(schema.processedFiles).where(eq(schema.processedFiles.file_hash, hash)).run();
 }
 
 // ---- Metadata cache ----
 
 export function getCache<T = any>(self: DatabaseManager, key: string): T | null {
-  const row = self.db.query('SELECT raw_json, expires_at FROM metadata_cache WHERE cache_key = ?').get(key) as
-    | { raw_json: string; expires_at: string }
-    | undefined;
+  const row = self.drizz.select({ raw_json: schema.metadataCache.raw_json, expires_at: schema.metadataCache.expires_at })
+    .from(schema.metadataCache)
+    .where(eq(schema.metadataCache.cache_key, key))
+    .get();
 
-  if (!row) return null;
+  if (!row || !row.expires_at) return null;
 
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    self.db.run('DELETE FROM metadata_cache WHERE cache_key = ?', [key]);
+    self.drizz.delete(schema.metadataCache).where(eq(schema.metadataCache.cache_key, key)).run();
     return null;
   }
 
   try {
-    return JSON.parse(row.raw_json) as T;
+    return row.raw_json ? (JSON.parse(row.raw_json) as T) : null;
   } catch {
     return null;
   }
@@ -42,10 +52,15 @@ export function getCache<T = any>(self: DatabaseManager, key: string): T | null 
 
 export function setCache(self: DatabaseManager, key: string, data: any, ttlMs: number = DEFAULT_CACHE_TTL_MS) {
   const expiresAt = new Date(Date.now() + ttlMs).toISOString();
-  self.db.run(
-    'INSERT OR REPLACE INTO metadata_cache (cache_key, raw_json, expires_at) VALUES (?, ?, ?)',
-    [key, JSON.stringify(data), expiresAt]
-  );
+  const rawJson = JSON.stringify(data);
+  self.drizz
+    .insert(schema.metadataCache)
+    .values({ cache_key: key, raw_json: rawJson, expires_at: expiresAt })
+    .onConflictDoUpdate({
+      target: schema.metadataCache.cache_key,
+      set: { raw_json: rawJson, expires_at: expiresAt },
+    })
+    .run();
 }
 
 // ---- Tasks ----
@@ -58,18 +73,35 @@ export function saveTask(self: DatabaseManager, task: {
   nextExecution?: string;
   enabled?: boolean;
 }) {
-  self.db.run(
-    'INSERT OR REPLACE INTO scheduled_tasks (name, interval_minutes, last_execution, last_duration_ms, next_execution, enabled) VALUES (?, ?, ?, ?, ?, ?)',
-    [task.name, task.intervalMinutes, task.lastExecution ?? null, task.lastDurationMs ?? null, task.nextExecution ?? null, task.enabled ?? 1]
-  );
+  const values = {
+    name: task.name,
+    interval_minutes: task.intervalMinutes,
+    last_execution: task.lastExecution ?? null,
+    last_duration_ms: task.lastDurationMs ?? null,
+    next_execution: task.nextExecution ?? null,
+    enabled: task.enabled === false ? 0 : 1,
+  };
+  self.drizz
+    .insert(schema.scheduledTasks)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.scheduledTasks.name, set: values })
+    .run();
 }
 
 export function listTasks(self: DatabaseManager) {
-  return self.db.query('SELECT * FROM scheduled_tasks').all() as any[];
+  return self.drizz.select().from(schema.scheduledTasks).all();
 }
 
 export function updateTaskExecution(self: DatabaseManager, name: string, durationMs: number, nextExecution: string) {
-  self.db.run('UPDATE scheduled_tasks SET last_execution = CURRENT_TIMESTAMP, last_duration_ms = ?, next_execution = ? WHERE name = ?', [durationMs, nextExecution, name]);
+  self.drizz
+    .update(schema.scheduledTasks)
+    .set({
+      last_execution: new Date().toISOString(),
+      last_duration_ms: durationMs,
+      next_execution: nextExecution,
+    })
+    .where(eq(schema.scheduledTasks.name, name))
+    .run();
 }
 
 // ---- Audit logs ----
@@ -81,22 +113,52 @@ export function logEvent(self: DatabaseManager, event: {
   message: string;
   metadata?: any;
 }) {
-  self.db.run(
-    'INSERT INTO audit_logs (event_type, entity_type, entity_id, message, metadata_json) VALUES (?, ?, ?, ?, ?)',
-    [event.type, event.entityType ?? null, event.entityId ?? null, event.message, event.metadata ? JSON.stringify(event.metadata) : null]
-  );
+  self.drizz
+    .insert(schema.auditLogs)
+    .values({
+      event_type: event.type,
+      entity_type: event.entityType ?? null,
+      entity_id: event.entityId ?? null,
+      message: event.message,
+      metadata_json: event.metadata ? JSON.stringify(event.metadata) : null,
+    })
+    .run();
 }
 
 export function listRecentEvents(self: DatabaseManager, limit = 20) {
-  return self.db.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?').all(limit) as any[];
+  return self.drizz
+    .select()
+    .from(schema.auditLogs)
+    .orderBy(desc(schema.auditLogs.id))
+    .limit(limit)
+    .all();
 }
 
 export function cleanupOldLogs(self: DatabaseManager, beforeDate: string) {
-  const result = self.db.run('DELETE FROM audit_logs WHERE timestamp < ?', [beforeDate]);
+  const result = self.drizz.delete(schema.auditLogs).where(lt(schema.auditLogs.timestamp, beforeDate)).run() as unknown as { changes: number };
   return result.changes;
 }
 
 export function cleanupExpiredCache(self: DatabaseManager) {
-  const result = self.db.run('DELETE FROM metadata_cache WHERE expires_at < CURRENT_TIMESTAMP');
+  const result = self.drizz
+    .delete(schema.metadataCache)
+    .where(lt(schema.metadataCache.expires_at, new Date().toISOString()))
+    .run() as unknown as { changes: number };
   return result.changes;
+}
+
+export interface CacheStats {
+  total: number;
+  expired: number;
+}
+
+/** Powers the analytics page's cache line - total vs. already-expired-but-not-yet-swept entries. */
+export function getCacheStats(self: DatabaseManager): CacheStats {
+  const nowIso = new Date().toISOString();
+  const total = self.drizz.select({ c: sql<number>`count(*)` }).from(schema.metadataCache).get()?.c ?? 0;
+  const expired = self.drizz.select({ c: sql<number>`count(*)` })
+    .from(schema.metadataCache)
+    .where(lt(schema.metadataCache.expires_at, nowIso))
+    .get()?.c ?? 0;
+  return { total, expired };
 }

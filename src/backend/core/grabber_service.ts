@@ -91,7 +91,12 @@ export class GrabberService {
     const anime = seriesType === 'anime' || seriesType === 'absolute';
     const indexers = this.getEnabledIndexers(profileId, seriesType);
     if (indexers.length === 0) {
-      return { error: 'No indexers configured. Add a Prowlarr or Native indexer in Settings > Indexers.' };
+      const message = 'No indexers configured. Add a Prowlarr or Native indexer in Settings > Indexers.';
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'FAILED', eventType: 'search_no_indexers', reasonCode: 'NO_INDEXERS_CONFIGURED', message,
+      });
+      return { error: message };
     }
 
     const query =
@@ -125,12 +130,19 @@ export class GrabberService {
         });
         allReleases.push(...results.map(r => ({ ...r, indexer })));
       } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
         logDebug({
           type: 'grabber',
           level: 'error',
           source: indexer.name,
           message: `Search error for "${query}"`,
-          error: e instanceof Error ? e.message : String(e),
+          error: errorMessage,
+        });
+        db.logPipelineEvent({
+          showId, seasonNumber: season, episodeNumber: episode ?? null,
+          stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
+          message: `${indexer.name} search failed: ${errorMessage}`,
+          indexerName: indexer.name,
         });
       }
     }
@@ -145,12 +157,53 @@ export class GrabberService {
         source: 'GrabberService',
         message: `Filtered ${removed}/${beforeFilter} results that don't match "${show.title} ${label}"`,
       });
+      const filteredOutTitles = allReleases
+        .filter(r => !isRelevantMatch(r.title, show.title, season, episode))
+        .map(r => r.title);
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'SEARCHING', eventType: 'release_filtered', reasonCode: 'TITLE_OR_SEASON_MISMATCH',
+        message: `${removed} release(s) filtered out - don't match "${show.title} ${label}"`,
+        metadata: { count: removed, sample: filteredOutTitles.slice(0, 50) },
+      });
     }
 
-    const releases = filtered
-      .map((r): ScoredRelease => ({ ...r, score: qualityEngine.getReleaseScore(r.title, profileId) }))
+    // Score every title-matched result, then split into accepted/rejected -
+    // rejected releases used to be thrown away here entirely (§2 of the
+    // pipeline design brief: "29 rejected" with no way to see which releases
+    // or why). They're logged as one aggregate event with a per-release
+    // breakdown in metadata rather than one row each, since a single search
+    // can produce dozens of rejects and this table is written to often.
+    const scored = filtered.map((r): ScoredRelease => ({ ...r, score: qualityEngine.getReleaseScore(r.title, profileId) }));
+    const rejected = scored.filter(r => r.score.rejected);
+    const releases = scored
       .filter(r => !r.score.rejected)
       .sort((a, b) => b.score.totalScore - a.score.totalScore);
+
+    if (rejected.length > 0) {
+      const breakdown: Record<string, number> = {};
+      for (const r of rejected) {
+        const code = r.score.rejectCode ?? 'QUALITY_UNKNOWN';
+        breakdown[code] = (breakdown[code] ?? 0) + 1;
+      }
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'SEARCHING', eventType: 'release_rejected',
+        message: `${rejected.length} release(s) rejected by quality profile`,
+        metadata: {
+          count: rejected.length,
+          breakdown,
+          releases: rejected.slice(0, 50).map(r => ({ title: r.title, code: r.score.rejectCode, reason: r.score.rejectReason })),
+        },
+      });
+    }
+
+    db.logPipelineEvent({
+      showId, seasonNumber: season, episodeNumber: episode ?? null,
+      stage: 'SEARCHING', eventType: 'search_completed',
+      message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
+      metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
+    });
 
     if (releases.length > 0) {
       logDebug({
@@ -159,11 +212,22 @@ export class GrabberService {
         source: 'GrabberService',
         message: `Best release: "${releases[0]!.title}" (score: ${releases[0]!.score.totalScore})`,
       });
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'SEARCHING', eventType: 'release_selected',
+        message: `Top pick selected: "${releases[0]!.title}" (score: ${releases[0]!.score.totalScore})`,
+        releaseTitle: releases[0]!.title,
+      });
     } else {
       logDebug({
         type: 'grabber',
         level: 'warn',
         source: 'GrabberService',
+        message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
+      });
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
         message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
       });
     }
@@ -206,6 +270,12 @@ export class GrabberService {
           type: 'grabber', level: 'info', source: 'GrabberService',
           message: `Skipping grab — "${best.title}" is not an upgrade over "${existingFilename}"`,
         });
+        db.logPipelineEvent({
+          showId, seasonNumber: season, episodeNumber: episode,
+          stage: 'WANTED', eventType: 'not_upgrade', reasonCode: 'NOT_AN_UPGRADE',
+          message: `"${best.title}" is not an upgrade over the existing file`,
+          releaseTitle: best.title,
+        });
         return {
           success: false,
           message: `Best found release (${best.title}) is not an upgrade over existing file.`,
@@ -214,7 +284,7 @@ export class GrabberService {
       }
     }
 
-    return this.grabRelease(best);
+    return this.grabRelease(best, { showId, season, episode });
   }
 
   /**
@@ -244,11 +314,20 @@ export class GrabberService {
       return { success: false, message: 'No releases found for this season' };
     }
 
-    return this.grabRelease(releases[0]!);
+    return this.grabRelease(releases[0]!, { showId, season });
   }
 
-  /** Grabs a specific, already-found release. Routes through TorBox if configured, otherwise falls back to the indexer's built-in grab (blackhole folder). */
-  async grabRelease(release: ScoredRelease): Promise<GrabResult> {
+  /**
+   * Grabs a specific, already-found release. Routes through TorBox if
+   * configured, otherwise falls back to the indexer's built-in grab
+   * (blackhole folder).
+   *
+   * `context` ties this grab back to a show/season/episode for the pipeline
+   * event log - it's optional so callers that don't have that context
+   * (interactive search, for instance) keep working unchanged, they just
+   * won't show up in that item's trace.
+   */
+  async grabRelease(release: ScoredRelease, context?: { showId: string; season?: number; episode?: number }): Promise<GrabResult> {
     logDebug({
       type: 'grabber',
       level: 'info',
@@ -271,6 +350,13 @@ export class GrabberService {
       if (result.ok) {
         logDebug({ type: 'grabber', level: 'info', source: 'TorBox', message: result.message });
         db.logEvent({ type: 'grab', entityType: 'release', message: result.message });
+        if (context) {
+          db.logPipelineEvent({
+            showId: context.showId, seasonNumber: context.season, episodeNumber: context.episode,
+            stage: 'GRABBED', eventType: 'grab_sent', reasonCode: 'GRAB_SUCCEEDED',
+            message: result.message, releaseTitle: release.title, indexerName: 'TorBox',
+          });
+        }
         return { success: true, message: result.message, release };
       }
 
@@ -292,6 +378,14 @@ export class GrabberService {
         type: 'grabber', level: 'error', source: release.indexer.name,
         message: `Grab returned false for "${release.title}"`,
       });
+      if (context) {
+        db.logPipelineEvent({
+          showId: context.showId, seasonNumber: context.season, episodeNumber: context.episode,
+          stage: 'FAILED', eventType: 'grab_failed', reasonCode: 'GRAB_FAILED_NO_CLIENT',
+          message: `Grab failed for "${release.title}". Check that a Download Client is configured.`,
+          releaseTitle: release.title, indexerName: release.indexer.name,
+        });
+      }
       return {
         success: false,
         message: `Grab failed for "${release.title}". Check that a Download Client is configured.`,
@@ -305,6 +399,13 @@ export class GrabberService {
     });
 
     db.logEvent({ type: 'grab', entityType: 'release', message: `Grabbed ${release.title}` });
+    if (context) {
+      db.logPipelineEvent({
+        showId: context.showId, seasonNumber: context.season, episodeNumber: context.episode,
+        stage: 'GRABBED', eventType: 'grab_sent', reasonCode: 'GRAB_SUCCEEDED',
+        message: `Grabbed "${release.title}"`, releaseTitle: release.title, indexerName: release.indexer.name,
+      });
+    }
 
     return { success: true, message: `Grabbed ${release.title}`, release };
   }

@@ -1,4 +1,5 @@
 import { db } from '../db';
+import type { ReasonCode } from './pipeline/reason_codes';
 
 /** Common technical tags always extracted from filenames regardless of
  *  profile configuration. These keep the tag display comprehensive even
@@ -44,6 +45,8 @@ export interface ReleaseScore {
    * out rather than just deprioritizing them by score. */
   rejected: boolean;
   rejectReason?: string;
+  /** Structured taxonomy code for rejectReason - see core/pipeline/reason_codes.ts. Callers that log to the pipeline event log should use this, not rejectReason, so the reason is filterable/groupable rather than free text. */
+  rejectCode?: ReasonCode;
   /** All tags detected from the filename (qualities + matched formats) */
   matchedTags: string[];
 }
@@ -63,8 +66,8 @@ export class QualityEngine {
     for (const q of qualities) {
       if (lower.includes(q.name.toLowerCase())) {
         matchedQualities.push(q.name);
-        if (q.rank > bestRank) {
-          bestRank = q.rank;
+        if ((q.rank ?? 0) > bestRank) {
+          bestRank = q.rank ?? 0;
           bestId = q.id;
         }
       }
@@ -109,7 +112,7 @@ export class QualityEngine {
       }
 
       if (f.profile_format_type === 'bonus' && matches) {
-        totalScore += f.score;
+        totalScore += f.score ?? 0;
         matchedFormats.push(f.name);
       }
     }
@@ -141,11 +144,11 @@ export class QualityEngine {
     const matchedTags = [...new Set([...matchedQualities, ...formatResult.matchedFormats, ...scanCommonTags(filename)])];
 
     if (formatResult.isForbidden) {
-      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Forbidden format matched: ${formatResult.forbiddenName}`, matchedTags };
+      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Forbidden format matched: ${formatResult.forbiddenName}`, rejectCode: 'FORBIDDEN_FORMAT_MATCHED', matchedTags };
     }
 
     if (formatResult.missingRequired.length > 0) {
-      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Missing required format(s): ${formatResult.missingRequired.join(', ')}`, matchedTags };
+      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Missing required format(s): ${formatResult.missingRequired.join(', ')}`, rejectCode: 'MISSING_REQUIRED_FORMAT', matchedTags };
     }
 
     const qualityCheck = this.isQualityAllowed(qualityId, profileId);
@@ -158,6 +161,7 @@ export class QualityEngine {
         qualityName,
         rejected: true,
         rejectReason: qualityId ? 'Quality not in this profile\'s allow-list' : 'Could not identify a quality for this release',
+        rejectCode: qualityId ? 'QUALITY_NOT_ALLOWED' : 'QUALITY_UNKNOWN',
         matchedTags,
       };
     }

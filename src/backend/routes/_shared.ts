@@ -49,6 +49,7 @@ export function loadConfig(): Config {
   const settings = db.getAllSettings();
   const configObj: any = {};
   for (const s of settings) {
+    if (s.value === null) continue;
     try {
       configObj[s.key] = JSON.parse(s.value);
     } catch {

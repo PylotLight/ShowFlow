@@ -161,3 +161,208 @@ export const seasonsRelations = relations(seasons, ({ one }) => ({
     references: [shows.id],
   }),
 }));
+
+// ---- Processed files (dedup) ----
+
+export const processedFiles = sqliteTable('processed_files', {
+  file_hash: text('file_hash').primaryKey(),
+  original_path: text('original_path'),
+  final_path: text('final_path'),
+  timestamp: text('timestamp').default(sql`(CURRENT_TIMESTAMP)`),
+});
+
+// ---- Metadata cache ----
+
+export const metadataCache = sqliteTable('metadata_cache', {
+  cache_key: text('cache_key').primaryKey(),
+  raw_json: text('raw_json'),
+  expires_at: text('expires_at'),
+});
+
+// ---- Scheduled tasks ----
+
+export const scheduledTasks = sqliteTable('scheduled_tasks', {
+  name: text('name').primaryKey(),
+  interval_minutes: integer('interval_minutes'),
+  last_execution: text('last_execution'),
+  last_duration_ms: integer('last_duration_ms'),
+  next_execution: text('next_execution'),
+  enabled: integer('enabled').default(1),
+});
+
+// ---- Quality definitions ----
+
+export const qualityDefinitions = sqliteTable('quality_definitions', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  rank: integer('rank').default(0),
+  min_size: integer('min_size'),
+  max_size: integer('max_size'),
+});
+
+// ---- Quality profiles ----
+
+export const qualityProfiles = sqliteTable('quality_profiles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  cutoff_quality_id: text('cutoff_quality_id').references(() => qualityDefinitions.id),
+  indexers: text('indexers').default('{}'),
+});
+
+// ---- Custom formats ----
+
+export const customFormats = sqliteTable('custom_formats', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  regex: text('regex').notNull(),
+  score: integer('score').default(0),
+});
+
+// ---- Profile <-> format / quality mapping ----
+
+export const profileFormats = sqliteTable('profile_formats', {
+  profile_id: text('profile_id')
+    .notNull()
+    .references(() => qualityProfiles.id, { onDelete: 'cascade' }),
+  format_id: text('format_id')
+    .notNull()
+    .references(() => customFormats.id, { onDelete: 'cascade' }),
+  type: text('type').default('bonus'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.profile_id, table.format_id] }),
+}));
+
+export const profileQualities = sqliteTable('profile_qualities', {
+  profile_id: text('profile_id')
+    .notNull()
+    .references(() => qualityProfiles.id, { onDelete: 'cascade' }),
+  quality_id: text('quality_id')
+    .notNull()
+    .references(() => qualityDefinitions.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.profile_id, table.quality_id] }),
+}));
+
+export const qualityProfilesRelations = relations(qualityProfiles, ({ many }) => ({
+  formats: many(profileFormats),
+  qualities: many(profileQualities),
+}));
+
+export const profileFormatsRelations = relations(profileFormats, ({ one }) => ({
+  profile: one(qualityProfiles, { fields: [profileFormats.profile_id], references: [qualityProfiles.id] }),
+  format: one(customFormats, { fields: [profileFormats.format_id], references: [customFormats.id] }),
+}));
+
+export const profileQualitiesRelations = relations(profileQualities, ({ one }) => ({
+  profile: one(qualityProfiles, { fields: [profileQualities.profile_id], references: [qualityProfiles.id] }),
+  quality: one(qualityDefinitions, { fields: [profileQualities.quality_id], references: [qualityDefinitions.id] }),
+}));
+
+// ---- Show profiles (root-folder presets) ----
+
+export const showProfiles = sqliteTable('show_profiles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  root_folder_path: text('root_folder_path').notNull(),
+});
+
+// ---- Settings (key/value) ----
+
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value'),
+});
+
+// ---- Audit logs (generic, free-text system log - predates the pipeline event log below) ----
+
+export const auditLogs = sqliteTable('audit_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  timestamp: text('timestamp').default(sql`(CURRENT_TIMESTAMP)`),
+  event_type: text('event_type'),
+  entity_type: text('entity_type'),
+  entity_id: text('entity_id'),
+  message: text('message'),
+  metadata_json: text('metadata_json'),
+});
+
+// ---- Pipeline event log ----
+//
+// Append-only per-item log of state transitions and decisions. This is the
+// shared backend primitive behind:
+//   - the Kanban pipeline view (current stage = latest event per item)
+//   - the "why isn't this downloading" trace (full event history for one item)
+//   - the Failure Diagnosis Assistant (reason_code -> diagnosis lookup)
+//
+// See src/backend/core/pipeline/reason_codes.ts for the stage/code/category
+// taxonomy these columns draw from. Rows are intentionally cheap/frequent
+// (one search can produce several), so this table should get a retention
+// policy (see cleanupOldPipelineEvents) same as audit_logs already has.
+export const pipelineEvents = sqliteTable('pipeline_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  show_id: text('show_id')
+    .notNull()
+    .references(() => shows.id, { onDelete: 'cascade' }),
+  season_number: integer('season_number'),
+  episode_number: integer('episode_number'),
+  /** Coarse pipeline stage - powers the Kanban column this item sits in. */
+  stage: text('stage').notNull(),
+  /** Fine-grained event, e.g. 'search_completed', 'release_rejected', 'grab_sent'. */
+  event_type: text('event_type').notNull(),
+  /** Structured taxonomy code from reason_codes.ts - null for plain progress events. */
+  reason_code: text('reason_code'),
+  /** Denormalized from reason_code, kept in sync, for fast filtering/badging. */
+  reason_category: text('reason_category'),
+  /** Human-readable summary line for the trace UI. */
+  message: text('message').notNull(),
+  /** Release title this event pertains to, if any. */
+  release_title: text('release_title'),
+  /** Indexer name this event pertains to, if any. */
+  indexer_name: text('indexer_name'),
+  /** Extra structured detail (rejected release list, scores, etc.) as JSON. */
+  metadata_json: text('metadata_json'),
+  created_at: text('created_at').default(sql`(datetime('now'))`),
+}, (table) => ({
+  itemIndex: index('idx_pipeline_events_item').on(
+    table.show_id,
+    table.season_number,
+    table.episode_number,
+  ),
+  createdAtIndex: index('idx_pipeline_events_created_at').on(table.created_at),
+  stageIndex: index('idx_pipeline_events_stage').on(table.stage),
+}));
+
+export const pipelineEventsRelations = relations(pipelineEvents, ({ one }) => ({
+  show: one(shows, {
+    fields: [pipelineEvents.show_id],
+    references: [shows.id],
+  }),
+}));
+
+// ---- System health snapshot ----
+//
+// Polled/cached current status of each indexer, download client, and
+// import path - the second shared primitive from the pipeline design brief
+// (§5), alongside pipeline_events above. Unlike pipeline_events this is a
+// current-state table (upserted by component), not an append-only log -
+// the brief describes it as a "snapshot," and the health dashboard (§4)
+// only ever needs the latest reading per component, not history.
+//
+// Uses the same reason_code/category taxonomy as pipeline_events
+// (core/pipeline/reason_codes.ts) so a diagnosis lookup (§3) can serve
+// both tables from one place, per the brief's explicit ask not to build
+// per-surface error parsers.
+//
+// NOTE: this table has no poller wired up yet - see docs/unified-pipeline-status.md.
+export const systemHealth = sqliteTable('system_health', {
+  component_type: text('component_type').notNull(), // 'indexer' | 'download_client' | 'import_path'
+  component_id: text('component_id').notNull(),
+  component_name: text('component_name').notNull(),
+  status: text('status').notNull(), // 'healthy' | 'degraded' | 'down'
+  reason_code: text('reason_code'),
+  reason_category: text('reason_category'),
+  message: text('message'),
+  metadata_json: text('metadata_json'),
+  checked_at: text('checked_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.component_type, table.component_id] }),
+}));
