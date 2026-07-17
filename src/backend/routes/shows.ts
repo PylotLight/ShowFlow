@@ -10,6 +10,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { RouteReq } from "./_shared";
 import { json, errorResponse, loadConfig, isProviderType, serializeRelease, toIsoUtc } from "./_shared";
+import { describeReasonCode } from "../core/pipeline/reason_codes";
 
 export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
   return {
@@ -494,6 +495,46 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               createdAt: toIsoUtc(e.created_at),
             })),
           );
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/seasons/:season/episodes/:episode/diagnose": {
+      async GET(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const season = parseInt(req.params.season!, 10);
+          const episode = parseInt(req.params.episode!, 10);
+          const latest = db.getLatestPipelineEvent(showId, season, episode);
+          if (!latest) {
+            return json({ hasIssue: false, diagnosis: null, suggestedAction: null });
+          }
+
+          const reasonDef = latest.reason_code ? describeReasonCode(latest.reason_code) : undefined;
+          const isFailure = latest.stage === "FAILED" || (latest.reason_code && latest.reason_code !== "GRAB_SUCCEEDED");
+
+          return json({
+            hasIssue: isFailure,
+            event: {
+              id: latest.id,
+              stage: latest.stage,
+              eventType: latest.event_type,
+              message: latest.message,
+              reasonCode: latest.reason_code,
+              createdAt: latest.created_at ? toIsoUtc(latest.created_at) : null,
+            },
+            diagnosis: reasonDef
+              ? {
+                  label: reasonDef.label,
+                  category: reasonDef.category,
+                  confidence: reasonDef.confidence,
+                  suggestedAction: reasonDef.suggestedAction,
+                }
+              : null,
+            suggestedAction: reasonDef?.suggestedAction ?? null,
+          });
         } catch (err) {
           return errorResponse(err, 500);
         }

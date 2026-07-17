@@ -7,6 +7,7 @@ import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
 import { TraceDialog } from "@frontend/components/showflow/TraceDialog";
+import { DiagnoseDialog } from "@frontend/components/showflow/DiagnoseDialog";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
 
@@ -36,6 +37,7 @@ function EpisodeRow({
   onSearch,
   onGrab,
   onTrace,
+  onDiagnose,
   grabbing,
   grabbed,
 }: {
@@ -43,6 +45,7 @@ function EpisodeRow({
   onSearch: () => void;
   onGrab: () => void;
   onTrace: () => void;
+  onDiagnose: () => void;
   grabbing: boolean;
   grabbed: boolean;
 }) {
@@ -75,6 +78,9 @@ function EpisodeRow({
           <Button size="sm" variant="outline" onClick={onTrace} className="h-7 px-2 text-xs">
             Trace
           </Button>
+          <Button size="sm" variant="outline" onClick={onDiagnose} className="h-7 px-2 text-xs">
+            Diagnose
+          </Button>
           <Button size="sm" variant="outline" onClick={onSearch} className="h-7 px-2 text-xs">
             <SearchIcon className="size-3" />
             Search
@@ -92,6 +98,7 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
   const [grabMsg, setGrabMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [searchTarget, setSearchTarget] = React.useState<MissingEpisode | null>(null);
   const [traceTarget, setTraceTarget] = React.useState<MissingEpisode | null>(null);
+  const [diagnoseTarget, setDiagnoseTarget] = React.useState<MissingEpisode | null>(null);
 
   const load = React.useCallback(() => {
     fetch("/api/missing")
@@ -209,6 +216,7 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
                         onSearch={() => setSearchTarget(ep)}
                         onGrab={() => handleGrab(ep)}
                         onTrace={() => setTraceTarget(ep)}
+                        onDiagnose={() => setDiagnoseTarget(ep)}
                         grabbing={grabbing === k}
                         grabbed={grabbedKeys.has(k)}
                       />
@@ -244,6 +252,17 @@ function MissingPage({ onSelectShow }: { onSelectShow: (show: ShowSummary) => vo
           showTitle={traceTarget.showTitle}
           season={traceTarget.season}
           episode={traceTarget.episode}
+        />
+      )}
+
+      {diagnoseTarget && (
+        <DiagnoseDialog
+          open={!!diagnoseTarget}
+          onOpenChange={(open) => { if (!open) setDiagnoseTarget(null); }}
+          showId={diagnoseTarget.showId}
+          showTitle={diagnoseTarget.showTitle}
+          season={diagnoseTarget.season}
+          episode={diagnoseTarget.episode}
         />
       )}
     </div>
