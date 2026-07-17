@@ -10,12 +10,13 @@ import {
   ChevronDown,
   FolderOpen,
   ExternalLink,
+  Heart,
 } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" | "sources" | "settings" | "manual-import";
+export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" | "sources" | "settings" | "manual-import" | "health";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -102,6 +103,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   ];
 
   const manageNavs = [
+    { id: "health" as NavItem, label: "Health", icon: Heart },
     { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount },
     { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
     { id: "settings" as NavItem, label: "Settings", icon: Settings },

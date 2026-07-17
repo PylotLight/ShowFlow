@@ -12,6 +12,7 @@ import { QueuePage } from "@frontend/components/showflow/QueuePage";
 import { MissingPage } from "@frontend/components/showflow/MissingPage";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { ManualImport } from "@frontend/components/showflow/ManualImport";
+import { HealthDashboard } from "@frontend/components/showflow/HealthDashboard";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { SearchIcon } from "lucide-react";
@@ -134,6 +135,13 @@ export function App() {
             <QueuePage key={refreshKey} />
           ) : activeNav === "missing" ? (
             <MissingPage key={refreshKey} onSelectShow={selectShow} />
+          ) : activeNav === "health" ? (
+            <HealthDashboard
+              onOpenSettings={(tab) => {
+                setSettingsInitialTab(tab);
+                setActiveNav("settings");
+              }}
+            />
           ) : activeNav === "sources" ? (
             <SourcesPage
               onOpenSettings={() => {
