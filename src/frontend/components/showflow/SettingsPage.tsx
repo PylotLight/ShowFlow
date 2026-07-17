@@ -1,7 +1,7 @@
 import * as React from "react";
 import { CheckIcon, XIcon, Loader2Icon } from "lucide-react";
 
-import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { HeaderActions } from "@frontend/lib/header-actions";
 
 import { loadAccent, saveAccent, applyAccent, loadTheme, saveTheme, applyTheme, type ThemeConfig } from "@frontend/lib/theme";
 import { QualityProfilesTab } from "@frontend/components/showflow/QualityProfiles";
@@ -379,43 +379,40 @@ export function SettingsPage({ onDone: _onDone, initialTab }: { onDone: () => vo
 
   return (
     <div className="space-y-6">
-      {/* Header + Tabs */}
-      <GlassPanel className="overflow-hidden">
-        <div className="px-6 py-4 border-b border-white/5">
-          <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">
-            // Settings
-          </span>
-          <div className="flex items-center justify-between mt-0.5">
-            <h2 className="font-display text-2xl font-bold text-white">Configuration</h2>
-            <div className="flex items-center gap-3">
+      {/* Tabs + save status — both live in the global header, replacing the
+          old standalone tab-strip panel so everything sits in one place. */}
+      <HeaderActions>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+            {SETTINGS_TABS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`shrink-0 rounded-full px-4 py-1.5 font-mono text-[11px] transition-all ${
+                  tab === t.id
+                    ? "bg-signal/15 text-signal shadow-[inset_0_0_0_0.5px_var(--signal)] font-semibold"
+                    : "text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.07]"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {(saveMsg || saving) && (
+            <div className="flex shrink-0 items-center gap-2 pl-2">
               {saveMsg && (
-                <span className={cn("flex items-center gap-1.5 text-xs",
+                <span className={cn("flex shrink-0 items-center gap-1.5 text-xs",
                   saveMsg.ok ? "text-emerald-400" : "text-red-400"
                 )}>
                   {saveMsg.ok ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
                   {saveMsg.text}
                 </span>
               )}
-              {saving && <Loader2Icon className="size-4 animate-spin text-muted-foreground" />}
+              {saving && <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />}
             </div>
-          </div>
+          )}
         </div>
-        <div className="flex items-center gap-1.5 px-6 py-3 overflow-x-auto">
-          {SETTINGS_TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`shrink-0 rounded-full px-4 py-1.5 font-mono text-[11px] transition-all ${
-                tab === t.id
-                  ? "bg-signal/15 text-signal shadow-[inset_0_0_0_0.5px_var(--signal)] font-semibold"
-                  : "text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.07]"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </GlassPanel>
+      </HeaderActions>
 
       {/* Content */}
       <div className="space-y-6">
