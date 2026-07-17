@@ -70,6 +70,7 @@ import { debugRoutes } from "./routes/debug";
 import { updateRoutes } from "./routes/updates";
 import { miscRoutes } from "./routes/misc";
 import { analyticsRoutes } from "./routes/analytics";
+import { pipelineRoutes } from "./routes/pipeline";
 import { loadConfig, invalidateConfigCache, ADMIN_TOKEN } from "./routes/_shared";
 import type { RouteReq } from "./routes/_shared";
 
@@ -128,6 +129,7 @@ const routeDefinitions: Record<string, any> = {
   ...debugRoutes(),
   ...integrationRoutes(),
   ...analyticsRoutes(),
+  ...pipelineRoutes(),
 };
 
 // ---- Lazy route definitions (depend on scheduler / systemManager) ----------

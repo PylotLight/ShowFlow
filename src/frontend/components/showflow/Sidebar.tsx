@@ -3,7 +3,7 @@ import {
   Calendar,
   Download,
   Library,
-  AlertCircle,
+  Layers,
   HardDrive,
   Settings,
   CheckCircle2,
@@ -16,7 +16,7 @@ import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "missing" | "sources" | "settings" | "manual-import" | "health";
+export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "sources" | "settings" | "manual-import" | "health";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -27,7 +27,7 @@ interface SidebarProps {
 
 export function Sidebar({ activeItem, onChange, onSettingsTab, className }: SidebarProps) {
   const [settingsHovered, setSettingsHovered] = React.useState(false);
-  const [missingCount, setMissingCount] = React.useState(0);
+  const [attentionCount, setAttentionCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
   const [manualCount, setManualCount] = React.useState(0);
   const [isHealthy, setIsHealthy] = React.useState<boolean | null>(null);
@@ -61,11 +61,11 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         .then((shows: any[]) => setSeriesCount(shows.length))
         .catch(() => {});
 
-    // Poll missing (aired, tracked, no file) episode count
-    const pollMissing = () =>
-      fetch("/api/missing")
+    // Poll pipeline attention count
+    const pollPipeline = () =>
+      fetch("/api/pipeline/kanban")
         .then((r) => r.json())
-        .then((episodes: any[]) => setMissingCount(episodes.length))
+        .then((d: { attentionCount: number }) => setAttentionCount(d.attentionCount ?? 0))
         .catch(() => {});
 
     // Poll manual import file count
@@ -78,14 +78,14 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
     pollQueue();
     pollHealth();
     pollLibrary();
-    pollMissing();
+    pollPipeline();
     pollManual();
 
     const id = setInterval(() => {
       pollQueue();
       pollHealth();
       pollLibrary();
-      pollMissing();
+      pollPipeline();
       pollManual();
     }, 15_000);
     return () => clearInterval(id);
@@ -99,7 +99,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
   const collectionNavs = [
     { id: "library" as NavItem, label: "Library", icon: Library },
-    { id: "missing" as NavItem, label: "Missing", icon: AlertCircle, badge: missingCount },
+    { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount },
   ];
 
   const manageNavs = [

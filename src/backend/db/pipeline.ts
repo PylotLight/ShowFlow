@@ -96,6 +96,105 @@ export function listRecentPipelineEvents(self: DatabaseManager, limit = 50) {
     .all();
 }
 
+/**
+ * All tracked episodes with their latest pipeline stage — powers the
+ * Kanban view (§1). Uses a window-function subquery to grab the most
+ * recent event per (show, season, episode) in a single scan. Episodes
+ * with no pipeline event at all resolve to WANTED; episodes that already
+ * have a file on disk resolve to AVAILABLE regardless of event history
+ * (covers legacy imports from before pipeline tracking existed).
+ */
+export interface KanbanEpisode {
+  showId: string;
+  showTitle: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string | null;
+  airDate: string | null;
+  filePath: string | null;
+  currentStage: string;
+  eventId: number | null;
+  eventType: string | null;
+  reasonCode: string | null;
+  reasonCategory: string | null;
+  message: string | null;
+  releaseTitle: string | null;
+  eventCreatedAt: string | null;
+  searchMode: string;
+}
+
+export interface KanbanLane {
+  stage: string;
+  label: string;
+  items: KanbanEpisode[];
+}
+
+export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
+  const rows = self.db.query(`
+    SELECT
+      e.show_id,
+      e.season_number,
+      e.episode_number,
+      e.title              AS episode_title,
+      e.air_date,
+      e.file_path,
+      e.search_mode,
+      s.title              AS show_title,
+      pe.id                AS event_id,
+      pe.stage             AS current_stage,
+      pe.event_type,
+      pe.reason_code,
+      pe.reason_category,
+      pe.message,
+      pe.release_title,
+      pe.created_at        AS event_created_at
+    FROM episodes e
+    JOIN shows s ON s.id = e.show_id
+    LEFT JOIN (
+      SELECT
+        show_id, season_number, episode_number,
+        id, stage, event_type, reason_code, reason_category,
+        message, release_title, created_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY show_id, season_number, episode_number
+          ORDER BY created_at DESC, id DESC
+        ) AS rn
+      FROM pipeline_events
+    ) pe ON pe.show_id         = e.show_id
+        AND pe.season_number    = e.season_number
+        AND pe.episode_number   = e.episode_number
+        AND pe.rn               = 1
+    WHERE e.is_tracked = 1
+    ORDER BY s.title ASC, e.season_number ASC, e.episode_number ASC
+  `).all() as any[];
+
+  return rows.map(r => {
+    const hasFile = r.file_path !== null && r.file_path !== '';
+    const stage = hasFile
+      ? 'AVAILABLE'
+      : r.current_stage ?? 'WANTED';
+
+    return {
+      showId: r.show_id,
+      showTitle: r.show_title,
+      seasonNumber: r.season_number,
+      episodeNumber: r.episode_number,
+      episodeTitle: r.episode_title ?? null,
+      airDate: r.air_date ?? null,
+      filePath: r.file_path ?? null,
+      currentStage: stage,
+      eventId: r.event_id ?? null,
+      eventType: r.event_type ?? null,
+      reasonCode: r.reason_code ?? null,
+      reasonCategory: r.reason_category ?? null,
+      message: r.message ?? null,
+      releaseTitle: r.release_title ?? null,
+      eventCreatedAt: r.event_created_at ?? null,
+      searchMode: r.search_mode ?? 'auto',
+    };
+  });
+}
+
 /** Retention: pipeline_events is high-volume (every search can write several rows), so this needs to run on a schedule same as cleanupOldLogs. */
 export function cleanupOldPipelineEvents(self: DatabaseManager, beforeDate: string) {
   const result = self.drizz

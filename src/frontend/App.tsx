@@ -9,7 +9,7 @@ import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { SettingsPage } from "@frontend/components/showflow/SettingsPage";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
 import { QueuePage } from "@frontend/components/showflow/QueuePage";
-import { MissingPage } from "@frontend/components/showflow/MissingPage";
+import { PipelineKanban } from "@frontend/components/showflow/PipelineKanban";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { ManualImport } from "@frontend/components/showflow/ManualImport";
 import { HealthDashboard } from "@frontend/components/showflow/HealthDashboard";
@@ -133,8 +133,8 @@ export function App() {
             />
           ) : activeNav === "queue" ? (
             <QueuePage key={refreshKey} />
-          ) : activeNav === "missing" ? (
-            <MissingPage key={refreshKey} onSelectShow={selectShow} />
+          ) : activeNav === "pipeline" ? (
+            <PipelineKanban key={refreshKey} onSelectShow={selectShow} />
           ) : activeNav === "health" ? (
             <HealthDashboard
               onOpenSettings={(tab) => {
