@@ -19,6 +19,8 @@ export function configRoutes() {
             db.setSetting(k, v);
           }
           invalidateConfigCache();
+          const keys = Object.keys(body).join(', ');
+          db.logEvent({ type: 'config', entityType: 'system', message: `Settings saved: ${keys}` });
           return json({ ok: true });
         } catch (err) {
           return errorResponse(err);
@@ -131,6 +133,7 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Prowlarr configuration saved' });
             return json({ ok: true });
           }
           if (key === "sonarr") {
@@ -148,6 +151,7 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Sonarr configuration saved' });
             return json({ ok: true });
           }
           if (key === "jellyfin") {
@@ -165,10 +169,17 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Jellyfin configuration saved' });
+            return json({ ok: true });
+          }
+          if (key.startsWith('onboarding.')) {
+            db.setSetting(key, value);
+            invalidateConfigCache();
             return json({ ok: true });
           }
           db.setSetting(key, value);
           invalidateConfigCache();
+          db.logEvent({ type: 'config', entityType: 'system', message: `Setting "${key}" saved` });
           return json({ ok: true });
         } catch (err) {
           return errorResponse(err);

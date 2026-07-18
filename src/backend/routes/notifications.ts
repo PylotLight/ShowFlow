@@ -19,9 +19,14 @@ export function notificationRoutes() {
             .limit(20)
             .all() as any[];
 
-          const recentEvents = db.drizz.select().from(schema.pipelineEvents)
+          const recentPipeline = db.drizz.select().from(schema.pipelineEvents)
             .where(sql`stage != 'FAILED' AND reason_code IS NULL`)
             .orderBy(desc(schema.pipelineEvents.created_at))
+            .limit(10)
+            .all() as any[];
+
+          const recentAudit = db.drizz.select().from(schema.auditLogs)
+            .orderBy(desc(schema.auditLogs.id))
             .limit(10)
             .all() as any[];
 
@@ -48,14 +53,24 @@ export function notificationRoutes() {
                 link: null,
               })),
             ],
-            recent: recentEvents.map((e: any) => ({
-              id: `event:${e.id}`,
-              type: 'event' as const,
-              severity: 'info' as const,
-              title: e.message?.slice(0, 100) ?? 'Event',
-              message: e.message ?? null,
-              timestamp: e.created_at,
-            })),
+            recent: [
+              ...recentAudit.map((a: any) => ({
+                id: `audit:${a.id}`,
+                type: 'event' as const,
+                severity: 'info' as const,
+                title: a.message?.slice(0, 100) ?? 'Event',
+                message: a.message ?? null,
+                timestamp: a.timestamp,
+              })),
+              ...recentPipeline.map((e: any) => ({
+                id: `event:${e.id}`,
+                type: 'event' as const,
+                severity: 'info' as const,
+                title: e.message?.slice(0, 100) ?? 'Event',
+                message: e.message ?? null,
+                timestamp: e.created_at,
+              })),
+            ],
             unreadCount: healthIssues.length + failedEvents.length,
           });
         } catch (err) {
