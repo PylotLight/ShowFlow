@@ -42,6 +42,7 @@ export function StepDone({ data, onNext }: StepProps) {
       </div>
 
       <Button
+        variant="glass"
         onClick={onNext}
         className="h-12 px-8 rounded-xl text-base gap-2"
       >

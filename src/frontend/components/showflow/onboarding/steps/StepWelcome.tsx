@@ -6,10 +6,12 @@ import logoUrl from "@frontend/assets/logo.svg";
 
 export function StepWelcome({ onNext }: StepProps) {
   return (
-    <div className="text-center py-8">
-      <div className="inline-flex items-center justify-center size-16 rounded-2xl bg-signal/10 mb-6 ring-1 ring-signal/20 p-2.5">
-        <img src={logoUrl} alt="ShowFlow" className="size-full" />
-      </div>
+    <div className="text-center py-6">
+      <img
+        src={logoUrl}
+        alt="ShowFlow"
+        className="size-32 mx-auto mb-8"
+      />
 
       <h1 className="text-3xl font-bold tracking-tight mb-3">
         Welcome to{" "}
@@ -21,22 +23,17 @@ export function StepWelcome({ onNext }: StepProps) {
       <p className="text-muted-foreground text-base leading-relaxed max-w-md mx-auto mb-8">
         Let's get your media server up and running. We'll walk through configuring
         your folders, library types, indexers, and download sources — all in one
-        sitting. This takes about 5 minutes.
+        sitting.
       </p>
 
-      <div className="flex flex-col items-center gap-3">
-        <Button
-          onClick={onNext}
-          className="h-12 px-8 rounded-xl text-base gap-2"
-        >
-          Get Started
-          <ArrowRightIcon className="size-4" />
-        </Button>
-
-        <p className="text-xs text-muted-foreground/50 mt-2">
-          You'll configure folders, library types, indexers, Sonarr, and appearance
-        </p>
-      </div>
+      <Button
+        variant="glass"
+        onClick={onNext}
+        className="h-12 px-8 rounded-xl text-base gap-2"
+      >
+        Get Started
+        <ArrowRightIcon className="size-4" />
+      </Button>
     </div>
   );
 }

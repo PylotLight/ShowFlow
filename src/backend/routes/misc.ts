@@ -161,5 +161,23 @@ export function miscRoutes(systemManager: SystemManager) {
       },
     },
 
+    "/api/files/mkdir": {
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = (await req.json()) as { parentPath?: string; name?: string };
+          const parent = path.resolve(body.parentPath ?? "/");
+          if (!fs.existsSync(parent)) return json({ error: "Parent path does not exist" }, { status: 404 });
+          if (!fs.statSync(parent).isDirectory()) return json({ error: "Parent is not a directory" }, { status: 400 });
+          if (!body.name || !/^[a-zA-Z0-9 _.-]+$/.test(body.name)) return json({ error: "Invalid folder name" }, { status: 400 });
+          const newPath = path.join(parent, body.name);
+          if (fs.existsSync(newPath)) return json({ error: "Folder already exists" }, { status: 409 });
+          fs.mkdirSync(newPath, { recursive: false });
+          return json({ path: newPath });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
   };
 }

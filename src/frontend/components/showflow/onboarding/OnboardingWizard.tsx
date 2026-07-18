@@ -9,8 +9,7 @@ import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImport
 import { StepWelcome } from "./steps/StepWelcome";
 import { StepRootFolders } from "./steps/StepRootFolders";
 import { StepLibraryType } from "./steps/StepLibraryType";
-import { StepProviderKeys } from "./steps/StepProviderKeys";
-import { StepSonarrConnect } from "./steps/StepSonarrConnect";
+import { StepIntegrations } from "./steps/StepIntegrations";
 import { StepTheme } from "./steps/StepTheme";
 import { StepHealthCheck } from "./steps/StepHealthCheck";
 import { StepDone } from "./steps/StepDone";
@@ -100,16 +99,15 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
       case 0: return <StepWelcome {...stepProps} />;
       case 1: return <StepRootFolders {...stepProps} />;
       case 2: return <StepLibraryType {...stepProps} />;
-      case 3: return <StepProviderKeys {...stepProps} />;
-      case 4: return <StepSonarrConnect {...stepProps} />;
-      case 5: return <StepTheme {...stepProps} />;
-      case 6: return <StepHealthCheck {...stepProps} />;
-      case 7: return <StepDone {...stepProps} />;
+      case 3: return <StepIntegrations {...stepProps} />;
+      case 4: return <StepTheme {...stepProps} />;
+      case 5: return <StepHealthCheck {...stepProps} />;
+      case 6: return <StepDone {...stepProps} />;
       default: return null;
     }
   };
 
-  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5, 6, 7]);
+  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5, 6]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
@@ -122,7 +120,7 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
             "transition-all duration-500 ease-out",
             direction === 'forward' ? "animate-slide-in-right" : "animate-slide-in-left"
           )}>
-            {step > 4 && data.sonarr.importJobId && data.sonarr.importForkMode === 'background' && (
+            {step > 3 && data.sonarr.importJobId && data.sonarr.importForkMode === 'background' && (
               <div className="mb-6">
                 <SonarrImportProgress jobId={data.sonarr.importJobId} compact silent>
                   {({ job, done }) => job ? (
@@ -170,12 +168,12 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
               </div>
               <div className="flex items-center gap-3">
                 {!stepProps.isLast && step < TOTAL_STEPS - 1 && (
-                  <button
-                    onClick={stepProps.onSkip}
-                    className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                  >
-                    Skip and set up manually
-                  </button>
+                   <button
+                     onClick={stepProps.onSkip}
+                     className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic"
+                   >
+                     Skip and set up manually
+                   </button>
                 )}
               </div>
             </div>
@@ -188,38 +186,38 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
 
 function StepIndicator({ current, onGoTo }: { current: number; onGoTo: (i: number) => void }) {
   return (
-    <div className="mb-12">
-      <div className="flex items-center justify-between">
+    <div className="mb-10 px-6">
+      <div className="flex items-center justify-between gap-1">
         {STEPS.map((s, i) => (
           <React.Fragment key={s.id}>
             <button
               onClick={() => i < current ? onGoTo(i) : null}
               className={cn(
-                "flex flex-col items-center gap-1.5 group",
+                "flex flex-col items-center gap-2 group",
                 i < current && "cursor-pointer",
                 i >= current && "cursor-default"
               )}
             >
               <div className={cn(
-                "flex items-center justify-center size-8 rounded-full border-2 text-xs font-mono font-bold transition-all duration-300",
+                "flex items-center justify-center size-10 rounded-full border-2 text-sm font-mono font-bold transition-all duration-300",
                 i === current && "border-signal bg-signal/10 text-signal scale-110 shadow-lg shadow-signal/20",
                 i < current && "border-green-500/60 bg-green-500/10 text-green-400",
                 i > current && "border-white/10 text-muted-foreground/30"
               )}>
-                {i < current ? <CheckIcon className="size-3.5" /> : i + 1}
+                {i < current ? <CheckIcon className="size-4" /> : i + 1}
               </div>
               <span className={cn(
-                "text-[10px] font-mono font-bold uppercase tracking-widest transition-all",
+                "text-xs font-medium uppercase tracking-wide transition-all whitespace-nowrap",
                 i === current && "text-signal",
                 i < current && "text-green-400/80",
-                i > current && "text-muted-foreground/20"
+                i > current && "text-muted-foreground/30"
               )}>
                 {s.short}
               </span>
             </button>
             {i < TOTAL_STEPS - 1 && (
               <div className={cn(
-                "flex-1 h-px mx-1 transition-colors duration-300",
+                "flex-1 h-px transition-colors duration-300",
                 i < current ? "bg-green-500/40" : "bg-white/5"
               )} />
             )}

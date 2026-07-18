@@ -128,7 +128,7 @@ export function StepHealthCheck({ onNext }: StepProps) {
 
       <div className="mt-8 flex items-center justify-between">
         <div />
-        <Button onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
+        <Button variant="glass" onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
           Finish setup
           <ArrowRightIcon className="size-4" />
         </Button>

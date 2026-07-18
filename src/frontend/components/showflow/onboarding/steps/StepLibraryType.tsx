@@ -1,58 +1,49 @@
 import * as React from "react";
 import { Button } from "@frontend/components/ui/button";
 import { cn } from "@frontend/lib/utils";
-import { ArrowRightIcon, BookIcon, SparklesIcon, StarIcon } from "lucide-react";
+import { ArrowRightIcon, BookIcon, SparklesIcon, StarIcon, FolderIcon } from "lucide-react";
 import type { StepProps } from "../types";
 
-interface LibraryType {
-  id: string;
-  name: string;
-  rootFolderPath: string | null;
-  qualityProfileId: string | null;
-  isDefault: boolean;
-}
+const TYPE_OPTIONS = [
+  { id: 'Standard', label: 'Standard', icon: BookIcon },
+  { id: 'Anime', label: 'Anime', icon: SparklesIcon },
+  { id: 'Movies', label: 'Movies', icon: StarIcon },
+] as const;
 
 export function StepLibraryType({ data, setData, onNext, onSkip }: StepProps) {
-  const [types, setTypes] = React.useState<LibraryType[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [mappings, setMappings] = React.useState<Record<string, string>>({});
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/library-types");
-        if (res.ok) setTypes(await res.json());
-      } catch {} finally {
-        setLoading(false);
+    if (!data.rootFolders.length) return;
+    setMappings(prev => {
+      const next = { ...prev };
+      for (const folder of data.rootFolders) {
+        if (!next[folder]) next[folder] = 'Standard';
       }
-    })();
-  }, []);
-
-  const selected = data.libraryTypeId;
-
-  const presets = [
-    { id: null as any, name: 'Standard', qualityProfileId: 'standard', isDefault: true },
-    { id: null as any, name: 'Anime', qualityProfileId: 'anime', isDefault: false },
-    { id: null as any, name: 'Movies', qualityProfileId: 'standard', isDefault: false },
-  ];
-
-  const displayTypes = types.length > 0 ? types : presets;
+      return next;
+    });
+  }, [data.rootFolders]);
 
   const handleContinue = async () => {
-    if (types.length > 0) { onNext(); return; }
-    const preset = presets.find(p => p.name === (displayTypes.find((t: any) => (t.id ?? t.name) === (selected || 'Standard')) as any)?.name) ?? presets[0];
     setSaving(true);
     try {
-      const id = `lt_${preset.name.toLowerCase()}`;
-      const res = await fetch("/api/library-types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, name: preset.name, qualityProfileId: preset.qualityProfileId, isDefault: preset.isDefault }),
-      });
-      if (res.ok) {
-        setData({ libraryTypeId: id });
-        onNext();
+      for (const [folder, typeName] of Object.entries(mappings)) {
+        const preset = TYPE_OPTIONS.find(o => o.id === typeName)!;
+        const id = `lt_${typeName.toLowerCase()}`;
+        await fetch("/api/library-types", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: `${id}_${folder.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')}`,
+            name: typeName,
+            rootFolderPath: folder,
+            qualityProfileId: preset.id === 'Anime' ? 'anime' : 'standard',
+            isDefault: false,
+          }),
+        });
       }
+      onNext();
     } catch {} finally {
       setSaving(false);
     }
@@ -63,66 +54,55 @@ export function StepLibraryType({ data, setData, onNext, onSkip }: StepProps) {
       <div className="mb-8">
         <h2 className="text-2xl font-bold tracking-tight mb-2">Library Type</h2>
         <p className="text-muted-foreground">
-          Choose how your library is organized. This sets default quality profiles,
-          root folder mappings, and indexer associations.
+          Map each root folder to a library type. This sets quality profiles and
+          how each folder is organized.
         </p>
       </div>
 
-      {loading ? (
-        <div className="text-center py-12 text-sm text-muted-foreground">Loading...</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {displayTypes.map((t: any) => {
-            const isSelected = selected === t.id || (!selected && t.name === 'Standard');
-            return (
-              <button
-                key={t.id ?? t.name}
-                onClick={() => setData({ libraryTypeId: t.id ?? null })}
-                className={cn(
-                  "relative flex flex-col items-center gap-3 p-6 rounded-2xl border text-left transition-all duration-200",
-                  isSelected
-                    ? "border-signal/50 bg-signal/[0.04] ring-1 ring-signal/30"
-                    : "border-white/10 hover:border-white/20 bg-white/[0.02]"
-                )}
-              >
-                {t.name === 'Standard' && <BookIcon className={cn("size-8", isSelected ? "text-signal" : "text-muted-foreground/40")} />}
-                {t.name === 'Anime' && <SparklesIcon className={cn("size-8", isSelected ? "text-signal" : "text-muted-foreground/40")} />}
-                {t.name === 'Movies' && <StarIcon className={cn("size-8", isSelected ? "text-signal" : "text-muted-foreground/40")} />}
-                {(t.name !== 'Standard' && t.name !== 'Anime' && t.name !== 'Movies') && (
-                  <div className={cn("size-8 rounded-lg flex items-center justify-center font-bold text-lg", isSelected ? "text-signal bg-signal/10" : "text-muted-foreground/40 bg-white/[0.03]")}>
-                    {t.name.charAt(0)}
-                  </div>
-                )}
-                <div className="text-center">
-                  <p className={cn("text-sm font-semibold", isSelected && "text-signal")}>{t.name}</p>
-                  {t.rootFolderPath && (
-                    <p className="text-[10px] font-mono text-muted-foreground/60 mt-1 truncate max-w-full">{t.rootFolderPath}</p>
-                  )}
-                </div>
-                {isSelected && (
-                  <div className="absolute top-3 right-3 size-3 rounded-full bg-signal" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {data.rootFolders.length > 0 && (
-        <div className="mt-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
-          <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-2">
-            Using root folder
-          </p>
-          <p className="text-sm font-mono truncate">{data.rootFolders[0]}</p>
-        </div>
-      )}
+      <div className="space-y-3">
+        {data.rootFolders.map(folder => {
+          const currentType = mappings[folder] || 'Standard';
+          return (
+            <div
+              key={folder}
+              className="p-4 rounded-xl border bg-white/[0.02] border-white/10 space-y-3"
+            >
+              <div className="flex items-center gap-3">
+                <FolderIcon className="size-4 shrink-0 text-signal" />
+                <span className="font-mono text-sm break-all text-foreground/80">{folder}</span>
+              </div>
+              <div className="flex gap-1.5 pl-7">
+                {TYPE_OPTIONS.map(opt => {
+                  const isActive = currentType === opt.id;
+                  const OptIcon = opt.icon;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setMappings(prev => ({ ...prev, [folder]: opt.id }))}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
+                        isActive
+                          ? "bg-signal/10 text-signal ring-1 ring-signal/30"
+                          : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
+                      )}
+                    >
+                      <OptIcon className="size-3" />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="mt-8 flex items-center justify-between">
-        <button onClick={onSkip} className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+        <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
-        <Button onClick={handleContinue} disabled={saving} className="gap-2 h-11 px-6 rounded-xl">
-          {saving ? "Saving..." : types.length === 0 ? "Use default" : "Continue"}
+        <Button variant="glass" onClick={handleContinue} disabled={saving} className="gap-2 h-11 px-6 rounded-xl">
+          {saving ? "Saving..." : "Continue"}
           <ArrowRightIcon className="size-4" />
         </Button>
       </div>

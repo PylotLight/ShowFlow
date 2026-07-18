@@ -215,10 +215,10 @@ export function StepProviderKeys({ data, setData, onNext, onSkip }: StepProps) {
       </div>
 
       <div className="mt-8 flex items-center justify-between">
-        <button onClick={onSkip} className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+        <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
-        <Button onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
+        <Button variant="glass" onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
           Continue
           <ArrowRightIcon className="size-4" />
         </Button>
