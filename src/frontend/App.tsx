@@ -19,6 +19,7 @@ import { SearchIcon } from "lucide-react";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
+import { BackgroundActivityPopover } from "@frontend/components/showflow/BackgroundActivityPopover";
 import "./styles/index.css";
 
 export function App() {
@@ -162,6 +163,11 @@ export function App() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Background Activity indicator — floating top-right, always visible */}
+      <div className="fixed top-4 right-4 z-50">
+        <BackgroundActivityPopover />
       </div>
 
       {/* Feedback button — floating bottom-right */}
