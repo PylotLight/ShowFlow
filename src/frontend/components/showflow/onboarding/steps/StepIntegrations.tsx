@@ -36,6 +36,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
   const [sonarrMsg, setSonarrMsg] = React.useState("");
 
   const [dcEnabled, setDcEnabled] = React.useState(data.downloadClient.type !== 'none');
+  const [sonarrPanelOpen, setSonarrPanelOpen] = React.useState(false);
   const [fetching, setFetching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
@@ -48,9 +49,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
       <div className="py-4">
         <div className="mb-8">
           <h2 className="text-2xl font-bold tracking-tight mb-2">Importing Series</h2>
-          <p className="text-muted-foreground">
-            Your series are being imported from Sonarr.
-          </p>
+          <p className="text-muted-foreground">Your series are being imported from Sonarr.</p>
         </div>
         <SonarrImportProgress jobId={sonarr.importJobId} onDone={onNext} />
       </div>
@@ -154,7 +153,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
   };
 
   return (
-    <div className="py-4">
+    <div className={cn(
+      "py-4 transition-all duration-300",
+      sonarrPanelOpen && "-translate-x-[260px]"
+    )}>
       <div className="mb-8">
         <h2 className="text-2xl font-bold tracking-tight mb-2">Integrations</h2>
         <p className="text-muted-foreground">
@@ -329,90 +331,17 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
                 )}
               </div>
 
-              {sonarrStatus === 'ok' && !sonarr.tested && (
+              {sonarrStatus === 'ok' && (
                 <div className="mt-2">
                   <Button
-                    variant="outline"
-                    onClick={fetchSeries}
+                    variant="glass"
+                    onClick={() => { if (!sonarr.tested) fetchSeries(); setSonarrPanelOpen(true); }}
                     disabled={fetching}
                     className="gap-2 w-full h-11 rounded-xl"
                   >
                     {fetching ? <Loader2Icon className="size-4 animate-spin" /> : <SearchIcon className="size-4" />}
-                    Fetch series from Sonarr
+                    {sonarr.series.length > 0 ? `Manage Import (${sonarr.series.length} series)` : "Fetch series from Sonarr"}
                   </Button>
-                </div>
-              )}
-
-              {sonarr.series.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
-                      {sonarr.series.length} series found
-                    </p>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set(sonarr.series.map(s => s.id)))} className="text-xs">
-                        Select all
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="text-xs">
-                        Clear
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="max-h-40 overflow-y-auto space-y-0.5 rounded-xl border border-white/10">
-                    {sonarr.series.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => toggleSeries(s.id)}
-                        className={cn(
-                          "w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors text-left",
-                          selectedIds.has(s.id) ? "bg-signal/[0.04]" : "hover:bg-white/[0.02]"
-                        )}
-                      >
-                        <div className={cn(
-                          "size-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                          selectedIds.has(s.id) ? "bg-signal border-signal" : "border-white/20"
-                        )}>
-                          {selectedIds.has(s.id) && <CheckCircleIcon className="size-3 text-white" />}
-                        </div>
-                        <span className="flex-1 truncate">{s.title}</span>
-                        <span className="text-xs text-muted-foreground/50">{s.year}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => startImport('background')}
-                      disabled={selectedIds.size === 0 || importing}
-                      className={cn(
-                        "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-left",
-                        "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
-                        "disabled:opacity-40 disabled:pointer-events-none",
-                      )}
-                    >
-                      <SparklesIcon className="size-5 text-signal" />
-                      <div>
-                        <p className="text-sm font-semibold">Import in background</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">Continue configuring</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => startImport('watch')}
-                      disabled={selectedIds.size === 0 || importing}
-                      className={cn(
-                        "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-left",
-                        "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
-                        "disabled:opacity-40 disabled:pointer-events-none",
-                      )}
-                    >
-                      <EyeIcon className="size-5 text-signal" />
-                      <div>
-                        <p className="text-sm font-semibold">Watch import</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">See each series imported</p>
-                      </div>
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -510,7 +439,134 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
         </div>
       </div>
 
-      <div className="mt-8 flex items-center justify-between">
+      {/* Slide-out Sonarr import manager panel */}
+      <div
+        className={cn(
+          "fixed right-0 top-0 h-full w-[520px] z-50 bg-[#15181f] border-l border-white/10 shadow-2xl flex flex-col transition-transform duration-300 ease-out",
+          sonarrPanelOpen ? "translate-x-0" : "translate-x-full"
+        )}
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-3">
+            <TvIcon className="size-5 text-signal" />
+            <div>
+              <p className="text-sm font-semibold">Sonarr Import</p>
+              <p className="text-xs text-muted-foreground">{sonarr.series.length} series from {sonarr.baseUrl || "Sonarr"}</p>
+            </div>
+          </div>
+          <button onClick={() => setSonarrPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/60 hover:text-foreground transition-colors">
+            <XCircleIcon className="size-4" />
+          </button>
+        </div>
+
+        {/* Fetch button */}
+        <div className="px-6 py-4 shrink-0">
+          {!sonarr.tested ? (
+            <Button
+              variant="glass"
+              className="w-full gap-2 h-11 rounded-xl"
+              onClick={async () => { await fetchSeries(); }}
+              disabled={fetching}
+            >
+              {fetching ? <Loader2Icon className="size-4 animate-spin" /> : <SearchIcon className="size-4" />}
+              Fetch series from Sonarr
+            </Button>
+          ) : (
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
+                {sonarr.series.length} series found
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set(sonarr.series.map(s => s.id)))} className="text-xs">
+                  Select all
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="text-xs">
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Series list */}
+        <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-0.5">
+          {sonarr.series.map(s => (
+            <button
+              key={s.id}
+              onClick={() => toggleSeries(s.id)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm transition-colors text-left",
+                selectedIds.has(s.id) ? "bg-signal/[0.06] ring-1 ring-signal/20" : "hover:bg-white/[0.03]"
+              )}
+            >
+              <div className={cn(
+                "size-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                selectedIds.has(s.id) ? "bg-signal border-signal" : "border-white/20"
+              )}>
+                {selectedIds.has(s.id) && <CheckCircleIcon className="size-3 text-white" />}
+              </div>
+              <span className="flex-1 truncate">{s.title}</span>
+              <span className="text-xs text-muted-foreground/50 shrink-0">{s.year}</span>
+            </button>
+          ))}
+          {sonarr.tested && sonarr.series.length === 0 && (
+            <div className="py-8 text-center text-sm text-muted-foreground">No series found</div>
+          )}
+        </div>
+
+        {/* Import actions */}
+        <div className="px-6 py-4 border-t border-white/5 shrink-0 space-y-3">
+          {data.rootFolders.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/40">Type mapping</p>
+              {data.rootFolders.map(folder => (
+                <div key={folder} className="flex items-center gap-2 text-xs font-mono text-muted-foreground/60">
+                  <span className="truncate flex-1">{folder.split('/').pop()}</span>
+                  <span className="text-signal shrink-0">{data.libraryTypeId ?? 'Standard'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => startImport('background')}
+              disabled={selectedIds.size === 0 || importing}
+              className={cn(
+                "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-left",
+                "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
+                "disabled:opacity-40 disabled:pointer-events-none",
+              )}
+            >
+              <SparklesIcon className="size-5 text-signal" />
+              <div>
+                <p className="text-sm font-semibold">Import in background</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Continue configuring</p>
+              </div>
+            </button>
+            <button
+              onClick={() => startImport('watch')}
+              disabled={selectedIds.size === 0 || importing}
+              className={cn(
+                "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-left",
+                "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
+                "disabled:opacity-40 disabled:pointer-events-none",
+              )}
+            >
+              <EyeIcon className="size-5 text-signal" />
+              <div>
+                <p className="text-sm font-semibold">Watch import</p>
+                <p className="text-xs text-muted-foreground mt-0.5">See each series imported</p>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className={cn(
+        "mt-8 flex items-center justify-between transition-all duration-300",
+        sonarrPanelOpen && "opacity-0 pointer-events-none"
+      )}>
         <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
