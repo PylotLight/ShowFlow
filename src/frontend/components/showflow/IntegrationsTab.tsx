@@ -6,14 +6,15 @@ import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { FieldRow } from "./SettingsShared";
+import { SonarrImportProgress } from "./SonarrImportProgress";
 
-export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportResults, sonarrImportTotal, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, libraryTypesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, }: {
+export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportJobId, onSonarrImportDone, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, libraryTypesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, }: {
   sonarr: any; setSonarr: any;
   showSonarrKey: boolean; setShowSonarrKey: (v: boolean) => void;
   sonarrTesting: boolean; sonarrStatus: any;
   sonarrTestingFn: () => void;
   sonarrSeries: any[] | null; sonarrSeriesLoading: boolean; sonarrFetchSeries: () => void;
-  sonarrImporting: boolean; sonarrImportResults: any[]; sonarrImportTotal: number;
+  sonarrImporting: boolean; sonarrImportJobId: string | null; onSonarrImportDone: () => void;
   selectedSonarrSeries: Set<number>; setSelectedSonarrSeries: (v: Set<number>) => void;
   showProfilesList: any[]; qualityProfilesList: any[]; libraryTypesList: any[];
   sonarrTypeConfig: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string; libraryTypeId: string }>;
@@ -258,20 +259,9 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                   </div>
                 )}
 
-                {sonarrImportResults.length > 0 && (
-                  <div className="rounded-lg bg-white/[0.03] p-3 space-y-1.5 max-h-40 overflow-y-auto">
-                    <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Import Results ({sonarrImportResults.length})
-                    </p>
-                    {sonarrImportResults.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        {r.status === 'imported' && <CheckIcon className="size-3 text-emerald-400 shrink-0" />}
-                        {r.status === 'existing' && <span className="size-3 shrink-0 text-muted-foreground">•</span>}
-                        {r.status === 'error' && <XIcon className="size-3 text-red-400 shrink-0" />}
-                        <span className="font-mono truncate">{r.title || r.sonarrTitle}</span>
-                        <span className="text-muted-foreground shrink-0">{r.status}</span>
-                      </div>
-                    ))}
+                {sonarrImportJobId && (
+                  <div className="rounded-lg bg-white/[0.03] p-4">
+                    <SonarrImportProgress jobId={sonarrImportJobId} onDone={onSonarrImportDone} />
                   </div>
                 )}
               </div>

@@ -1,9 +1,10 @@
 import * as React from "react";
-import { CheckIcon, ArrowLeftIcon } from "lucide-react";
+import { CheckIcon, ArrowLeftIcon, XCircleIcon } from "lucide-react";
 import { Button } from "@frontend/components/ui/button";
 import { cn } from "@frontend/lib/utils";
 import { STEPS, TOTAL_STEPS, DEFAULT_WIZARD_DATA } from "./types";
 import type { WizardData, StepProps } from "./types";
+import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 
 import { StepWelcome } from "./steps/StepWelcome";
 import { StepRootFolders } from "./steps/StepRootFolders";
@@ -118,6 +119,39 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
             "transition-all duration-500 ease-out",
             direction === 'forward' ? "animate-slide-in-right" : "animate-slide-in-left"
           )}>
+            {step > 4 && data.sonarr.importJobId && data.sonarr.importForkMode === 'background' && (
+              <div className="mb-6">
+                <SonarrImportProgress jobId={data.sonarr.importJobId} compact silent>
+                  {({ job, done }) => job ? (
+                    <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+                      {job.status === 'running' ? (
+                        <div className="size-2 rounded-full bg-signal animate-pulse shrink-0" />
+                      ) : job.status === 'done' ? (
+                        <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />
+                      ) : (
+                        <XCircleIcon className="size-3.5 shrink-0 text-red-400" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">
+                          {job.status === 'running' ? "Importing series in background..." : job.status === 'done' ? "Import complete" : "Import failed"}
+                        </p>
+                        {job.progress.detail && (
+                          <p className="text-[11px] text-muted-foreground truncate">{job.progress.detail}</p>
+                        )}
+                      </div>
+                      {job.status === 'running' && job.progress.total && job.progress.total > 0 && (
+                        <div className="w-16 h-1 rounded-full bg-white/10 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-signal transition-all duration-500"
+                            style={{ width: `${Math.round((job.progress.completed / job.progress.total) * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </SonarrImportProgress>
+              </div>
+            )}
             {renderStep()}
           </div>
 

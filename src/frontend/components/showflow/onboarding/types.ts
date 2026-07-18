@@ -18,6 +18,7 @@ export interface SonarrWizardData {
   series: SonarrSeries[];
   typeMapping: Record<string, string>;
   importJobId: string | null;
+  importForkMode: 'background' | 'watch' | null;
 }
 
 export interface SonarrSeries {
@@ -79,6 +80,7 @@ export const DEFAULT_WIZARD_DATA: WizardData = {
     series: [],
     typeMapping: {},
     importJobId: null,
+    importForkMode: null,
   },
   prowlarr: {
     baseUrl: '',

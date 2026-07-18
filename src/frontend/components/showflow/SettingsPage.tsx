@@ -65,8 +65,7 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
   const [sonarrSeries, setSonarrSeries] = React.useState<any[] | null>(null);
   const [sonarrSeriesLoading, setSonarrSeriesLoading] = React.useState(false);
   const [sonarrImporting, setSonarrImporting] = React.useState(false);
-  const [sonarrImportResults, setSonarrImportResults] = React.useState<any[]>([]);
-  const [sonarrImportTotal, setSonarrImportTotal] = React.useState(0);
+  const [sonarrImportJobId, setSonarrImportJobId] = React.useState<string | null>(null);
   const [selectedSonarrSeries, setSelectedSonarrSeries] = React.useState<Set<number>>(new Set());
 
   const [showProfilesList, setShowProfilesList] = React.useState<any[]>([]);
@@ -334,17 +333,14 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
 
   function importSonarrSeries() {
     setSonarrImporting(true);
-    setSonarrImportResults([]);
+    setSonarrImportJobId(null);
     fetch("/api/sonarr/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seriesIds: [...selectedSonarrSeries], typeMapping: sonarrTypeConfig }),
     }).then(r => r.json()).then(data => {
-      setSonarrImportResults(data.results || []);
-      if (data.results) {
-        setSonarrImportTotal(data.results.length);
-      }
-    }).catch(() => setSonarrImportResults([{ status: 'error', title: 'Import request failed' }]))
+      if (data.jobId) setSonarrImportJobId(data.jobId);
+    }).catch(() => {})
     .finally(() => setSonarrImporting(false));
   }
 
@@ -481,8 +477,8 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
             sonarrSeriesLoading={sonarrSeriesLoading}
             sonarrFetchSeries={fetchSonarrSeries}
             sonarrImporting={sonarrImporting}
-            sonarrImportResults={sonarrImportResults}
-            sonarrImportTotal={sonarrImportTotal}
+            sonarrImportJobId={sonarrImportJobId}
+            onSonarrImportDone={() => setSonarrImportJobId(null)}
             selectedSonarrSeries={selectedSonarrSeries}
             setSelectedSonarrSeries={setSelectedSonarrSeries}
             showProfilesList={showProfilesList}

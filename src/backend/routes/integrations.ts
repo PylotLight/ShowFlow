@@ -1,12 +1,23 @@
 import { db, SonarrConfigSchema, JellyfinConfigSchema } from "../db";
-import { SonarrImporter, type SonarrTypeMapping } from "../providers/sonarr/import";
+import { SonarrImporter, type SonarrTypeMapping, type ImportResult } from "../providers/sonarr/import";
 import { JellyfinSync } from "../providers/jellyfin/sync";
 import { backgroundJobs } from "../core/background_jobs";
 import { LibraryScanner } from "../core/library_scanner";
 import { json, errorResponse, loadConfig, invalidateConfigCache, getSonarrClient, getJellyfinClient } from "./_shared";
 
+/** Stores import results by jobId so the frontend can fetch them after completion. */
+const importResultsStore = new Map<string, ImportResult[]>();
+
 export function integrationRoutes() {
   return {
+
+    "/api/sonarr/import/:jobId/results": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        const results = importResultsStore.get(req.params.jobId!);
+        if (!results) return errorResponse("Results not found", 404);
+        return json(results);
+      },
+    },
 
     "/api/sonarr/settings": {
       async GET() {
@@ -107,6 +118,7 @@ export function integrationRoutes() {
           const runImport = async () => {
             try {
               const results = await importer.importSeries(series, body?.typeMapping, jobId);
+              importResultsStore.set(jobId, results);
               // Post-import library scan (design-brief-onboarding-wizard.md §2 /
               // design-brief-platform-ux-systems.md §5): newly imported shows
               // should immediately reflect files already present in their root
@@ -123,18 +135,13 @@ export function integrationRoutes() {
             }
           };
 
-          if (!series || series.length <= 5) {
-            const results = await runImport();
-            return json({ results, jobId });
-          }
-
           runImport().then(results => {
             console.log(`[sonarr] Import completed: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`);
           }).catch(err => {
             console.error('[sonarr] Import failed:', err);
           });
 
-          return json({ message: `Import started for ${series.length} series.`, jobId });
+          return json({ jobId });
         } catch (err) {
           return errorResponse(err, 500);
         }

@@ -17,10 +17,10 @@ import {
   TvIcon,
   SearchIcon,
   ImportIcon,
-  RefreshCwIcon,
-  MinusIcon,
-  PlusIcon,
+  EyeIcon,
+  SparklesIcon,
 } from "lucide-react";
+import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 import type { StepProps, SonarrSeries } from "../types";
 
 export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) {
@@ -52,9 +52,9 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
     try {
       await saveConfig();
       const res = await fetch("/api/sonarr/test");
-      const data = await res.json();
-      if (data.ok) { setTestStatus('ok'); setTestMsg("Sonarr connected"); }
-      else { setTestStatus('fail'); setTestMsg(data.message ?? "Test failed"); }
+      const d = await res.json();
+      if (d.ok) { setTestStatus('ok'); setTestMsg("Sonarr connected"); }
+      else { setTestStatus('fail'); setTestMsg(d.message ?? "Test failed"); }
     } catch { setTestStatus('fail'); setTestMsg("Connection error"); }
     finally { setTesting(false); }
   };
@@ -79,7 +79,7 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
     });
   };
 
-  const importFromSonarr = async () => {
+  const startImport = async (mode: 'background' | 'watch') => {
     setImporting(true);
     try {
       const ids = [...selectedIds];
@@ -90,10 +90,27 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
       });
       if (res.ok) {
         const result = await res.json();
-        setData({ sonarr: { ...sonarr, importJobId: result.jobId ?? null } });
+        setData({ sonarr: { ...sonarr, importJobId: result.jobId, importForkMode: mode } });
+        if (mode === 'background') {
+          onNext();
+        }
       }
     } catch {} finally { setImporting(false); }
   };
+
+  if (sonarr.importJobId && sonarr.importForkMode === 'watch') {
+    return (
+      <div className="py-4">
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold tracking-tight mb-2">Importing Series</h2>
+          <p className="text-muted-foreground">
+            Your series are being imported from Sonarr.
+          </p>
+        </div>
+        <SonarrImportProgress jobId={sonarr.importJobId} onDone={onNext} />
+      </div>
+    );
+  }
 
   return (
     <div className="py-4">
@@ -243,18 +260,42 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
             ))}
           </div>
 
-          <Button
-            onClick={importFromSonarr}
-            disabled={selectedIds.size === 0 || importing}
-            className="gap-2 w-full h-11 rounded-xl mt-2"
-          >
-            {importing ? (
-              <Loader2Icon className="size-4 animate-spin" />
-            ) : (
-              <ImportIcon className="size-4" />
-            )}
-            Import {selectedIds.size} series
-          </Button>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <button
+              onClick={() => startImport('background')}
+              disabled={selectedIds.size === 0 || importing}
+              className={cn(
+                "flex flex-col items-center gap-2 p-5 rounded-xl border transition-all text-left",
+                "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
+                "disabled:opacity-40 disabled:pointer-events-none",
+              )}
+            >
+              <SparklesIcon className="size-6 text-signal" />
+              <div>
+                <p className="text-sm font-semibold">Import in background</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Start importing and continue configuring
+                </p>
+              </div>
+            </button>
+            <button
+              onClick={() => startImport('watch')}
+              disabled={selectedIds.size === 0 || importing}
+              className={cn(
+                "flex flex-col items-center gap-2 p-5 rounded-xl border transition-all text-left",
+                "bg-white/[0.02] border-white/10 hover:bg-white/[0.05] hover:border-white/20",
+                "disabled:opacity-40 disabled:pointer-events-none",
+              )}
+            >
+              <EyeIcon className="size-6 text-signal" />
+              <div>
+                <p className="text-sm font-semibold">Watch import progress</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Wait here and see each series imported
+                </p>
+              </div>
+            </button>
+          </div>
         </div>
       )}
 
