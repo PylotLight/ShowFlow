@@ -81,13 +81,9 @@ export function App() {
     setWizardOpen(true);
   }
 
-  if (wizardOpen) {
-    return <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />;
-  }
-
   return (
     <HeaderActionsProvider container={headerActionsEl}>
-    <div className="app-background flex h-screen text-foreground pb-14 md:pb-0">
+    <div className={`app-background flex h-screen text-foreground pb-14 md:pb-0 ${wizardOpen ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
@@ -217,6 +213,9 @@ export function App() {
       {/* Feedback button — floating bottom-right */}
       <FeedbackButton />
     </div>
+    {wizardOpen && (
+      <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />
+    )}
     </HeaderActionsProvider>
   );
 }

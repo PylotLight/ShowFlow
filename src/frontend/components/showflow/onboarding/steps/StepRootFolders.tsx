@@ -11,8 +11,6 @@ import {
 import {
   Dialog,
   DialogTrigger,
-  DialogPortal,
-  DialogOverlay,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -113,9 +111,7 @@ export function StepRootFolders({ data, setData, onNext }: StepProps) {
             {data.rootFolders.length === 0 ? "Add a root folder" : "Add another folder"}
           </Button>
         </DialogTrigger>
-        <DialogPortal>
-          <DialogOverlay />
-          <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg z-[200]">
             <DialogHeader>
               <DialogTitle>Browse Directories</DialogTitle>
             </DialogHeader>
@@ -190,8 +186,7 @@ export function StepRootFolders({ data, setData, onNext }: StepProps) {
               </Button>
             </div>
           </DialogContent>
-        </DialogPortal>
-      </Dialog>
+        </Dialog>
 
       <div className="mt-8 flex items-center justify-between">
         <div>

@@ -112,9 +112,10 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
   const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5, 6, 7]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-background">
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
-        <div className="w-full max-w-2xl">
+    <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
+        <div className="w-full max-w-2xl glass-panel rounded-2xl p-8 shadow-2xl animate-page-enter">
           <StepIndicator current={step} onGoTo={goTo} />
 
           <div key={animKey} className={cn(
