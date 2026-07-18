@@ -289,6 +289,12 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             }
           }
 
+          if (show) {
+            const renamedCount = results.filter(r => r.ok && !r.skipped).length;
+            const skippedCount = results.filter(r => r.skipped).length;
+            const failedCount = results.filter(r => !r.ok).length;
+            db.logEvent({ type: 'organize', entityType: 'show', entityId: showId, message: `Organized "${show.title}": ${renamedCount} renamed, ${skippedCount} skipped, ${failedCount} failed` });
+          }
           return json({ ok: true, renamed: results.filter(r => r.ok && !r.skipped).length, skipped: results.filter(r => r.skipped).length, failed: results.filter(r => !r.ok).length, results });
         } catch (err) {
           return errorResponse(err, 500);

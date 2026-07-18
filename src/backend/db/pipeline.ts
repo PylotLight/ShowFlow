@@ -170,9 +170,34 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
 
   return rows.map(r => {
     const hasFile = r.file_path !== null && r.file_path !== '';
-    const stage = hasFile
-      ? 'AVAILABLE'
-      : r.current_stage ?? 'WANTED';
+    const isFuture = r.air_date !== null && new Date(r.air_date) > new Date();
+
+    if (hasFile) {
+      return {
+        showId: r.show_id,
+        showTitle: r.show_title,
+        seasonNumber: r.season_number,
+        episodeNumber: r.episode_number,
+        episodeTitle: r.episode_title ?? null,
+        airDate: r.air_date ?? null,
+        filePath: r.file_path ?? null,
+        currentStage: 'AVAILABLE',
+        eventId: r.event_id ?? null,
+        eventType: r.event_type ?? null,
+        reasonCode: r.reason_code ?? null,
+        reasonCategory: r.reason_category ?? null,
+        message: r.message ?? null,
+        releaseTitle: r.release_title ?? null,
+        eventCreatedAt: r.event_created_at ?? null,
+        searchMode: r.search_mode ?? 'auto',
+      };
+    }
+
+    const stage = r.current_stage ?? 'WANTED';
+
+    if (stage === 'WANTED' && isFuture) {
+      return null;
+    }
 
     return {
       showId: r.show_id,
@@ -192,7 +217,7 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
       eventCreatedAt: r.event_created_at ?? null,
       searchMode: r.search_mode ?? 'auto',
     };
-  });
+  }).filter((e): e is NonNullable<typeof e> => e !== null);
 }
 
 /** Retention: pipeline_events is high-volume (every search can write several rows), so this needs to run on a schedule same as cleanupOldLogs. */
