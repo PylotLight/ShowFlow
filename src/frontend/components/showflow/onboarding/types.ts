@@ -51,6 +51,8 @@ export interface StepProps {
   onSkip: () => void;
   isFirst: boolean;
   isLast: boolean;
+  sonarrPanelOpen: boolean;
+  setSonarrPanelOpen: (open: boolean) => void;
 }
 
 export const STEPS = [

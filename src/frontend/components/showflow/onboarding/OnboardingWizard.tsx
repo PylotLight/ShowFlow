@@ -43,6 +43,7 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
   const [step, setStep] = React.useState(data.step);
   const [direction, setDirection] = React.useState<'forward' | 'backward'>('forward');
   const [animKey, setAnimKey] = React.useState(0);
+  const [sonarrPanelOpen, setSonarrPanelOpen] = React.useState(false);
 
   React.useEffect(() => { saveData({ ...data, step }); }, [data, step]);
 
@@ -92,6 +93,8 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
     onSkip: skipToEnd,
     isFirst: step === 0,
     isLast: step === TOTAL_STEPS - 1,
+    sonarrPanelOpen,
+    setSonarrPanelOpen,
   };
 
   const renderStep = () => {
@@ -111,9 +114,18 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0" style={{
+        background: `
+          radial-gradient(circle at 22% 8%, rgba(80, 180, 110, 0.14), transparent 40%),
+          radial-gradient(circle at 85% 14%, rgba(220, 195, 50, 0.11), transparent 36%),
+          rgba(0, 0, 0, 0.55)
+        `
+      }} />
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
-        <div className="w-full max-w-2xl glass-panel rounded-2xl p-8 shadow-2xl animate-page-enter">
+        <div className={cn(
+          "w-full max-w-2xl glass-panel rounded-2xl p-8 shadow-2xl animate-page-enter transition-transform duration-300 ease-out",
+          step === 3 && sonarrPanelOpen && "-translate-x-[218px]"
+        )}>
           <StepIndicator current={step} onGoTo={goTo} />
 
           <div key={animKey} className={cn(

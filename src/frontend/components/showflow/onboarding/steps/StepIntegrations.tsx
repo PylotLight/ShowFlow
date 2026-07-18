@@ -24,7 +24,7 @@ import {
 import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 import type { StepProps, SonarrSeries } from "../types";
 
-export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
+export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpen, setSonarrPanelOpen }: StepProps) {
   const [prowlarrEnabled, setProwlarrEnabled] = React.useState(!!data.prowlarr.baseUrl);
   const [testingProwlarr, setTestingProwlarr] = React.useState(false);
   const [prowlarrStatus, setProwlarrStatus] = React.useState<'idle' | 'ok' | 'fail'>('idle');
@@ -36,7 +36,6 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
   const [sonarrMsg, setSonarrMsg] = React.useState("");
 
   const [dcEnabled, setDcEnabled] = React.useState(data.downloadClient.type !== 'none');
-  const [sonarrPanelOpen, setSonarrPanelOpen] = React.useState(false);
   const [fetching, setFetching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
@@ -226,10 +225,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
   };
 
   return (
-    <div className={cn(
-      "relative py-2 transition-transform duration-300 ease-out",
-      sonarrPanelOpen && "-translate-x-[218px]"
-    )}>
+    <div className="relative py-2">
       <div className="mb-6">
         <h2 className="text-xl font-bold tracking-tight mb-1">Integrations</h2>
         <p className="text-sm text-muted-foreground">
