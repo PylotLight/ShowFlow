@@ -116,12 +116,12 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
     <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
       <div className="absolute inset-0" style={{
         background: `
-          radial-gradient(circle at 22% 8%, rgba(80, 180, 110, 0.14), transparent 40%),
-          radial-gradient(circle at 85% 14%, rgba(220, 195, 50, 0.11), transparent 36%),
-          rgba(0, 0, 0, 0.82)
+          rgba(0, 0, 0, 0.92),
+          radial-gradient(circle at 22% 8%, rgba(80, 180, 110, 0.18), transparent 40%),
+          radial-gradient(circle at 85% 14%, rgba(220, 195, 50, 0.14), transparent 36%)
         `,
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)"
+        backdropFilter: "blur(32px)",
+        WebkitBackdropFilter: "blur(32px)"
       }} />
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className={cn(
