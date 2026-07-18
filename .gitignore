@@ -5,6 +5,11 @@ node_modules
 out
 dist
 *.tgz
+# bun build outputs
+chunk-*.js.map
+manifest.json
+server.js.map
+showflow
 
 # code coverage
 coverage
