@@ -86,10 +86,11 @@ export class GrabberService {
     const show = db.getShow(showId);
     if (!show) return { error: `Show ${showId} not found` };
 
-    const profileId = db.resolveProfileId(show.profile) ?? '';
+    const libraryType = show.library_type_id ? db.getLibraryType(show.library_type_id) : null;
+    const profileId = libraryType?.quality_profile_id ?? db.resolveProfileId(show.profile) ?? '';
     const seriesType = this.getSeriesType(show);
     const anime = seriesType === 'anime' || seriesType === 'absolute';
-    const indexers = this.getEnabledIndexers(profileId, seriesType);
+    const indexers = this.getEnabledIndexers({ profileId, libraryType });
     if (indexers.length === 0) {
       const message = 'No indexers configured. Add a Prowlarr or Native indexer in Settings > Indexers.';
       db.logPipelineEvent({
@@ -410,7 +411,7 @@ export class GrabberService {
     return { success: true, message: `Grabbed ${release.title}`, release };
   }
 
-  private getEnabledIndexers(profileId?: string, seriesType?: string): Indexer[] {
+  private getEnabledIndexers(opts?: { profileId?: string; libraryType?: any }): Indexer[] {
     const all: { id: string; instance: Indexer }[] = [];
 
     // Load Prowlarr if configured and enabled
@@ -449,9 +450,16 @@ export class GrabberService {
       }
     }
 
-    // If a profile specifies indexer filtering, intersect with enabled indexers
-    if (profileId) {
-      const allowed = db.getProfileIndexers(profileId);
+    // If a library type specifies indexers, intersect with enabled indexers
+    // (library type's indexers replace quality_profiles.indexers as the
+    // source of truth - see design-brief-platform-ux-systems.md §1)
+    if (opts?.libraryType?.indexers && Array.isArray(opts.libraryType.indexers) && opts.libraryType.indexers.length > 0) {
+      return all.filter(i => opts.libraryType.indexers.includes(i.id)).map(i => i.instance);
+    }
+
+    // Legacy path: profile-based indexer filtering from quality_profiles.indexers
+    if (opts?.profileId) {
+      const allowed = db.getProfileIndexers(opts.profileId);
       if (allowed.length > 0) {
         return all.filter(i => allowed.includes(i.id)).map(i => i.instance);
       }

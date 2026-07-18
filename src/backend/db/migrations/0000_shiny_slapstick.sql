@@ -30,6 +30,18 @@ CREATE TABLE `episodes` (
 	FOREIGN KEY (`show_id`) REFERENCES `shows`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `library_types` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`root_folder_path` text,
+	`quality_profile_id` text,
+	`indexers` text DEFAULT '{}',
+	`is_default` integer DEFAULT 0,
+	`created_at` text DEFAULT (datetime('now')),
+	FOREIGN KEY (`quality_profile_id`) REFERENCES `quality_profiles`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_library_types_name` ON `library_types` (`name`);--> statement-breakpoint
 CREATE TABLE `metadata_cache` (
 	`cache_key` text PRIMARY KEY NOT NULL,
 	`raw_json` text,
@@ -182,9 +194,11 @@ CREATE TABLE `shows` (
 	`profile` text DEFAULT 'standard',
 	`series_type` text DEFAULT 'standard',
 	`root_folder_path` text,
+	`library_type_id` text,
 	`sort_title` text,
 	`added_at` text DEFAULT (datetime('now')),
-	`last_updated` text DEFAULT (datetime('now'))
+	`last_updated` text DEFAULT (datetime('now')),
+	FOREIGN KEY (`library_type_id`) REFERENCES `library_types`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `system_health` (

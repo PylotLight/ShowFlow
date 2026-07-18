@@ -250,6 +250,7 @@ export function saveShow(self: DatabaseManager, show: {
   title: string;
   profile?: string;
   showProfileId?: string;
+  libraryTypeId?: string;
   config: any;
   year?: number;
   originalTitle?: string;
@@ -258,7 +259,10 @@ export function saveShow(self: DatabaseManager, show: {
   rootFolderPath?: string;
   seriesType?: string;
 }) {
-  const profile = self.resolveProfileId(show.profile) ?? show.profile ?? undefined;
+  const resolvedLibraryTypeId = show.libraryTypeId ? self.resolveLibraryTypeId(show.libraryTypeId) : undefined;
+  const profile = resolvedLibraryTypeId
+    ? (self.getLibraryType(resolvedLibraryTypeId)?.quality_profile_id ?? self.resolveProfileId(show.profile) ?? show.profile ?? undefined)
+    : (self.resolveProfileId(show.profile) ?? show.profile ?? undefined);
   const rootFolderPath = show.rootFolderPath ?? (show.showProfileId ? self.getShowProfileRootFolder(show.showProfileId) : null);
   const seriesType = show.seriesType ?? 'standard';
 
@@ -270,6 +274,7 @@ export function saveShow(self: DatabaseManager, show: {
     profile,
     series_type: seriesType,
     root_folder_path: rootFolderPath,
+    library_type_id: resolvedLibraryTypeId ?? null,
   }).onConflictDoUpdate({
     target: schema.shows.id,
     set: {
@@ -279,6 +284,7 @@ export function saveShow(self: DatabaseManager, show: {
       profile,
       series_type: seriesType,
       root_folder_path: rootFolderPath,
+      library_type_id: resolvedLibraryTypeId ?? null,
       last_updated: sql`(datetime('now'))`,
     },
   }).run();

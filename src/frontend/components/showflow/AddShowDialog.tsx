@@ -32,6 +32,9 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [searching, setSearching] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const [libraryTypes, setLibraryTypes] = React.useState<{ id: string; name: string }[]>([]);
+  const [selectedLibraryTypeId, setSelectedLibraryTypeId] = React.useState("");
+
   const [qualityProfiles, setQualityProfiles] = React.useState<{ id: string; name: string }[]>([]);
   const [selectedQualityProfile, setSelectedQualityProfile] = React.useState("");
 
@@ -57,6 +60,15 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     setResults([]);
     setError(null);
     setSeriesType(source === "anilist" ? "anime" : "standard");
+    fetch("/api/library-types").then(r => r.json()).then(data => {
+      const list = Array.isArray(data) ? data : [];
+      setLibraryTypes(list);
+      if (list.length > 0) {
+        const defaultType = list.find((t: any) => t.is_default === 1) || list[0];
+        setSelectedLibraryTypeId(defaultType.id);
+        setSelectedQualityProfile("");
+      }
+    }).catch(() => {});
     fetch("/api/profiles").then(r => r.json()).then(data => {
       const list = Array.isArray(data) ? data : [];
       setQualityProfiles(list);
@@ -125,9 +137,10 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             source,
             providerId: item.id,
             name: item.title,
-            profile: selectedQualityProfile || undefined,
+            profile: selectedLibraryTypeId ? undefined : (selectedQualityProfile || undefined),
             seriesType,
             showProfileId: selectedShowProfileId || undefined,
+            libraryTypeId: selectedLibraryTypeId || undefined,
           }),
         });
         if (res.ok) {
@@ -186,7 +199,22 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {qualityProfiles.length > 0 && (
+          {libraryTypes.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Type</span>
+              <Select value={selectedLibraryTypeId} onValueChange={setSelectedLibraryTypeId}>
+                <SelectTrigger className="w-28 h-7 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {libraryTypes.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {libraryTypes.length <= 1 && qualityProfiles.length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quality</span>
               <Select value={selectedQualityProfile} onValueChange={setSelectedQualityProfile}>
@@ -202,7 +230,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Type</span>
+            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Series</span>
             <Select value={seriesType} onValueChange={setSeriesType}>
               <SelectTrigger className="w-28 h-7 text-xs">
                 <SelectValue />

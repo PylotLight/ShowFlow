@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema';
 
-import { seedDefaults, migrateQualityIds } from './init';
+import { seedDefaults, migrateQualityIds, seedDefaultLibraryTypes } from './init';
 import { backfillShowTitles } from './shows';
 import * as shows from './shows';
 import * as config from './config';
@@ -64,6 +64,7 @@ export class DatabaseManager {
 
     seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
     migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
+    seedDefaultLibraryTypes(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
 
     const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;
     if (!titleCount || titleCount.c === 0) {
@@ -177,6 +178,14 @@ export class DatabaseManager {
   saveShowProfile(id: string, name: string, rootFolderPath: string) { return config.saveShowProfile(this, id, name, rootFolderPath); }
   removeShowProfile(id: string) { return config.removeShowProfile(this, id); }
   getShowProfileRootFolder(profileId: string) { return config.getShowProfileRootFolder(this, profileId); }
+
+  // ---- Library Types (design-brief-platform-ux-systems.md §1) ------------
+
+  listLibraryTypes() { return config.listLibraryTypes(this); }
+  getLibraryType(id: string) { return config.getLibraryType(this, id); }
+  saveLibraryType(t: Parameters<typeof config.saveLibraryType>[1]) { return config.saveLibraryType(this, t); }
+  removeLibraryType(id: string) { return config.removeLibraryType(this, id); }
+  resolveLibraryTypeId(id: string | null | undefined) { return config.resolveLibraryTypeId(this, id); }
 
   // ---- Settings ----------------------------------------------------------
 

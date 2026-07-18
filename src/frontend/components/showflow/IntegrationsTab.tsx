@@ -7,7 +7,7 @@ import { Switch } from "@frontend/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { FieldRow } from "./SettingsShared";
 
-export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportResults, sonarrImportTotal, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, }: {
+export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportResults, sonarrImportTotal, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, libraryTypesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, }: {
   sonarr: any; setSonarr: any;
   showSonarrKey: boolean; setShowSonarrKey: (v: boolean) => void;
   sonarrTesting: boolean; sonarrStatus: any;
@@ -15,8 +15,8 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
   sonarrSeries: any[] | null; sonarrSeriesLoading: boolean; sonarrFetchSeries: () => void;
   sonarrImporting: boolean; sonarrImportResults: any[]; sonarrImportTotal: number;
   selectedSonarrSeries: Set<number>; setSelectedSonarrSeries: (v: Set<number>) => void;
-  showProfilesList: any[]; qualityProfilesList: any[];
-  sonarrTypeConfig: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }>;
+  showProfilesList: any[]; qualityProfilesList: any[]; libraryTypesList: any[];
+  sonarrTypeConfig: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string; libraryTypeId: string }>;
   setSonarrTypeConfig: (v: any) => void;
   sonarrTypesPresent: any[]; visibleSonarrSeries: any[];
   sonarrImportFn: () => void;
@@ -131,7 +131,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                   Series Type Mapping
                 </p>
                 {sonarrTypesPresent.map(([type, count]: [string, number]) => {
-                  const tc = sonarrTypeConfig[type] || { included: true, showProfileId: "", qualityProfileId: "" };
+                  const tc = sonarrTypeConfig[type] || { included: true, showProfileId: "", qualityProfileId: "", libraryTypeId: "" };
                   return (
                     <div key={type} className="flex items-center gap-3">
                       <Switch
@@ -140,31 +140,59 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                       />
                       <span className="font-mono text-sm min-w-[100px]">{type} ({count})</span>
                       <Select
-                        value={tc.showProfileId}
-                        onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, showProfileId: v } }))}
+                        value={tc.libraryTypeId}
+                        onValueChange={v => {
+                          const libType = libraryTypesList.find((lt: any) => lt.id === v);
+                          setSonarrTypeConfig((prev: any) => ({
+                            ...prev,
+                            [type]: {
+                              ...tc,
+                              libraryTypeId: v,
+                              showProfileId: libType?.root_folder_path ? "" : tc.showProfileId,
+                              qualityProfileId: libType?.quality_profile_id || tc.qualityProfileId,
+                            },
+                          }));
+                        }}
                       >
                         <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Root folder" />
+                          <SelectValue placeholder="Library type" />
                         </SelectTrigger>
                         <SelectContent>
-                          {showProfilesList.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          {libraryTypesList.map((lt: any) => (
+                            <SelectItem key={lt.id} value={lt.id}>{lt.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      <Select
-                        value={tc.qualityProfileId}
-                        onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, qualityProfileId: v } }))}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Quality profile" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {qualityProfilesList.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {!tc.libraryTypeId && (
+                        <>
+                          <Select
+                            value={tc.showProfileId}
+                            onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, showProfileId: v } }))}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue placeholder="Root folder" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {showProfilesList.map((p: any) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={tc.qualityProfileId}
+                            onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, qualityProfileId: v } }))}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue placeholder="Quality profile" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {qualityProfilesList.map((p: any) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </>
+                      )}
                     </div>
                   );
                 })}

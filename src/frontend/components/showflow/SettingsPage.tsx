@@ -71,7 +71,8 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
 
   const [showProfilesList, setShowProfilesList] = React.useState<any[]>([]);
   const [qualityProfilesList, setQualityProfilesList] = React.useState<any[]>([]);
-  const [sonarrTypeConfig, setSonarrTypeConfig] = React.useState<Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }>>({});
+  const [libraryTypesList, setLibraryTypesList] = React.useState<any[]>([]);
+  const [sonarrTypeConfig, setSonarrTypeConfig] = React.useState<Record<string, { included: boolean; showProfileId: string; qualityProfileId: string; libraryTypeId: string }>>({});
 
   const visibleSonarrSeries = React.useMemo(() => {
     if (!sonarrSeries) return [];
@@ -112,14 +113,16 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
       fetch("/api/tasks").then(r => r.json()),
       fetch("/api/show-profiles").then(r => r.json()).catch(() => []),
       fetch("/api/profiles").then(r => r.json()).catch(() => []),
+      fetch("/api/library-types").then(r => r.json()).catch(() => []),
       loadTheme(),
-    ]).then(([cfg, settings, nativeMetaData, tasksData, showProfilesData, qualityProfilesData, loadedTheme]) => {
+    ]).then(([cfg, settings, nativeMetaData, tasksData, showProfilesData, qualityProfilesData, libraryTypesData, loadedTheme]) => {
       setConfig(cfg);
       setTheme(loadedTheme);
       setNativeMeta(Array.isArray(nativeMetaData) ? nativeMetaData : []);
       setTasks(Array.isArray(tasksData) ? tasksData : []);
       setShowProfilesList(Array.isArray(showProfilesData) ? showProfilesData : []);
       setQualityProfilesList(Array.isArray(qualityProfilesData) ? qualityProfilesData : []);
+      setLibraryTypesList(Array.isArray(libraryTypesData) ? libraryTypesData : []);
       const sonarrRaw = settings.find((s: any) => s.key === "sonarr");
       if (sonarrRaw) {
         try {
@@ -484,6 +487,7 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
             setSelectedSonarrSeries={setSelectedSonarrSeries}
             showProfilesList={showProfilesList}
             qualityProfilesList={qualityProfilesList}
+            libraryTypesList={libraryTypesList}
             sonarrTypeConfig={sonarrTypeConfig}
             setSonarrTypeConfig={setSonarrTypeConfig}
             sonarrTypesPresent={sonarrTypesPresent}

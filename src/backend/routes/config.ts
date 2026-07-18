@@ -57,6 +57,53 @@ export function configRoutes() {
       },
     },
 
+    "/api/library-types": {
+      async GET() {
+        try {
+          return json(db.listLibraryTypes());
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = await req.json() as { id?: string; name?: string; rootFolderPath?: string; qualityProfileId?: string; indexers?: any; isDefault?: boolean };
+          if (!body.id || !body.name) return errorResponse("id and name are required");
+          db.saveLibraryType({
+            id: body.id,
+            name: body.name,
+            rootFolderPath: body.rootFolderPath,
+            qualityProfileId: body.qualityProfileId,
+            indexers: body.indexers,
+            isDefault: body.isDefault,
+          });
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
+    "/api/library-types/:id": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        try {
+          const type = db.getLibraryType(req.params.id!);
+          if (!type) return errorResponse("Library type not found", 404);
+          return json(type);
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async DELETE(req: Request & { params: Record<string, string> }) {
+        try {
+          db.removeLibraryType(req.params.id!);
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
     "/api/settings": {
       async GET() {
         try {
