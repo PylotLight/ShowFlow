@@ -20,6 +20,7 @@ import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
 import { BackgroundActivityPopover } from "@frontend/components/showflow/BackgroundActivityPopover";
+import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 import "./styles/index.css";
 
 export function App() {
@@ -165,8 +166,9 @@ export function App() {
         </div>
       </div>
 
-      {/* Background Activity indicator — floating top-right, always visible */}
-      <div className="fixed top-4 right-4 z-50">
+      {/* Background Activity + Notifications — floating top-right, always visible */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+        <NotificationsPopover />
         <BackgroundActivityPopover />
       </div>
 

@@ -1,0 +1,12 @@
+{
+  "releaseId": "development",
+  "version": "development",
+  "commit": "development",
+  "platform": "linux-x64",
+  "readyPath": "/internal/ready",
+  "artifact": {
+    "name": "showflow",
+    "sha256": "bb4cd8e1982ce4235397cc22a3866d06b7ad509bccf623417b71757fe911153e"
+  },
+  "minimumSupervisorVersion": "0.1.0"
+}
