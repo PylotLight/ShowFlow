@@ -15,6 +15,8 @@ import {
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
+import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
+import { BackgroundActivityPopover } from "@frontend/components/showflow/BackgroundActivityPopover";
 
 export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "sources" | "settings" | "manual-import" | "health";
 
@@ -124,6 +126,12 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
   return (
     <>
+      {/* Mobile notification bar */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 md:hidden">
+        <NotificationsPopover />
+        <BackgroundActivityPopover />
+      </div>
+
       {/* Desktop Sidebar (visible on md screens and up) */}
       <aside
         className={cn(
@@ -138,6 +146,10 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
           <span className="font-display text-lg font-bold tracking-wider text-white uppercase hidden lg:inline">
             ShowFlow
           </span>
+          <div className="ml-auto flex items-center gap-1">
+            <NotificationsPopover />
+            <BackgroundActivityPopover />
+          </div>
         </div>
 
         {/* Navigation Lists */}

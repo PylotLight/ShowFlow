@@ -19,8 +19,6 @@ import { SearchIcon } from "lucide-react";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
-import { BackgroundActivityPopover } from "@frontend/components/showflow/BackgroundActivityPopover";
-import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 import { OnboardingWizard } from "@frontend/components/showflow/onboarding/OnboardingWizard";
 import "./styles/index.css";
 
@@ -58,10 +56,10 @@ export function App() {
     if (!wizardOpen) return;
     (async () => {
       try {
-        const res = await fetch("/api/library-types");
+        const res = await fetch("/api/shows?limit=1");
         if (res.ok) {
-          const types = await res.json();
-          if (types.length > 0) setWizardOpen(false);
+          const shows = await res.json();
+          if (shows.length > 0) setWizardOpen(false);
         }
       } catch {}
     })();
@@ -208,15 +206,6 @@ export function App() {
         </div>
       </div>
 
-      {/* Background Activity + Notifications — floating top-right, always visible */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
-        <NotificationsPopover />
-        <BackgroundActivityPopover />
-      </div>
-
-      {/* Feedback button — floating bottom-right */}
-      <FeedbackButton />
-
       {/* Show Detail Modal — renders on top of any page */}
       {selected && (
         <ShowDetailDialog
@@ -224,6 +213,9 @@ export function App() {
           onClose={() => setSelected(null)}
         />
       )}
+
+      {/* Feedback button — floating bottom-right */}
+      <FeedbackButton />
     </div>
     </HeaderActionsProvider>
   );
