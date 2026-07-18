@@ -33,6 +33,7 @@ export function App() {
   const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
   const [wizardOpen, setWizardOpen] = React.useState<boolean | null>(null);
   const [wizardKey, setWizardKey] = React.useState(0);
+  const wizardManual = React.useRef(false);
 
   React.useEffect(() => {
     loadTheme().then((theme) => {
@@ -41,6 +42,10 @@ export function App() {
   }, []);
 
   React.useEffect(() => {
+    if (wizardManual.current) {
+      wizardManual.current = false;
+      return;
+    }
     (async () => {
       try {
         const stored = localStorage.getItem("showflow-onboarding");
@@ -70,10 +75,12 @@ export function App() {
 
   function reRunWizard() {
     localStorage.removeItem("showflow-onboarding");
+    wizardManual.current = true;
     setWizardKey(k => k + 1);
     setWizardOpen(true);
   }
 
+  if (wizardOpen === null) return null;
   if (wizardOpen === true) {
     return <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />;
   }

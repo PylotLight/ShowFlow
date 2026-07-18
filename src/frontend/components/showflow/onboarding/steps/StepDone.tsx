@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import type { StepProps } from "../types";
 
-export function StepDone({ data }: StepProps) {
+export function StepDone({ data, onNext }: StepProps) {
   const summary = [
     { icon: LibraryIcon, label: 'Root folders', value: data.rootFolders.length.toString() },
     { icon: SettingsIcon, label: 'Library type', value: data.libraryTypeId ? 'Configured' : 'Default' },
@@ -42,7 +42,7 @@ export function StepDone({ data }: StepProps) {
       </div>
 
       <Button
-        onClick={() => window.location.reload()}
+        onClick={onNext}
         className="h-12 px-8 rounded-xl text-base gap-2"
       >
         <SparklesIcon className="size-4" />

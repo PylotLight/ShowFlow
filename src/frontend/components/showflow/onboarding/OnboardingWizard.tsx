@@ -109,6 +109,8 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
     }
   };
 
+  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5, 6, 7]);
+
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-background">
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
@@ -155,26 +157,28 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
             {renderStep()}
           </div>
 
-          <div className="mt-10 flex items-center justify-between">
-            <div>
-              {!stepProps.isFirst && (
-                <Button variant="ghost" onClick={goBack} className="gap-2">
-                  <ArrowLeftIcon className="size-4" />
-                  Back
-                </Button>
-              )}
+          {!HAS_OWN_NAV.has(step) && (
+            <div className="mt-10 flex items-center justify-between">
+              <div>
+                {!stepProps.isFirst && (
+                  <Button variant="ghost" onClick={goBack} className="gap-2">
+                    <ArrowLeftIcon className="size-4" />
+                    Back
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {!stepProps.isLast && step < TOTAL_STEPS - 1 && (
+                  <button
+                    onClick={stepProps.onSkip}
+                    className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                  >
+                    Skip and set up manually
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              {!stepProps.isLast && step < TOTAL_STEPS - 1 && (
-                <button
-                  onClick={stepProps.onSkip}
-                  className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-                >
-                  Skip and set up manually
-                </button>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
