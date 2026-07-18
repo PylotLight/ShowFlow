@@ -83,7 +83,7 @@ export function App() {
 
   return (
     <HeaderActionsProvider container={headerActionsEl}>
-    <div className={`app-background flex h-screen text-foreground pb-14 md:pb-0 ${wizardOpen ? 'opacity-40 pointer-events-none' : ''}`}>
+    <div className={`app-background flex h-screen text-foreground pb-14 md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">

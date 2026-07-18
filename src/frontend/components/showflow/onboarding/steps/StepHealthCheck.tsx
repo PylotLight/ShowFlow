@@ -12,17 +12,27 @@ import {
 } from "lucide-react";
 import type { StepProps } from "../types";
 
-interface HealthItem {
-  componentType: string;
-  componentId: string;
-  componentName: string;
+interface HealthRow {
+  component_type: string;
+  component_id: string;
+  component_name: string;
   status: 'healthy' | 'degraded' | 'down';
-  reasonCode: string | null;
+  reason_code: string | null;
   message: string | null;
 }
 
+interface HealthResponse {
+  overallStatus: 'healthy' | 'degraded' | 'down';
+  byType: {
+    indexer: HealthRow[];
+    download_client: HealthRow[];
+    import_path: HealthRow[];
+  };
+}
+
 export function StepHealthCheck({ onNext }: StepProps) {
-  const [items, setItems] = React.useState<HealthItem[]>([]);
+  const [items, setItems] = React.useState<HealthRow[]>([]);
+  const [overallStatus, setOverallStatus] = React.useState<'healthy' | 'degraded' | 'down' | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -31,7 +41,18 @@ export function StepHealthCheck({ onNext }: StepProps) {
     setError(null);
     try {
       const res = await fetch("/api/system/health");
-      if (res.ok) setItems(await res.json());
+      if (res.ok) {
+        // The endpoint returns { overallStatus, byType: { indexer, download_client, import_path } },
+        // not a flat array — flatten it here for this step's simple list view.
+        const data: HealthResponse = await res.json();
+        const rows = [
+          ...(data.byType?.indexer ?? []),
+          ...(data.byType?.download_client ?? []),
+          ...(data.byType?.import_path ?? []),
+        ];
+        setItems(rows);
+        setOverallStatus(data.overallStatus ?? null);
+      }
       else setError("Could not load health data");
     } catch { setError("Failed to fetch health"); }
     finally { setLoading(false); }
@@ -39,11 +60,7 @@ export function StepHealthCheck({ onNext }: StepProps) {
 
   React.useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
-  const overall = !loading && !error
-    ? items.some(i => i.status === 'down') ? 'down'
-      : items.some(i => i.status === 'degraded') ? 'degraded'
-      : 'healthy'
-    : null;
+  const overall = !loading && !error ? overallStatus : null;
 
   const overallConfig = {
     healthy: { label: 'All systems healthy', icon: CheckCircleIcon, color: 'text-green-400', bg: 'bg-green-500/[0.04] border-green-500/20' },
@@ -95,7 +112,7 @@ export function StepHealthCheck({ onNext }: StepProps) {
           <div className="space-y-1.5">
             {items.map(item => (
               <div
-                key={`${item.componentType}:${item.componentId}`}
+                key={`${item.component_type}:${item.component_id}`}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 rounded-xl border text-sm transition-all",
                   item.status === 'healthy' && "border-green-500/20 bg-white/[0.02]",
@@ -107,7 +124,7 @@ export function StepHealthCheck({ onNext }: StepProps) {
                 {item.status === 'degraded' && <AlertTriangleIcon className="size-4 shrink-0 text-amber-400" />}
                 {item.status === 'down' && <XCircleIcon className="size-4 shrink-0 text-red-400" />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.componentName}</p>
+                  <p className="text-sm font-medium truncate">{item.component_name}</p>
                   {item.message && (
                     <p className="text-xs text-muted-foreground mt-0.5">{item.message}</p>
                   )}

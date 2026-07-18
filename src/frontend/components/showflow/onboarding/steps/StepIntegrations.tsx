@@ -40,18 +40,87 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
   const [fetching, setFetching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
+  const [libraryTypes, setLibraryTypes] = React.useState<{ id: string; name: string; is_default?: boolean }[]>([]);
 
   const { sonarr, prowlarr, downloadClient } = data;
 
-  // Watch-mode import takes over the page
-  if (sonarr.importJobId && sonarr.importForkMode === 'watch') {
+  // Per-folder type mapping (rootFolder -> libraryTypeId)
+  const [typeMapping, setTypeMapping] = React.useState<Record<string, string>>({});
+
+  // Load library types on mount
+  React.useEffect(() => {
+    fetch("/api/library-types").then(res => res.json()).then(setLibraryTypes).catch(() => {});
+  }, []);
+
+  // Seed new folders only; never reset existing selections
+  React.useEffect(() => {
+    const defaultId = data.libraryTypeId ?? (libraryTypes.find(lt => lt.is_default) ?? libraryTypes[0])?.id ?? '';
+    setTypeMapping(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const folder of data.rootFolders) {
+        if (!next[folder]) { next[folder] = defaultId; changed = true; }
+      }
+      // Remove entries for folders that no longer exist
+      for (const key of Object.keys(next)) {
+        if (!data.rootFolders.includes(key)) { delete next[key]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [data.rootFolders, data.libraryTypeId, libraryTypes.length]);
+
+  // Watch-mode import takes over the page. The job itself lives only in an
+  // in-memory registry on the server (see /api/background-jobs) — it is NOT
+  // persisted in the database. So if the server restarted, or the DB was
+  // wiped, the job referenced by a leftover importJobId is gone for good,
+  // but the wizard's own persisted state (localStorage / the
+  // "onboarding.wizard" setting) has no way of knowing that on its own.
+  // Without this check, the takeover screen below polls a job that 404s
+  // forever and just sits on "Starting import...". Verify the job is real
+  // before trusting it, and silently drop back to the normal config form
+  // if it isn't.
+  const [importJobMissing, setImportJobMissing] = React.useState(false);
+  React.useEffect(() => {
+    if (!sonarr.importJobId || sonarr.importForkMode !== 'watch') return;
+    let cancelled = false;
+    fetch(`/api/background-jobs/${sonarr.importJobId}`)
+      .then(res => { if (!cancelled && !res.ok) setImportJobMissing(true); })
+      .catch(() => { if (!cancelled) setImportJobMissing(true); });
+    return () => { cancelled = true; };
+  }, [sonarr.importJobId, sonarr.importForkMode]);
+
+  React.useEffect(() => {
+    if (importJobMissing) {
+      setData({ sonarr: { ...sonarr, importJobId: null, importForkMode: null } });
+      setImportJobMissing(false);
+    }
+  }, [importJobMissing]);
+
+  if (sonarr.importJobId && sonarr.importForkMode === 'watch' && !importJobMissing) {
     return (
       <div className="py-4">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold tracking-tight mb-2">Importing Series</h2>
-          <p className="text-muted-foreground">Your series are being imported from Sonarr.</p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight mb-2">Importing Series</h2>
+            <p className="text-muted-foreground">Your series are being imported from Sonarr.</p>
+          </div>
+          <button
+            onClick={() => setData({ sonarr: { ...sonarr, importJobId: null, importForkMode: null } })}
+            className="shrink-0 text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic whitespace-nowrap pt-1"
+          >
+            Cancel and reconfigure
+          </button>
         </div>
-        <SonarrImportProgress jobId={sonarr.importJobId} onDone={onNext} />
+        <SonarrImportProgress
+          jobId={sonarr.importJobId}
+          onDone={() => {
+            // Clear the job flags so this takeover screen doesn't reappear the
+            // next time this step is rendered (e.g. after going back/forward,
+            // or on a later run of onboarding).
+            setData({ sonarr: { ...sonarr, importJobId: null, importForkMode: null } });
+            onNext();
+          }}
+        />
       </div>
     );
   }
@@ -137,10 +206,14 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
     setImporting(true);
     try {
       const ids = [...selectedIds];
+      const mapping: Record<string, string> = {};
+      data.rootFolders.forEach(folder => {
+        mapping[folder] = typeMapping[folder] ?? data.libraryTypeId ?? 'standard';
+      });
       const res = await fetch("/api/sonarr/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seriesIds: ids, typeMapping: { default: data.libraryTypeId ?? 'standard' } }),
+        body: JSON.stringify({ seriesIds: ids, typeMapping: mapping }),
       });
       if (res.ok) {
         const result = await res.json();
@@ -154,8 +227,8 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
 
   return (
     <div className={cn(
-      "py-4 transition-all duration-300",
-      sonarrPanelOpen && "-translate-x-[260px]"
+      "relative py-4 transition-transform duration-300 ease-out",
+      sonarrPanelOpen && "-translate-x-[218px]"
     )}>
       <div className="mb-8">
         <h2 className="text-2xl font-bold tracking-tight mb-2">Integrations</h2>
@@ -439,11 +512,16 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
         </div>
       </div>
 
-      {/* Slide-out Sonarr import manager panel */}
+      {/* Slide-out Sonarr import manager panel — docked to the right edge of this
+          card (not the browser viewport), so it opens up right where the card
+          slides away from, and its height is capped so it can never run below
+          the viewport. */}
       <div
         className={cn(
-          "fixed right-0 top-0 h-full w-[520px] z-50 bg-[#15181f] border-l border-white/10 shadow-2xl flex flex-col transition-transform duration-300 ease-out",
-          sonarrPanelOpen ? "translate-x-0" : "translate-x-full"
+          "absolute left-full top-0 ml-4 w-[420px] max-h-[min(680px,85vh)] z-50",
+          "bg-[#15181f] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden",
+          "transition-all duration-300 ease-out",
+          sonarrPanelOpen ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 translate-x-4 pointer-events-none"
         )}
       >
         {/* Panel header */}
@@ -489,16 +567,19 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
           )}
         </div>
 
-        {/* Series list */}
-        <div className="flex-1 overflow-y-auto px-6 pb-4 space-y-0.5">
+        {/* Series list — flexes to fill whatever space is left between the
+            header/fetch row above and the type-mapping/import actions below,
+            so it scrolls internally instead of pushing the panel taller than
+            its capped max-height. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-3 space-y-0.5">
           {sonarr.series.map(s => (
             <button
               key={s.id}
               onClick={() => toggleSeries(s.id)}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm transition-colors text-left",
-                selectedIds.has(s.id) ? "bg-signal/[0.06] ring-1 ring-signal/20" : "hover:bg-white/[0.03]"
-              )}
+               className={cn(
+                 "w-full flex items-center gap-3 px-4 py-1.5 rounded-xl text-sm transition-colors text-left",
+                 selectedIds.has(s.id) ? "bg-signal/[0.06] ring-1 ring-signal/20" : "hover:bg-white/[0.03]"
+               )}
             >
               <div className={cn(
                 "size-4 rounded border flex items-center justify-center shrink-0 transition-colors",
@@ -515,20 +596,52 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
           )}
         </div>
 
-        {/* Import actions */}
-        <div className="px-6 py-4 border-t border-white/5 shrink-0 space-y-3">
+        {/* Type mapping + Import actions */}
+        <div className="shrink-0 space-y-3">
           {data.rootFolders.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/40">Type mapping</p>
-              {data.rootFolders.map(folder => (
-                <div key={folder} className="flex items-center gap-2 text-xs font-mono text-muted-foreground/60">
-                  <span className="truncate flex-1">{folder.split('/').pop()}</span>
-                  <span className="text-signal shrink-0">{data.libraryTypeId ?? 'Standard'}</span>
-                </div>
-              ))}
+            <div className="mx-6 px-4 py-3 rounded-lg bg-white/[0.02] border border-white/10">
+              <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/40 mb-2">
+                Type mapping
+              </p>
+              {libraryTypes.length > 0 ? (
+              <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+              {data.rootFolders.map(folder => {
+                const folderName = folder.split('/').pop() ?? folder;
+                const currentTypeId = typeMapping[folder];
+                return (
+                  <div key={folder} className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-muted-foreground/60 truncate flex-1">
+                      {folderName}
+                    </span>
+                    <Select
+                      value={currentTypeId}
+                      onValueChange={(v) => {
+                        setTypeMapping(prev => ({ ...prev, [folder]: v }));
+                      }}
+                    >
+                      <SelectTrigger className="h-7 w-36 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {libraryTypes.map(lt => (
+                          <SelectItem key={lt.id} value={lt.id}>
+                            {lt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
+              </div>
+              ) : (
+                <p className="text-xs text-muted-foreground/40 italic">
+                  Complete the Library & Quality step first
+                </p>
+              )}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="px-6 pb-6 grid grid-cols-2 gap-3">
             <button
               onClick={() => startImport('background')}
               disabled={selectedIds.size === 0 || importing}
