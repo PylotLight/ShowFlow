@@ -118,8 +118,10 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
         background: `
           radial-gradient(circle at 22% 8%, rgba(80, 180, 110, 0.14), transparent 40%),
           radial-gradient(circle at 85% 14%, rgba(220, 195, 50, 0.11), transparent 36%),
-          rgba(0, 0, 0, 0.55)
-        `
+          rgba(0, 0, 0, 0.82)
+        `,
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)"
       }} />
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className={cn(
