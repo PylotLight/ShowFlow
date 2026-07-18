@@ -10,6 +10,8 @@ chunk-*.js.map
 manifest.json
 server.js.map
 /showflow
+main.js
+main.css
 
 # code coverage
 coverage
