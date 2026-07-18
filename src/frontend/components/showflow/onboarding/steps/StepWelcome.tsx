@@ -2,12 +2,13 @@ import * as React from "react";
 import { Button } from "@frontend/components/ui/button";
 import { ArrowRightIcon } from "lucide-react";
 import type { StepProps } from "../types";
+import logoUrl from "@frontend/assets/logo.svg";
 
 export function StepWelcome({ onNext }: StepProps) {
   return (
     <div className="text-center py-8">
-      <div className="inline-flex items-center justify-center size-16 rounded-2xl bg-signal/10 mb-6 ring-1 ring-signal/20">
-        <span className="text-2xl font-bold text-signal">SF</span>
+      <div className="inline-flex items-center justify-center size-16 rounded-2xl bg-signal/10 mb-6 ring-1 ring-signal/20 p-2.5">
+        <img src={logoUrl} alt="ShowFlow" className="size-full" />
       </div>
 
       <h1 className="text-3xl font-bold tracking-tight mb-3">

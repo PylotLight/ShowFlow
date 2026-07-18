@@ -31,7 +31,16 @@ export function App() {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
   const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
-  const [wizardOpen, setWizardOpen] = React.useState<boolean | null>(null);
+  const [wizardOpen, setWizardOpen] = React.useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem("showflow-onboarding");
+      if (!raw) return true;
+      const parsed = JSON.parse(raw);
+      return !parsed.completed;
+    } catch {
+      return true;
+    }
+  });
   const [wizardKey, setWizardKey] = React.useState(0);
   const wizardManual = React.useRef(false);
 
@@ -46,21 +55,15 @@ export function App() {
       wizardManual.current = false;
       return;
     }
+    if (!wizardOpen) return;
     (async () => {
       try {
-        const stored = localStorage.getItem("showflow-onboarding");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.completed) { setWizardOpen(false); return; }
-        }
         const res = await fetch("/api/library-types");
         if (res.ok) {
           const types = await res.json();
-          setWizardOpen(types.length === 0);
-        } else {
-          setWizardOpen(false);
+          if (types.length > 0) setWizardOpen(false);
         }
-      } catch { setWizardOpen(false); }
+      } catch {}
     })();
   }, [wizardKey]);
 
@@ -80,8 +83,7 @@ export function App() {
     setWizardOpen(true);
   }
 
-  if (wizardOpen === null) return null;
-  if (wizardOpen === true) {
+  if (wizardOpen) {
     return <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />;
   }
 
