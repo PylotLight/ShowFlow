@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema';
 
-import { seedDefaults, migrateQualityIds, seedDefaultLibraryTypes } from './init';
+import { seedDefaults, migrateQualityIds } from './init';
 import { backfillShowTitles } from './shows';
 import * as shows from './shows';
 import * as config from './config';
@@ -64,7 +64,6 @@ export class DatabaseManager {
 
     seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
     migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
-    seedDefaultLibraryTypes(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
 
     const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;
     if (!titleCount || titleCount.c === 0) {

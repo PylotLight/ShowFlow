@@ -56,10 +56,10 @@ export function App() {
     if (!wizardOpen) return;
     (async () => {
       try {
-        const res = await fetch("/api/shows?limit=1");
+        const res = await fetch("/api/library-types");
         if (res.ok) {
-          const shows = await res.json();
-          if (shows.length > 0) setWizardOpen(false);
+          const types = await res.json();
+          if (types.length > 0) setWizardOpen(false);
         }
       } catch {}
     })();

@@ -15,6 +15,7 @@ interface LibraryType {
 export function StepLibraryType({ data, setData, onNext, onSkip }: StepProps) {
   const [types, setTypes] = React.useState<LibraryType[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     (async () => {
@@ -30,12 +31,32 @@ export function StepLibraryType({ data, setData, onNext, onSkip }: StepProps) {
   const selected = data.libraryTypeId;
 
   const presets = [
-    { id: null as any, name: 'Standard', rootFolderPath: null, qualityProfileId: null, isDefault: false },
-    { id: null as any, name: 'Anime', rootFolderPath: null, qualityProfileId: null, isDefault: false },
-    { id: null as any, name: 'Movies', rootFolderPath: null, qualityProfileId: null, isDefault: false },
+    { id: null as any, name: 'Standard', qualityProfileId: 'standard', isDefault: true },
+    { id: null as any, name: 'Anime', qualityProfileId: 'anime', isDefault: false },
+    { id: null as any, name: 'Movies', qualityProfileId: 'standard', isDefault: false },
   ];
 
   const displayTypes = types.length > 0 ? types : presets;
+
+  const handleContinue = async () => {
+    if (types.length > 0) { onNext(); return; }
+    const preset = presets.find(p => p.name === (displayTypes.find((t: any) => (t.id ?? t.name) === (selected || 'Standard')) as any)?.name) ?? presets[0];
+    setSaving(true);
+    try {
+      const id = `lt_${preset.name.toLowerCase()}`;
+      const res = await fetch("/api/library-types", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name: preset.name, qualityProfileId: preset.qualityProfileId, isDefault: preset.isDefault }),
+      });
+      if (res.ok) {
+        setData({ libraryTypeId: id });
+        onNext();
+      }
+    } catch {} finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="py-4">
@@ -100,8 +121,8 @@ export function StepLibraryType({ data, setData, onNext, onSkip }: StepProps) {
         <button onClick={onSkip} className="text-sm text-muted-foreground/60 hover:text-muted-foreground transition-colors">
           Skip and set up manually
         </button>
-        <Button onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
-          {types.length === 0 ? "Use default" : "Continue"}
+        <Button onClick={handleContinue} disabled={saving} className="gap-2 h-11 px-6 rounded-xl">
+          {saving ? "Saving..." : types.length === 0 ? "Use default" : "Continue"}
           <ArrowRightIcon className="size-4" />
         </Button>
       </div>
