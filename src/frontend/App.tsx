@@ -21,6 +21,7 @@ import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
 import { BackgroundActivityPopover } from "@frontend/components/showflow/BackgroundActivityPopover";
 import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
+import { OnboardingWizard } from "@frontend/components/showflow/onboarding/OnboardingWizard";
 import "./styles/index.css";
 
 export function App() {
@@ -30,12 +31,33 @@ export function App() {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
   const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
+  const [wizardOpen, setWizardOpen] = React.useState<boolean | null>(null);
+  const [wizardKey, setWizardKey] = React.useState(0);
 
   React.useEffect(() => {
     loadTheme().then((theme) => {
       applyTheme(theme);
     });
   }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const stored = localStorage.getItem("showflow-onboarding");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.completed) { setWizardOpen(false); return; }
+        }
+        const res = await fetch("/api/library-types");
+        if (res.ok) {
+          const types = await res.json();
+          setWizardOpen(types.length === 0);
+        } else {
+          setWizardOpen(false);
+        }
+      } catch { setWizardOpen(false); }
+    })();
+  }, [wizardKey]);
 
   const [backdropUrl, setBackdropUrl] = React.useState("");
   const [headerActionsEl, setHeaderActionsEl] = React.useState<HTMLDivElement | null>(null);
@@ -44,6 +66,16 @@ export function App() {
     if (show) {
       setSelected(show);
     }
+  }
+
+  function reRunWizard() {
+    localStorage.removeItem("showflow-onboarding");
+    setWizardKey(k => k + 1);
+    setWizardOpen(true);
+  }
+
+  if (wizardOpen === true) {
+    return <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />;
   }
 
   return (
@@ -132,6 +164,7 @@ export function App() {
               onDone={() => { setActiveNav("dashboard"); setSettingsScrollTo(undefined); }}
               initialTab={settingsInitialTab}
               scrollToSection={settingsScrollTo}
+              onReRunWizard={reRunWizard}
             />
           ) : activeNav === "queue" ? (
             <QueuePage key={refreshKey} />

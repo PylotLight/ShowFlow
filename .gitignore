@@ -9,7 +9,7 @@ dist
 chunk-*.js.map
 manifest.json
 server.js.map
-showflow
+/showflow
 
 # code coverage
 coverage

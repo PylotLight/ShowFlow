@@ -32,7 +32,7 @@ const SETTINGS_TABS = [
   { id: "debug", label: "Debug" },
 ];
 
-export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: { onDone: () => void; initialTab?: string; scrollToSection?: string }) {
+export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onReRunWizard }: { onDone: () => void; initialTab?: string; scrollToSection?: string; onReRunWizard?: () => void }) {
   const [tab, setTab] = React.useState(initialTab || "general");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
@@ -542,6 +542,21 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
         {tab === "analytics" && <AnalyticsPanel />}
         {tab === "debug" && <DebugSettings />}
       </div>
+
+      {onReRunWizard && (
+        <div className="mt-8 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <p className="text-sm font-medium mb-1">Setup Wizard</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Re-run the onboarding wizard to reconfigure from scratch.
+          </p>
+          <button
+            onClick={onReRunWizard}
+            className="text-sm text-signal hover:underline"
+          >
+            Re-run setup wizard
+          </button>
+        </div>
+      )}
     </div>
   );
 }
