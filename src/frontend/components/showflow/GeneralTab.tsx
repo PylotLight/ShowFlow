@@ -2,16 +2,13 @@ import * as React from "react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
-import { ColorDock } from "./ColorDock";
 import { ShowProfileManager } from "./ShowProfileManager";
 import { UpdatesPanel } from "./UpdatesPanel";
 import { FieldRow } from "./SettingsShared";
 
-export function GeneralTab({ config, saveConfig, accent, setAccent, scrollToSection }: {
+export function GeneralTab({ config, saveConfig, scrollToSection }: {
   config: any;
   saveConfig: (updates: Record<string, any>) => void;
-  accent: string;
-  setAccent: (c: string) => void;
   scrollToSection?: string;
 }) {
   const updatesRef = React.useRef<HTMLDivElement>(null);
@@ -24,14 +21,6 @@ export function GeneralTab({ config, saveConfig, accent, setAccent, scrollToSect
 
   return (
     <>
-      <GlassPanel className="p-6 space-y-5">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Accent Theme</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Choose the accent color used throughout the interface</p>
-        </div>
-        <ColorDock current={accent} onChange={(color) => { setAccent(color); }} />
-      </GlassPanel>
-
       <GlassPanel className="p-6 space-y-5">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Profiles &amp; Root Folders</h3>

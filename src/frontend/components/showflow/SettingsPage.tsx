@@ -419,10 +419,23 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
           <GeneralTab
             config={config}
             saveConfig={saveConfig}
-            accent={accent}
-            setAccent={handleAccentChange}
             scrollToSection={scrollToSection}
           />
+        )}
+
+        {tab === "general" && onReRunWizard && (
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+            <p className="text-sm font-medium mb-1">Setup Wizard</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Re-run the onboarding wizard to reconfigure from scratch.
+            </p>
+            <button
+              onClick={onReRunWizard}
+              className="text-sm text-signal hover:underline"
+            >
+              Re-run setup wizard
+            </button>
+          </div>
         )}
 
         {tab === "providers" && (
@@ -500,6 +513,8 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
             jellyfinSyncResult={jellyfinSyncResult}
             jellyfinSyncFn={syncJellyfin}
             saveSonarr={saveSonarr}
+            config={config}
+            updateApiKey={updateApiKey}
           />
         )}
 
@@ -538,21 +553,6 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
         {tab === "analytics" && <AnalyticsPanel />}
         {tab === "debug" && <DebugSettings />}
       </div>
-
-      {onReRunWizard && (
-        <div className="mt-8 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
-          <p className="text-sm font-medium mb-1">Setup Wizard</p>
-          <p className="text-xs text-muted-foreground mb-3">
-            Re-run the onboarding wizard to reconfigure from scratch.
-          </p>
-          <button
-            onClick={onReRunWizard}
-            className="text-sm text-signal hover:underline"
-          >
-            Re-run setup wizard
-          </button>
-        </div>
-      )}
     </div>
   );
 }

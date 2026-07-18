@@ -28,6 +28,7 @@ export interface SonarrSeries {
   status: string;
   seriesType: string;
   path: string;
+  rootFolderPath: string;
   seasons: { seasonNumber: number }[];
 }
 
@@ -61,7 +62,6 @@ export const STEPS = [
   { id: 'library-type', label: 'Library & Quality', short: 'Library' },
   { id: 'integrations', label: 'Integrations', short: 'Integrate' },
   { id: 'theme', label: 'Theme', short: 'Theme' },
-  { id: 'health', label: 'Health Check', short: 'Health' },
   { id: 'done', label: 'Done', short: 'Done' },
 ] as const;
 

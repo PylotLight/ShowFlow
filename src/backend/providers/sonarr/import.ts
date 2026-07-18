@@ -177,20 +177,28 @@ export class SonarrImporter {
 
     const providerId = providerType === 'tvdb' ? tvdbId! : tmdbId!;
 
-    // Fetch provider metadata
-    const provider = ProviderFactory.getProvider(providerType as any, this.config);
+    // Fetch provider metadata — try primary provider, then fallback,
+    // then continue with Sonarr data if neither is available
+    let showData: any = null;
+    let resolvedProviderType = providerType;
+    let resolvedProviderId = providerId;
 
-    let showData: any;
-    try {
-      showData = await provider.getShow(providerId);
-    } catch (err) {
-      return {
-        seriesId: '',
-        sonarrSeriesId: series.id,
-        title: series.title,
-        status: 'error',
-        message: `Failed to fetch metadata from ${providerType}: ${err instanceof Error ? err.message : String(err)}`,
-      };
+    const providerCandidates = [
+      { type: providerType, id: providerId },
+      // Try the other provider as fallback
+      ...(tvdbId && tmdbId ? [{ type: providerType === 'tvdb' ? 'tmdb' as const : 'tvdb' as const, id: providerType === 'tvdb' ? tmdbId : tvdbId }] : []),
+    ];
+
+    for (const candidate of providerCandidates) {
+      try {
+        const provider = ProviderFactory.getProvider(candidate.type as any, this.config);
+        showData = await provider.getShow(candidate.id);
+        resolvedProviderType = candidate.type;
+        resolvedProviderId = candidate.id;
+        break;
+      } catch (err) {
+        console.warn(`[sonarr] ${candidate.type} metadata fetch failed for "${series.title}": ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Create show in database
@@ -241,12 +249,13 @@ export class SonarrImporter {
 
     db.saveShow({
       uuid: showUuid,
-      providerId,
-      type: providerType,
+      providerId: resolvedProviderId,
+      type: resolvedProviderType,
       title: series.title,
-      originalTitle: showData.originalTitle,
-      romanizedTitle: showData.romanizedTitle,
-      metadata: showData.metadata,
+      originalTitle: showData?.originalTitle,
+      romanizedTitle: showData?.romanizedTitle,
+      metadata: showData?.metadata,
+      year: showData?.year,
       rootFolderPath: rootFolderPath ?? undefined,
       profile: qualityProfileId,
       seriesType,

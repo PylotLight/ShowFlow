@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { Sidebar, type NavItem } from "@frontend/components/showflow/Sidebar";
+import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 import { Dashboard } from "@frontend/components/showflow/Dashboard";
 import { CalendarView } from "@frontend/components/showflow/CalendarView";
 import { Library } from "@frontend/components/Library";
@@ -107,20 +108,23 @@ export function App() {
 
       {/* Main Viewport Workspace */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 relative z-10">
-        {/* Main Content Header — hidden when view has its own header. Layout is
-            identical on every page; only the actions slot content (portaled
-            in by the active page via <HeaderActions>) changes. */}
-        {activeNav !== "agenda" && (
-          <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
-            <div className="flex items-center gap-4 shrink-0">
-              <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
-                {activeNav}
-              </h1>
-            </div>
+        {/* Main Content Header — single persistent row for every page: title,
+            page-specific actions (portaled in via <HeaderActions>), and the
+            global notification / background-activity controls. */}
+        <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
+          <div className="flex items-center gap-4 shrink-0">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
+              {activeNav === "agenda" ? "Calendar" : activeNav}
+            </h1>
+          </div>
 
-            <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
-          </header>
-        )}
+          <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
+
+          <div className="hidden md:flex items-center gap-1 shrink-0">
+            <NotificationsPopover />
+            <FeedbackButton />
+          </div>
+        </header>
 
         {/* Dynamic Content Views */}
         <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-6 animate-page-enter">
@@ -209,9 +213,6 @@ export function App() {
           onClose={() => setSelected(null)}
         />
       )}
-
-      {/* Feedback button — floating bottom-right */}
-      <FeedbackButton />
     </div>
     {wizardOpen && (
       <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />

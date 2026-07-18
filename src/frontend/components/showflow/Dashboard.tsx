@@ -4,11 +4,10 @@ import {
 import * as React from "react";
 
 import { Skeleton } from "@frontend/components/ui/skeleton";
-import { EventTicker, type TickerItem } from "@frontend/components/showflow/EventTicker";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { HeaderActions } from "@frontend/lib/header-actions";
-import { WatcherPanel, type ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
+import type { ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
@@ -113,7 +112,7 @@ function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, o
   }, [open]);
 
   return (
-    <div ref={ref}>
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
@@ -223,7 +222,21 @@ function Dashboard({
     return () => clearInterval(id);
   }, [fetchShowsAndCalendar]);
 
-  // Re-fetch when a show finishes syncing, is removed, or is scanned (picked up from WatcherPanel events)
+  // Poll the system event log directly (no UI here — the full log now lives
+  // in the notification bell) just to know when a show finishes syncing, is
+  // removed, or is scanned, so the agenda can refresh itself.
+  React.useEffect(() => {
+    const poll = () => {
+      fetch("/api/events?limit=50")
+        .then((r) => r.json())
+        .then((data: ActivityEvent[]) => setRecentEvents(data))
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
   const lastTriggerEventId = React.useRef(0);
   React.useEffect(() => {
     const triggerEvent = recentEvents.find(
@@ -246,32 +259,6 @@ function Dashboard({
     const id = setInterval(poll, 5_000);
     return () => clearInterval(id);
   }, []);
-
-  const tickerItems = React.useMemo<TickerItem[]>(() => {
-    const eventItems: TickerItem[] = recentEvents.map((e) => {
-      let tone: "signal" | "amber" | "muted" = "muted";
-      if (e.type === "grab" || e.type === "import") tone = "signal";
-      else if (e.type === "error") tone = "amber";
-      else if (e.type === "scan" || e.type === "watcher") tone = "signal";
-      else if (e.type === "upgrade") tone = "signal";
-      
-      return {
-        key: `event-${e.id}`,
-        label: e.message,
-        tone,
-      };
-    });
-    const upcomingItems: TickerItem[] = (upcoming ?? []).slice(0, 8).map((ep, i) => {
-      const time = formatAirTime(ep.airDate);
-      const dateLabel = new Date(ep.airDate).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-      return {
-        key: `up-${i}`,
-        label: `${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")} airs ${dateLabel}${time ? ` ${time}` : ""}`,
-        tone: "amber",
-      };
-    });
-    return [...eventItems, ...upcomingItems];
-  }, [recentEvents, upcoming]);
 
   const groupedEpisodes = React.useMemo(() => {
     if (!upcoming) return [];
@@ -373,7 +360,9 @@ function Dashboard({
 
       <div className="flex flex-row gap-6 flex-1 min-h-0 overflow-hidden">
 
-        {/* LEFT COLUMN: Primary Agenda */}
+        {/* Primary Agenda — the old "Live Events" side panel duplicated the
+            notification bell's activity log 1:1, so it's gone; that panel
+            now has the full width to itself. */}
         <GlassPanel className="flex flex-col overflow-hidden flex-1">
           {/* Header */}
           <div className="border-b border-white/5 px-5 py-3">
@@ -549,11 +538,6 @@ function Dashboard({
             </div>
           )}
         </GlassPanel>
-
-        {/* RIGHT COLUMN: Live Events */}
-        <div className="flex flex-col gap-4 w-[340px] min-w-[340px] shrink-0 min-h-0">
-          <WatcherPanel onEvents={setRecentEvents} className="flex-1 min-h-0" />
-        </div>
       </div>
     </div>
   );

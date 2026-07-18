@@ -15,16 +15,48 @@ import {
   XCircleIcon,
   Loader2Icon,
   CableIcon,
+  DatabaseIcon,
   DownloadIcon,
   TvIcon,
   SearchIcon,
   EyeIcon,
+  EyeOffIcon,
   SparklesIcon,
 } from "lucide-react";
 import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 import type { StepProps, SonarrSeries } from "../types";
 
 export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpen, setSonarrPanelOpen }: StepProps) {
+  const [tvdbKey, setTvdbKey] = React.useState("");
+  const [tvdbPin, setTvdbPin] = React.useState("");
+  const [tmdbKey, setTmdbKey] = React.useState("");
+  const [showTvdbKey, setShowTvdbKey] = React.useState(false);
+  const [showTvdbPin, setShowTvdbPin] = React.useState(false);
+  const [showTmdbKey, setShowTmdbKey] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch("/api/config").then(r => r.json()).then(cfg => {
+      const keys = cfg.apiKeys || {};
+      setTvdbKey(keys.tvdb || "");
+      setTvdbPin(keys.tvdb_pin || "");
+      setTmdbKey(keys.tmdb || "");
+    }).catch(() => {});
+  }, []);
+
+  const hasMetadataKey = !!(tvdbKey.trim() || tmdbKey.trim());
+
+  const saveMetadataKeys = (tvdb: string, pin: string, tmdb: string) => {
+    const payload: Record<string, string | undefined> = {};
+    if (tvdb) payload.tvdb = tvdb;
+    if (pin) payload.tvdb_pin = pin;
+    if (tmdb) payload.tmdb = tmdb;
+    fetch("/api/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKeys: payload }),
+    }).catch(() => {});
+  };
+
   const [prowlarrEnabled, setProwlarrEnabled] = React.useState(!!data.prowlarr.baseUrl);
   const [testingProwlarr, setTestingProwlarr] = React.useState(false);
   const [prowlarrStatus, setProwlarrStatus] = React.useState<'idle' | 'ok' | 'fail'>('idle');
@@ -35,16 +67,38 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
   const [sonarrStatus, setSonarrStatus] = React.useState<'idle' | 'ok' | 'fail'>('idle');
   const [sonarrMsg, setSonarrMsg] = React.useState("");
 
+  const [metaPanelOpen, setMetaPanelOpen] = React.useState(false);
   const [dcEnabled, setDcEnabled] = React.useState(data.downloadClient.type !== 'none');
   const [fetching, setFetching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
   const [libraryTypes, setLibraryTypes] = React.useState<{ id: string; name: string; is_default?: boolean }[]>([]);
+  const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
 
   const { sonarr, prowlarr, downloadClient } = data;
 
   // Per-folder type mapping (rootFolder -> libraryTypeId)
   const [typeMapping, setTypeMapping] = React.useState<Record<string, string>>({});
+
+  // Unique seriesType values present in Sonarr's data
+  const seriesTypes = React.useMemo(() => {
+    const types = new Set(sonarr.series.map(s => s.seriesType));
+    return [...types];
+  }, [sonarr.series]);
+
+  // Auto-select first seriesType when data arrives and no filter is set
+  React.useEffect(() => {
+    if (seriesTypes.length > 0 && !typeFilter) {
+      const first = seriesTypes[0];
+      if (first) setTypeFilter(first);
+    }
+  }, [seriesTypes]);
+
+  // Series filtered by the selected seriesType
+  const filteredSeries = React.useMemo(() => {
+    if (!typeFilter) return sonarr.series;
+    return sonarr.series.filter(s => s.seriesType === typeFilter);
+  }, [sonarr.series, typeFilter]);
 
   // Load library types on mount
   React.useEffect(() => {
@@ -229,12 +283,44 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
       <div className="mb-6">
         <h2 className="text-xl font-bold tracking-tight mb-1">Integrations</h2>
         <p className="text-sm text-muted-foreground">
-          Connect the services ShowFlow integrates with. Each one is optional —
-          enable and configure what you need.
+          Connect the services ShowFlow integrates with. Metadata providers are required — everything else is optional.
         </p>
       </div>
 
       <div className="space-y-3">
+
+        {/* ├─ Metadata Providers (required) ────────────────────── */}
+        <div className={cn(
+          "p-4 rounded-2xl border transition-all",
+          hasMetadataKey
+            ? "border-green-500/30 bg-green-500/[0.03]"
+            : "border-amber-500/30 bg-amber-500/[0.03]"
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "size-5 rounded-md border-2 flex items-center justify-center shrink-0",
+              hasMetadataKey ? "bg-green-500 border-green-500" : "border-amber-500"
+            )}>
+              {hasMetadataKey && <CheckCircleIcon className="size-3.5 text-white" />}
+            </div>
+            <DatabaseIcon className={cn("size-4", hasMetadataKey ? "text-green-400" : "text-amber-400")} />
+            <div className="flex-1">
+              <p className="text-sm font-semibold">Metadata Providers</p>
+              <p className="text-xs text-muted-foreground">
+                TVDB or TMDB API key required for show metadata
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMetaPanelOpen(true)}
+              className="gap-1.5 shrink-0"
+            >
+              <EyeIcon className="size-3.5" />
+              {hasMetadataKey ? "View keys" : "Configure"}
+            </Button>
+          </div>
+        </div>
 
         {/* ├─ Prowlarr ─────────────────────────────────────────── */}
         <div className={cn(
@@ -314,12 +400,13 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
         {/* ├─ Sonarr ───────────────────────────────────────────── */}
         <div className={cn(
           "p-4 rounded-2xl border transition-all",
+          !hasMetadataKey && "opacity-40 pointer-events-none",
           sonarrStatus === 'ok'
             ? "border-green-500/30 bg-green-500/[0.03]"
             : "border-white/10 bg-white/[0.02]"
         )}>
           <button
-            onClick={() => { setSonarrEnabled(!sonarrEnabled); if (!sonarrEnabled) setSonarrStatus('idle'); }}
+            onClick={() => { if (!hasMetadataKey) return; setSonarrEnabled(!sonarrEnabled); if (!sonarrEnabled) setSonarrStatus('idle'); }}
             className="flex items-center gap-3 w-full text-left"
           >
             <div className={cn(
@@ -334,7 +421,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 Sonarr
               </p>
               <p className="text-xs text-muted-foreground">
-                Sync your existing series and imports
+                {hasMetadataKey ? "Sync your existing series and imports" : "Configure a metadata provider key above first"}
               </p>
             </div>
           </button>
@@ -508,13 +595,106 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
         </div>
       </div>
 
+      {/* Slide-out Metadata Providers panel — same right-edge docking pattern
+          as the Sonarr panel below. */}
+      <div
+        className={cn(
+          "absolute left-full top-1/2 -translate-y-1/2 ml-4 w-[420px] max-h-[min(800px,90vh)] z-50",
+          "bg-[#15181f] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden",
+          "transition-all duration-300 ease-out",
+          metaPanelOpen ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 translate-x-4 pointer-events-none"
+        )}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-3">
+            <DatabaseIcon className="size-5 text-signal" />
+            <div>
+              <p className="text-sm font-semibold">Metadata Providers</p>
+              <p className="text-xs text-muted-foreground">TVDB or TMDB API key required</p>
+            </div>
+          </div>
+          <button onClick={() => setMetaPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/60 hover:text-foreground transition-colors">
+            <XCircleIcon className="size-4" />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          <div>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TVDB API Key</p>
+            <div className="relative">
+              <Input
+                type={showTvdbKey ? "text" : "password"}
+                value={tvdbKey}
+                onChange={e => { setTvdbKey(e.target.value); saveMetadataKeys(e.target.value, tvdbPin, tmdbKey); }}
+                placeholder="TVDB_API_KEY"
+                className="font-mono pr-8"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTvdbKey(!showTvdbKey)}
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+              >
+                {showTvdbKey ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TVDB PIN</p>
+            <div className="relative">
+              <Input
+                type={showTvdbPin ? "text" : "password"}
+                value={tvdbPin}
+                onChange={e => { setTvdbPin(e.target.value); saveMetadataKeys(tvdbKey, e.target.value, tmdbKey); }}
+                placeholder="TVDB_PIN (optional)"
+                className="font-mono pr-8"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTvdbPin(!showTvdbPin)}
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+              >
+                {showTvdbPin ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TMDB API Key</p>
+            <div className="relative">
+              <Input
+                type={showTmdbKey ? "text" : "password"}
+                value={tmdbKey}
+                onChange={e => { setTmdbKey(e.target.value); saveMetadataKeys(tvdbKey, tvdbPin, e.target.value); }}
+                placeholder="TMDB_API_KEY"
+                className="font-mono pr-8"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTmdbKey(!showTmdbKey)}
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+              >
+                {showTmdbKey ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="shrink-0 px-6 pb-6">
+          <Button
+            variant="glass"
+            className="w-full gap-2 h-11 rounded-xl"
+            onClick={() => setMetaPanelOpen(false)}
+          >
+            <CheckCircleIcon className="size-4" />
+            Done
+          </Button>
+        </div>
+      </div>
+
       {/* Slide-out Sonarr import manager panel — docked to the right edge of this
           card (not the browser viewport), so it opens up right where the card
           slides away from, and its height is capped so it can never run below
           the viewport. */}
       <div
         className={cn(
-          "absolute left-full top-0 ml-4 w-[420px] max-h-[min(680px,85vh)] z-50",
+          "absolute left-full top-1/2 -translate-y-1/2 ml-4 w-[420px] max-h-[min(800px,90vh)] z-50",
           "bg-[#15181f] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden",
           "transition-all duration-300 ease-out",
           sonarrPanelOpen ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 translate-x-4 pointer-events-none"
@@ -549,10 +729,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           ) : (
             <div className="flex items-center justify-between">
               <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
-                {sonarr.series.length} series found
+                {filteredSeries.length} of {sonarr.series.length} series
               </p>
               <div className="flex gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set(sonarr.series.map(s => s.id)))} className="text-xs">
+                <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set(filteredSeries.map(s => s.id)))} className="text-xs">
                   Select all
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="text-xs">
@@ -563,12 +743,43 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           )}
         </div>
 
+        {/* SeriesType filter tabs */}
+        {sonarr.tested && seriesTypes.length > 0 && (
+          <div className="flex gap-1.5 px-6 pb-2 shrink-0">
+            <button
+              onClick={() => setTypeFilter(null)}
+              className={cn(
+                "text-xs px-2.5 py-1 rounded-lg font-medium transition-colors",
+                !typeFilter
+                  ? "bg-white/10 text-foreground"
+                  : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.04]"
+              )}
+            >
+              All
+            </button>
+            {seriesTypes.map(st => (
+              <button
+                key={st}
+                onClick={() => setTypeFilter(typeFilter === st ? null : st)}
+                className={cn(
+                  "text-xs px-2.5 py-1 rounded-lg font-medium transition-colors",
+                  typeFilter === st
+                    ? "bg-white/10 text-foreground"
+                    : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.04]"
+                )}
+              >
+                {st.charAt(0).toUpperCase() + st.slice(1)}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Series list — flexes to fill whatever space is left between the
             header/fetch row above and the type-mapping/import actions below,
             so it scrolls internally instead of pushing the panel taller than
             its capped max-height. */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-3 space-y-0.5">
-          {sonarr.series.map(s => (
+          {filteredSeries.map(s => (
             <button
               key={s.id}
               onClick={() => toggleSeries(s.id)}
@@ -587,8 +798,8 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               <span className="text-xs text-muted-foreground/50 shrink-0">{s.year}</span>
             </button>
           ))}
-          {sonarr.tested && sonarr.series.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">No series found</div>
+          {sonarr.tested && filteredSeries.length === 0 && (
+            <div className="py-8 text-center text-sm text-muted-foreground">No {typeFilter ? `${typeFilter} ` : ''}series found</div>
           )}
         </div>
 
@@ -674,13 +885,13 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
 
       <div className={cn(
         "mt-6 flex items-center justify-between transition-all duration-300",
-        sonarrPanelOpen && "opacity-0 pointer-events-none"
+        (sonarrPanelOpen || metaPanelOpen) && "opacity-0 pointer-events-none"
       )}>
         <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
-        <Button variant="glass" onClick={onNext} className="gap-2 h-10 px-5 rounded-xl">
-          Continue
+        <Button variant="glass" onClick={onNext} disabled={!hasMetadataKey} className="gap-2 h-10 px-5 rounded-xl">
+          {!hasMetadataKey ? "Enter a metadata provider key" : "Continue"}
           <ArrowRightIcon className="size-4" />
         </Button>
       </div>

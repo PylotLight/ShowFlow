@@ -11,7 +11,6 @@ import { StepRootFolders } from "./steps/StepRootFolders";
 import { StepLibraryType } from "./steps/StepLibraryType";
 import { StepIntegrations } from "./steps/StepIntegrations";
 import { StepTheme } from "./steps/StepTheme";
-import { StepHealthCheck } from "./steps/StepHealthCheck";
 import { StepDone } from "./steps/StepDone";
 
 const STORAGE_KEY = "showflow-onboarding";
@@ -104,24 +103,23 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
       case 2: return <StepLibraryType {...stepProps} />;
       case 3: return <StepIntegrations {...stepProps} />;
       case 4: return <StepTheme {...stepProps} />;
-      case 5: return <StepHealthCheck {...stepProps} />;
-      case 6: return <StepDone {...stepProps} />;
+      case 5: return <StepDone {...stepProps} />;
       default: return null;
     }
   };
 
-  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5, 6]);
+  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
       <div className="absolute inset-0" style={{
-        background: `
-          rgba(0, 0, 0, 0.92),
+        backgroundColor: "rgba(0, 0, 0, 0.92)",
+        backgroundImage: `
           radial-gradient(circle at 22% 8%, rgba(80, 180, 110, 0.18), transparent 40%),
           radial-gradient(circle at 85% 14%, rgba(220, 195, 50, 0.14), transparent 36%)
         `,
-        backdropFilter: "blur(32px)",
-        WebkitBackdropFilter: "blur(32px)"
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)"
       }} />
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className={cn(
