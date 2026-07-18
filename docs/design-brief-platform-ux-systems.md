@@ -1,8 +1,10 @@
 # Design Brief: Platform-Wide UX Systems & Backlog
 
-**Status:** Draft for scoping — not yet in development
+**Status:** §1–§3 merged to `main`; §4–§9 open
 
-> 🔶 **§1 (Library Type model) and §2 (Background Activity registry) are claimed and in progress** on branch `feature/library-type-and-background-jobs` — backend/schema foundation has landed there (not yet merged). See `docs/tasklist-library-type-and-background-jobs.md` for exactly what's done vs. outstanding before picking up either section below. §3–§9 are still fully open.
+> ✅ **§1 (Library Type model) and §2 (Background Activity registry)** — schema, backend, and read-path migration complete. See `docs/tasklist-remaining-items.md` for what's still open (wiring more background tasks, folder picker backport).
+> ✅ **§3 (Notifications inbox)** — backend endpoint + frontend popover built. Not wired into input save confirmations yet (see remaining tasklist).
+> **§4–§9 are still open.** See `docs/tasklist-remaining-items.md` for suggested branch groupings and overlap coordination.
 **Purpose:** Capture the cross-cutting systems (they affect onboarding, settings, library, and pipeline surfaces alike) plus a batch of smaller fixes raised in review. These aren't scoped to one feature — building them once, centrally, is the whole point, same philosophy as the shared pipeline data model.
 
 ---

@@ -1,8 +1,8 @@
 # Design Brief: Setup Onboarding Wizard
 
-**Status:** Draft for scoping — not yet in development
+**Status:** ✅ BUILT — all 8 steps implemented and merged to `main`
 
-> 🔶 **The two backend prerequisites this wizard depends on (Library Type model + Background Activity registry, plus the Sonarr import progress-tracking gap in §2) are claimed and in progress** on branch `feature/library-type-and-background-jobs`. See `docs/tasklist-library-type-and-background-jobs.md`. The wizard shell itself (steps 1-2, 6-8) is untouched and open — only the backend §2 depends on has moved.
+> See `docs/tasklist-remaining-items.md` for remaining post-wizard polish items (import fork UI, progress visualization, folder picker backport). The wizard itself is complete — steps 1-8 live at `src/frontend/components/showflow/onboarding/` on `main`.
 **Purpose:** Replace "open Settings, hope you find the right tab, hope you do it in the right order" first-run experience with a guided, linear wizard that gets a new install from empty to "actually watching something get grabbed" in one sitting.
 
 **Depends on:** the Library Type / indexer-association rework and the platform-wide Notifications + Background Activity systems described in `design-brief-platform-ux-systems.md`. This wizard is designed *against* those systems rather than duplicating its own progress/toast pattern — see §3 and §4 below.

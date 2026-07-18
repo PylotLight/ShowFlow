@@ -1,7 +1,9 @@
 # Tasklist: Library Type model + Background Activity + Sonarr import progress
 
 **Branch:** `feature/library-type-and-background-jobs`
-**Status:** ✅ COMPLETE — all schema + read-path migrations done, ready for review
+**Status:** ✅ COMPLETE — merged to `main`, all items in this doc are done
+
+**See `docs/tasklist-remaining-items.md`** for post-wizard polish and remaining platform-UX items (import fork UI, progress visualization, folder picker backport, notifications wiring, agenda scroll, wanted bug, pipeline rename, show page scan visibility).
 **Do not start overlapping work on:** `schema.ts` (shows/library_types/quality_profiles tables), `db/config.ts` library-type functions, `db/init.ts` seed/migration functions, `core/background_jobs.ts`, `routes/config.ts` (`/api/library-types*`), `routes/background-jobs.ts`, `routes/integrations.ts` (`/api/sonarr/import`), `providers/sonarr/import.ts`. Check this file before touching any of those — if you need something in this list, coordinate rather than re-implementing it on a different branch.
 
 **Source briefs:** `design-brief-platform-ux-systems.md` §1 (Library Type), §2 (Background Activity), §4 (Sonarr import polish), §5 (post-import scan) · `design-brief-onboarding-wizard.md` §2 (Sonarr connect/fetch/import step)
