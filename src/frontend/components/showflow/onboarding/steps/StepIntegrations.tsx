@@ -227,29 +227,29 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
 
   return (
     <div className={cn(
-      "relative py-4 transition-transform duration-300 ease-out",
+      "relative py-2 transition-transform duration-300 ease-out",
       sonarrPanelOpen && "-translate-x-[218px]"
     )}>
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold tracking-tight mb-2">Integrations</h2>
-        <p className="text-muted-foreground">
+      <div className="mb-6">
+        <h2 className="text-xl font-bold tracking-tight mb-1">Integrations</h2>
+        <p className="text-sm text-muted-foreground">
           Connect the services ShowFlow integrates with. Each one is optional —
           enable and configure what you need.
         </p>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
 
         {/* ├─ Prowlarr ─────────────────────────────────────────── */}
         <div className={cn(
-          "p-5 rounded-2xl border transition-all",
+          "p-4 rounded-2xl border transition-all",
           prowlarrStatus === 'ok'
             ? "border-green-500/30 bg-green-500/[0.03]"
             : "border-white/10 bg-white/[0.02]"
         )}>
           <button
             onClick={() => setProwlarrEnabled(!prowlarrEnabled)}
-            className="flex items-center gap-3 w-full text-left mb-1"
+            className="flex items-center gap-3 w-full text-left"
           >
             <div className={cn(
               "size-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors",
@@ -257,7 +257,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
             )}>
               {prowlarrEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <CableIcon className={cn("size-5", prowlarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <CableIcon className={cn("size-4", prowlarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
             <div className="flex-1">
               <p className={cn("text-sm font-semibold", !prowlarrEnabled && "text-muted-foreground/50")}>
                 Prowlarr (Indexer)
@@ -269,7 +269,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
           </button>
 
           {prowlarrEnabled && (
-            <div className="mt-4 space-y-3 pl-10">
+            <div className="mt-3 space-y-2 pl-10">
               <div>
                 <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">URL</p>
                 <Input
@@ -317,14 +317,14 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
 
         {/* ├─ Sonarr ───────────────────────────────────────────── */}
         <div className={cn(
-          "p-5 rounded-2xl border transition-all",
+          "p-4 rounded-2xl border transition-all",
           sonarrStatus === 'ok'
             ? "border-green-500/30 bg-green-500/[0.03]"
             : "border-white/10 bg-white/[0.02]"
         )}>
           <button
             onClick={() => { setSonarrEnabled(!sonarrEnabled); if (!sonarrEnabled) setSonarrStatus('idle'); }}
-            className="flex items-center gap-3 w-full text-left mb-1"
+            className="flex items-center gap-3 w-full text-left"
           >
             <div className={cn(
               "size-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors",
@@ -332,7 +332,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
             )}>
               {sonarrEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <TvIcon className={cn("size-5", sonarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <TvIcon className={cn("size-4", sonarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
             <div className="flex-1">
               <p className={cn("text-sm font-semibold", !sonarrEnabled && "text-muted-foreground/50")}>
                 Sonarr
@@ -344,7 +344,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
           </button>
 
           {sonarrEnabled && (
-            <div className="mt-4 space-y-3 pl-10">
+            <div className="mt-3 space-y-2 pl-10">
               <div>
                 <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">URL</p>
                 <Input
@@ -422,10 +422,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
         </div>
 
         {/* ├─ Download Client ──────────────────────────────────── */}
-        <div className="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
           <button
             onClick={() => { setDcEnabled(!dcEnabled); if (!dcEnabled) setData({ downloadClient: { type: 'none', config: {} } }); }}
-            className="flex items-center gap-3 w-full text-left mb-1"
+            className="flex items-center gap-3 w-full text-left"
           >
             <div className={cn(
               "size-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors",
@@ -433,7 +433,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
             )}>
               {dcEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <DownloadIcon className={cn("size-5", dcEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <DownloadIcon className={cn("size-4", dcEnabled ? "text-signal" : "text-muted-foreground/40")} />
             <div className="flex-1">
               <p className={cn("text-sm font-semibold", !dcEnabled && "text-muted-foreground/50")}>
                 Download Client
@@ -445,7 +445,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
           </button>
 
           {dcEnabled && (
-            <div className="mt-4 space-y-3 pl-10">
+            <div className="mt-3 space-y-2 pl-10">
               <div>
                 <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Type</p>
                 <Select
@@ -539,7 +539,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
         </div>
 
         {/* Fetch button */}
-        <div className="px-6 py-4 shrink-0">
+        <div className="px-6 py-3 shrink-0">
           {!sonarr.tested ? (
             <Button
               variant="glass"
@@ -677,13 +677,13 @@ export function StepIntegrations({ data, setData, onNext, onSkip }: StepProps) {
       </div>
 
       <div className={cn(
-        "mt-8 flex items-center justify-between transition-all duration-300",
+        "mt-6 flex items-center justify-between transition-all duration-300",
         sonarrPanelOpen && "opacity-0 pointer-events-none"
       )}>
         <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
-        <Button variant="glass" onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">
+        <Button variant="glass" onClick={onNext} className="gap-2 h-10 px-5 rounded-xl">
           Continue
           <ArrowRightIcon className="size-4" />
         </Button>
