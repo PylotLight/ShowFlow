@@ -4,6 +4,7 @@ import type { SystemManager } from "../core/system_manager";
 import { json, errorResponse } from "./_shared";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 export function miscRoutes(systemManager: SystemManager) {
   return {
@@ -142,8 +143,8 @@ export function miscRoutes(systemManager: SystemManager) {
       GET(req: Request & { params: Record<string, string> }) {
         try {
           const url = new URL(req.url);
-          const rawPath = url.searchParams.get("path") || "/";
-          const dirPath = path.resolve(rawPath);
+          const rawPath = url.searchParams.get("path");
+          const dirPath = path.resolve(rawPath && rawPath.trim() ? rawPath : os.homedir());
           if (!fs.existsSync(dirPath)) return json({ error: "Path does not exist" }, { status: 404 });
           const stat = fs.statSync(dirPath);
           if (!stat.isDirectory()) return json({ error: "Path is not a directory" }, { status: 400 });

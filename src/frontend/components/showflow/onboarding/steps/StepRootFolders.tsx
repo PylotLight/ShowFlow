@@ -25,7 +25,7 @@ import type { StepProps } from "../types";
 
 export function StepRootFolders({ data, setData, onNext }: StepProps) {
   const [browseOpen, setBrowseOpen] = React.useState(false);
-  const [currentPath, setCurrentPath] = React.useState("/");
+  const [currentPath, setCurrentPath] = React.useState("");
   const [dirs, setDirs] = React.useState<string[]>([]);
   const [parentPath, setParentPath] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -40,7 +40,7 @@ export function StepRootFolders({ data, setData, onNext }: StepProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/files/browse?path=${encodeURIComponent(dirPath)}`);
+      const res = await fetch(`/api/files/browse?path=${encodeURIComponent(dirPath || "")}`);
       if (!res.ok) {
         const d = await res.json();
         throw new Error(d.error || "Failed to load directory");
@@ -59,7 +59,7 @@ export function StepRootFolders({ data, setData, onNext }: StepProps) {
   }, []);
 
   React.useEffect(() => {
-    if (browseOpen) loadDir("/");
+    if (browseOpen) loadDir("");
   }, [browseOpen, loadDir]);
 
   const createFolder = React.useCallback(async () => {
