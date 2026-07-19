@@ -73,6 +73,17 @@ function AgendaList({
     }
   };
 
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (scrollRef.current) {
+      const nowLine = scrollRef.current.querySelector('[data-now-line="true"]');
+      if (nowLine) {
+        nowLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [upcoming]);
+
   return (
     <GlassPanel className="flex flex-col overflow-hidden h-full">
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
@@ -85,7 +96,7 @@ function AgendaList({
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {upcoming.length === 0 ? (
           <div className="text-muted-foreground py-12 text-center text-xs">Nothing airing in the next 7 days.</div>
         ) : (
@@ -120,7 +131,7 @@ function AgendaList({
                     return (
                       <React.Fragment key={i}>
                         {hasNowLine && i === nowLineIdx && (
-                          <div className="relative flex items-center py-1.5">
+                          <div data-now-line="true" className="relative flex items-center py-1.5">
                             <div className="absolute inset-0 flex items-center">
                               <div className="w-full border-t border-signal/40" />
                             </div>

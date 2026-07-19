@@ -2,52 +2,84 @@
 
 Tracks implementation against `design-brief-unified-pipeline.md`'s four features and shared data model (§5). Update this alongside the code as pieces land — don't let it drift into aspirational-doc territory.
 
+**Last verified against actual code:** all four features have shipped UI wired into `App.tsx` nav (`pipeline`, `health` routes, plus trace/diagnose dialogs opened from Kanban cards). The section below was previously out of date — it described a UI-not-started state that no longer matched the repo.
+
 ## Shared data model (§5) — foundation for all four features
 
 | Primitive | Status | Where |
 |---|---|---|
-| Reason-code taxonomy | ✅ Done | `core/pipeline/reason_codes.ts` — `ReasonCode`, `ReasonCategory`, `PipelineStage` |
-| Pipeline Event Log | ✅ Done, fully wired | `db/schema.ts` (`pipelineEvents`), `db/pipeline.ts`. Written from `grabber_service.ts` (search/filter/reject/grab) AND from `BlackholeClient.handleFile()` (watch-folder detection → oracle resolve → upgrade check → import), so IMPORTING/AVAILABLE stage transitions now exist end-to-end. TorBox-downloaded files go through the blackhole watch folder and are covered by the same path. |
-| System Health Snapshot | ✅ Done, poller wired | `db/schema.ts` (`systemHealth`), `db/health.ts`. `core/pipeline/health_poller.ts` now actually populates it: Prowlarr + native indexers via `Indexer.validate()`, Blackhole (watch-folder writability) + TorBox (`/v1/api/user/me` credential check), and every show profile's root folder (writability). Runs as the `health-check` scheduled task, every 5 minutes. Exposed read-only at `GET /api/system/health` (`{ overallStatus, byType }`) - no dashboard UI consumes it yet, that's still §4. |
+| Reason-code taxonomy | ✅ Done | `core/pipeline/reason_codes.ts` — `ReasonCode`, `ReasonCategory`, `PipelineStage`, plus `suggestedAction` per code (already present, not a TODO). |
+| Pipeline Event Log | ✅ Done, fully wired | `db/schema.ts` (`pipelineEvents`), `db/pipeline.ts`. Written from `grabber_service.ts` (search/filter/reject/grab) AND from `BlackholeClient.handleFile()` (watch-folder detection → oracle resolve → upgrade check → import), so IMPORTING/AVAILABLE stage transitions exist end-to-end. TorBox-downloaded files go through the blackhole watch folder and are covered by the same path. |
+| System Health Snapshot | ✅ Done, poller wired | `db/schema.ts` (`systemHealth`), `db/health.ts`. `core/pipeline/health_poller.ts` populates it: Prowlarr + native indexers via `Indexer.validate()`, Blackhole (watch-folder writability) + TorBox (credential check), and every show profile's root folder (writability). Runs as the `health-check` scheduled task, every 5 minutes, registered in `scheduler.ts`. Exposed read-only at `GET /api/system/health` (`db/routes/analytics.ts`) → `{ overallStatus, byType }`, consumed by `HealthDashboard.tsx`. |
 | Retention | ✅ Done | `pipeline-cleanup` scheduled task (daily, 14-day retention) + `cleanupOldPipelineEvents`. `system_health` doesn't need retention (current-state table, not a log). |
 
-## §3 Failure Diagnosis Assistant — not started (UI), data layer ready
+## §3 Failure Diagnosis Assistant — ✅ shipped
 
-The brief's recommendation was rules-based lookup first (no ML). The taxonomy in `reason_codes.ts` *is* that lookup table — each `ReasonCode` already carries `category`, `label`, and `confidence`. What's missing:
-- A route (`GET /api/pipeline/diagnose?code=...` or similar) that returns the plain-English diagnosis + suggested action for a code. Right now `describeReasonCode()` only returns category/label/confidence — no "suggested action" field exists yet, that needs adding to `ReasonCodeDef`.
-- Surfacing it in the three places the brief calls for: queue, history, and the trace panel (§2, not built) — plus the health dashboard (§4, data flowing, UI not built).
-- Confidence display (certain/likely/guess) — the data exists, no UI reads it yet.
+- `GET /api/shows/:id/seasons/:season/episodes/:episode/diagnose` (`routes/shows.ts`) returns `{ hasIssue, event, diagnosis, suggestedAction }` off the latest pipeline event + `describeReasonCode()`.
+- `DiagnoseDialog.tsx` renders it: issue summary, category, confidence badge, suggested action callout. Opened from Kanban cards (`PipelineKanban.tsx`).
+- Rules-based only, per the brief's recommendation — nothing ML-assisted, consistent with the confidence field always reading `certain`/`likely` today.
+- **Not yet done:** surfacing diagnosis inline in Queue/History (brief asked for it in "the three places" — queue, history, and the trace panel; only the trace/diagnose dialogs exist today, not an inline queue/history badge).
 
-## §2 "Why isn't this downloading" trace — not started (UI), data layer ready
+## §2 "Why isn't this downloading" trace — ✅ shipped, missing 3 small brief asks
 
-`listPipelineEvents(showId, season, episode)` already returns the full chronological trace, oldest→newest, exactly as the brief's example format wants. Remaining work is entirely UI + one route:
-- `GET /api/shows/:id/seasons/:season/episodes/:episode/trace` (or similar) wrapping `db.listPipelineEvents`.
-- Render as the brief's timeline, with the four distinct states it calls out (nothing tried / tried & rejected / grabbed & stuck downloading / grabbed & stuck importing) — note the "stuck downloading/importing" states need the import-path event logging mentioned above to exist.
-- Expandable rejected-release detail — already there in `metadata_json` on `release_rejected`/`release_filtered` events (per-release breakdown, not just counts).
-- Manual "Search now" action at the top — wire to the existing `POST .../grab` or search endpoint.
-- "Copy trace as text" — cheap, do it early.
+- `GET /api/shows/:id/seasons/:season/episodes/:episode/trace` (`routes/shows.ts`) wraps `db.listPipelineEvents`, oldest→newest.
+- `TraceDialog.tsx` renders it grouped by stage with per-event detail (reason label, release title, indexer), opened from Kanban cards.
+- **Gaps vs. the brief, still open:**
+  - No "Copy trace as text" button — brief flags this explicitly as cheap/high-value for community troubleshooting.
+  - No expandable per-release rejection detail — `metadata_json` on `release_rejected`/`release_filtered` events already carries the per-release breakdown (per the comment in `db/pipeline.ts`), but `TraceDialog.tsx` only renders the summary `message` line, not a drill-down list.
+  - No manual "Search now" action at the top of the panel — brief calls this "often the very next thing" someone wants after opening the trace.
 
-## §4 Unified Health Dashboard — data flowing, UI not started
+## §4 Unified Health Dashboard — ✅ shipped
 
-The poller now writes real data every 5 minutes (`GET /api/system/health` to inspect). What's left is purely the dashboard UI itself: the three-section layout from the brief (indexers / download clients / import, one top-line status), each row expanding to the diagnosis from §3 (still needs the "suggested action" field added to `ReasonCodeDef`, see above), and linking a failed row out to its config page.
+- `HealthDashboard.tsx` consumes `GET /api/system/health`, mounted at the `health` nav item in `App.tsx`, with an "open settings" link-out for failed components.
+- **Needs verifying, not confirmed either way:** the brief's explicit ask that each row expand into the §3 diagnosis layer rather than a separate explanation — worth a quick check that `HealthDashboard.tsx` calls the same diagnosis path as `DiagnoseDialog.tsx` rather than re-deriving its own text from `reason_code`.
 
-## §1 Pipeline Kanban view — not started
+## §1 Pipeline Kanban view — ✅ shipped
 
-Per the brief's own build order this is deliberately last. Needs:
-- A "current stage per item" bulk query — `getLatestPipelineEvent` exists for one item; the Kanban view needs the equivalent across every tracked show/episode at once (group by show_id+season+episode, take latest). Not built yet — will get slow with a naive per-item loop once libraries are large, worth a proper grouped query when this gets built.
-- The IA decision from the brief (§1): recommendation was Option 2 (new additive "Pipeline" nav page), not replacing Queue/Wanted/History yet.
+- `db.listKanbanEpisodes()` (`db/pipeline.ts`) does the bulk "latest stage per item" query as a single window-function scan (not a per-item loop) — resolves the brief's stated perf concern up front.
+- `GET /api/pipeline/kanban` (`routes/pipeline.ts`) groups into lanes by `STAGE_ORDER`, with an `attentionCount` across WANTED/SEARCHING/FAILED.
+- `PipelineKanban.tsx` renders it, mounted at the `pipeline` nav item, cards opening `TraceDialog`/`DiagnoseDialog`.
+- IA decision followed the brief's recommendation: Option 2, additive new nav page, old Queue page (`QueuePage.tsx`) still present alongside it.
+- **Unconfirmed — check `PipelineKanban.tsx` directly if these matter to you:** bulk actions from cards (force search / skip / delete) and a rolling 48h window for the AVAILABLE lane were both open questions in the brief (§1) and I didn't verify either is implemented.
 
-## Suggested next concrete step: §4 dashboard UI, or §2 trace UI
+## Open decisions from brief §7 — current status
 
-The backend plumbing (§5) is now fully built end-to-end - both primitives exist, are written to, and are exposed over HTTP. Nothing UI-facing has been built yet for any of the four features. Two reasonable next steps, roughly equal effort:
-- **§4 Health Dashboard**: `GET /api/system/health` already returns everything it needs; this is close to pure aggregation/rendering work now.
-- **§2 Trace panel**: `listPipelineEvents` already returns everything it needs too; needs one small route plus the timeline UI.
+- [x] IA approach for Pipeline view — Option 2 (additive nav page) shipped, matches recommendation
+- [x] Diagnosis engine rules-based only, no ML in v1 — shipped as rules-based, no change needed
+- [ ] Health Dashboard vs Pipeline view as default landing page, or neither — still genuinely open; both exist now so this is decidable
+- [x] Build order — backend (§5) and all four UI surfaces are built; original §6 order (taxonomy/log → diagnosis → trace → dashboard → kanban) was followed loosely, dashboard/kanban UI landed alongside rather than strictly after
 
-Either is now unblocked - pick whichever is more useful to see first.
+---
 
-## Open decisions still unresolved (from brief §7)
+## Where to go from here
 
-- [ ] IA approach for Pipeline view — brief recommends Option 2, not yet confirmed as final
-- [x] Diagnosis engine rules-based only, no ML in v1 — taxonomy is rules-based by construction, nothing to reconsider
-- [ ] Health Dashboard vs Pipeline view as default landing page, or neither — still open, moot until both exist
-- [x] Build order — followed brief's §6 order for the backend piece (taxonomy+log before diagnosis/trace/dashboard/kanban); diagnosis/trace/dashboard/kanban themselves not yet built in that order since none are started
+The four features from the original brief are all live end-to-end. That closes out the brief as scoped — everything below is new work building on top of it, not finishing what's here. Roughly in order of how directly it builds on what already exists:
+
+### 1. Close the three §2 trace gaps (small, self-contained)
+These were explicit asks in the original brief that didn't make it into `TraceDialog.tsx`:
+- **Copy trace as text** — serialize the already-fetched `TraceEvent[]` into the brief's plain-text format, clipboard button in the dialog header. No new backend work.
+- **Expandable rejected-release detail** — the per-release breakdown is already sitting in `metadata_json`; this is a frontend-only accordion/drill-down on `release_rejected`/`release_filtered` rows.
+- **"Search now" action** — wire a button in `TraceDialog.tsx` to the existing grab/search endpoint for that episode.
+
+Cheap wins because the data layer for all three already exists — this is UI-only work.
+
+### 2. Surface diagnosis inline where the brief originally asked for it
+Right now diagnosis only shows up in the dedicated `DiagnoseDialog`. The brief's §3 scope was queue, history, *and* the trace panel — worth deciding whether that's still the right scope or whether the dialog covers the need well enough on its own. If you do want it inline, it's a small reusable `<DiagnosisBadge reasonCode=... />` component rather than new backend work, since `reason_codes.ts` already has everything a badge needs.
+
+### 3. Decide the landing-page question (§7, still open)
+Now that Pipeline and Health both exist as real pages, worth actually deciding: Pipeline as home (probably right, per the brief's own reasoning — people check "what's downloading" more than "is the system healthy") with Health reachable via a persistent status dot in the sidebar, rather than a full nav item. This is a product decision more than a build task, but it's cheap to implement once decided.
+
+### 4. Kanban's two open questions from §1
+Worth resolving now that the Kanban view is real and presumably getting used:
+- Bulk actions from cards (force search / skip / delete) for parity with the old Queue page.
+- A rolling window (brief suggested 48h) for the AVAILABLE lane so it doesn't accumulate forever.
+
+### 5. Extend the shared data model instead of the four original surfaces
+This is genuinely new scope, not brief cleanup — flagging as ideas rather than commitments:
+- **Historical health trends** — the brief explicitly deferred this ("current-state-only in v1... trends are a natural v2"). The polling data is already being collected every 5 minutes; a lightweight trend view becomes mostly a query + chart now that the raw data exists.
+- **Notification hook** — also explicitly deferred in the brief as "a separate ticket." Push/email/Discord when `overallStatus` flips to degraded is a small addition on top of the existing health-check task.
+- **Community-maintained reason-code list** — the brief raised this as an open question for §3. If failure patterns come up that the taxonomy doesn't cover, this is the point where it's worth deciding whether new codes ship via normal releases (fine at current scale) or need a faster-moving mechanism.
+- **Heuristic/ML-assisted diagnoses** — brief's explicit v2, never same confidence tier as rules-based. Only worth it once real gaps show up in what the rules-based table catches.
+
+### Suggested order given you're mid bug-fixing
+Since you're heads-down on bugs right now: (1) and (4) are the cheapest, most self-contained, and least likely to interact with whatever you're currently debugging — good "between bugs" work. (2) and (3) are product decisions worth making deliberately rather than squeezing in. (5) is genuinely next-phase work, worth revisiting once the current bug list is down to a manageable size.

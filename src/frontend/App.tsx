@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { Sidebar, type NavItem } from "@frontend/components/showflow/Sidebar";
+import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 import { Dashboard } from "@frontend/components/showflow/Dashboard";
 import { CalendarView } from "@frontend/components/showflow/CalendarView";
 import { Library } from "@frontend/components/Library";
@@ -19,6 +20,7 @@ import { SearchIcon } from "lucide-react";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
+import { OnboardingWizard } from "@frontend/components/showflow/onboarding/OnboardingWizard";
 import "./styles/index.css";
 
 export function App() {
@@ -28,12 +30,41 @@ export function App() {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
   const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
+  const [wizardOpen, setWizardOpen] = React.useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem("showflow-onboarding");
+      if (!raw) return true;
+      const parsed = JSON.parse(raw);
+      return !parsed.completed;
+    } catch {
+      return true;
+    }
+  });
+  const [wizardKey, setWizardKey] = React.useState(0);
+  const wizardManual = React.useRef(false);
 
   React.useEffect(() => {
     loadTheme().then((theme) => {
       applyTheme(theme);
     });
   }, []);
+
+  React.useEffect(() => {
+    if (wizardManual.current) {
+      wizardManual.current = false;
+      return;
+    }
+    if (!wizardOpen) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/library-types");
+        if (res.ok) {
+          const types = await res.json();
+          if (types.length > 0) setWizardOpen(false);
+        }
+      } catch {}
+    })();
+  }, [wizardKey]);
 
   const [backdropUrl, setBackdropUrl] = React.useState("");
   const [headerActionsEl, setHeaderActionsEl] = React.useState<HTMLDivElement | null>(null);
@@ -44,9 +75,16 @@ export function App() {
     }
   }
 
+  function reRunWizard() {
+    localStorage.removeItem("showflow-onboarding");
+    wizardManual.current = true;
+    setWizardKey(k => k + 1);
+    setWizardOpen(true);
+  }
+
   return (
     <HeaderActionsProvider container={headerActionsEl}>
-    <div className="app-background flex h-screen text-foreground pb-14 md:pb-0">
+    <div className={`app-background flex h-screen text-foreground pb-14 md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
@@ -70,20 +108,23 @@ export function App() {
 
       {/* Main Viewport Workspace */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 relative z-10">
-        {/* Main Content Header — hidden when view has its own header. Layout is
-            identical on every page; only the actions slot content (portaled
-            in by the active page via <HeaderActions>) changes. */}
-        {activeNav !== "agenda" && (
-          <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
-            <div className="flex items-center gap-4 shrink-0">
-              <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
-                {activeNav}
-              </h1>
-            </div>
+        {/* Main Content Header — single persistent row for every page: title,
+            page-specific actions (portaled in via <HeaderActions>), and the
+            global notification / background-activity controls. */}
+        <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
+          <div className="flex items-center gap-4 shrink-0">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
+              {activeNav === "agenda" ? "Calendar" : activeNav}
+            </h1>
+          </div>
 
-            <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
-          </header>
-        )}
+          <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
+
+          <div className="hidden md:flex items-center gap-1 shrink-0">
+            <NotificationsPopover />
+            <FeedbackButton />
+          </div>
+        </header>
 
         {/* Dynamic Content Views */}
         <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-6 animate-page-enter">
@@ -130,6 +171,7 @@ export function App() {
               onDone={() => { setActiveNav("dashboard"); setSettingsScrollTo(undefined); }}
               initialTab={settingsInitialTab}
               scrollToSection={settingsScrollTo}
+              onReRunWizard={reRunWizard}
             />
           ) : activeNav === "queue" ? (
             <QueuePage key={refreshKey} />
@@ -164,9 +206,6 @@ export function App() {
         </div>
       </div>
 
-      {/* Feedback button — floating bottom-right */}
-      <FeedbackButton />
-
       {/* Show Detail Modal — renders on top of any page */}
       {selected && (
         <ShowDetailDialog
@@ -175,6 +214,9 @@ export function App() {
         />
       )}
     </div>
+    {wizardOpen && (
+      <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />
+    )}
     </HeaderActionsProvider>
   );
 }

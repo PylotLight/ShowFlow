@@ -64,7 +64,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
       async POST(req: RouteReq) {
         try {
-          const body = (await req.json()) as { source: string; providerId: string; name?: string; rootFolderPath?: string; profile?: string; showProfileId?: string; seriesType?: string };
+          const body = (await req.json()) as { source: string; providerId: string; name?: string; rootFolderPath?: string; profile?: string; showProfileId?: string; seriesType?: string; libraryTypeId?: string };
           if (!body?.source || !body?.providerId) {
             return errorResponse("Both `source` and `providerId` are required.");
           }
@@ -92,6 +92,17 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const showUuid = crypto.randomUUID();
           const seriesType = body.seriesType || 'standard';
 
+          // When libraryTypeId is set, resolve root folder and quality profile
+          // from the library type (design-brief-platform-ux-systems.md §1).
+          if (body.libraryTypeId) {
+            const resolvedId = db.resolveLibraryTypeId(body.libraryTypeId);
+            const libraryType = resolvedId ? db.getLibraryType(resolvedId) : null;
+            if (libraryType) {
+              body.rootFolderPath ??= libraryType.root_folder_path ?? undefined;
+              body.profile ??= libraryType.quality_profile_id ?? undefined;
+            }
+          }
+
           if (!body.showProfileId && !body.rootFolderPath) {
             const showProfiles = db.listShowProfiles();
             if (showProfiles.length > 0) {
@@ -109,6 +120,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             metadata: showData.metadata,
             profile: body.profile,
             showProfileId: body.showProfileId,
+            libraryTypeId: body.libraryTypeId,
             seriesType,
             config: {},
             rootFolderPath: body.rootFolderPath,
@@ -277,6 +289,12 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             }
           }
 
+          if (show) {
+            const renamedCount = results.filter(r => r.ok && !r.skipped).length;
+            const skippedCount = results.filter(r => r.skipped).length;
+            const failedCount = results.filter(r => !r.ok).length;
+            db.logEvent({ type: 'organize', entityType: 'show', entityId: showId, message: `Organized "${show.title}": ${renamedCount} renamed, ${skippedCount} skipped, ${failedCount} failed` });
+          }
           return json({ ok: true, renamed: results.filter(r => r.ok && !r.skipped).length, skipped: results.filter(r => r.skipped).length, failed: results.filter(r => !r.ok).length, results });
         } catch (err) {
           return errorResponse(err, 500);

@@ -1,6 +1,8 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { FolderOpenIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
+import { Input } from "@frontend/components/ui/input";
+import { Button } from "@frontend/components/ui/button";
 
 export function FolderPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = React.useState(false);
@@ -9,6 +11,7 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
   const [parentPath, setParentPath] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [customPath, setCustomPath] = React.useState("");
   const [position, setPosition] = React.useState<{ top: number; left: number; width: number } | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -25,6 +28,8 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
         setCurrentPath(data.path);
         setDirs(data.directories);
         setParentPath(data.parentPath);
+        setCustomPath("");
+        setError(null);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -33,9 +38,10 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
   function openPanel() {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      setPosition({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+      setPosition({ top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 320) });
     }
     setOpen(true);
+    setCustomPath("");
     loadDir(value || "/");
   }
 
@@ -73,11 +79,29 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
       </div>
 
       {open && position && createPortal(
-        <div ref={panelRef} className="fixed z-[9999] rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-2 max-h-60 overflow-y-auto"
+        <div ref={panelRef} className="fixed z-[9999] rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-3 max-h-80 overflow-y-auto"
           style={{ top: position.top, left: position.left, width: position.width, backdropFilter: "blur(16px)" }}>
           <div className="px-2 py-1 font-mono text-caption text-muted-foreground/60 truncate" title={currentPath}>
             {currentPath}
           </div>
+
+          <div className="flex gap-2 mt-2 mb-2">
+            <Input
+              value={customPath}
+              onChange={e => setCustomPath(e.target.value)}
+              placeholder="Or type a path..."
+              className="flex-1 font-mono text-sm h-8"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 h-8"
+              onClick={() => { if (customPath) loadDir(customPath); }}
+            >
+              Go
+            </Button>
+          </div>
+
           {loading ? (
             <div className="flex items-center justify-center py-6">
               <Loader2Icon className="size-4 animate-spin text-muted-foreground" />

@@ -1,22 +1,23 @@
 import * as React from "react";
-import { CheckIcon, XIcon, Loader2Icon, EyeIcon, EyeOffIcon } from "lucide-react";
+import { CheckIcon, XIcon, Loader2Icon, DatabaseIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Input } from "@frontend/components/ui/input";
 import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { FieldRow } from "./SettingsShared";
+import { SonarrImportProgress } from "./SonarrImportProgress";
 
-export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportResults, sonarrImportTotal, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, }: {
+export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonarrKey, sonarrTesting, sonarrStatus, sonarrTestingFn, sonarrSeries, sonarrSeriesLoading, sonarrFetchSeries, sonarrImporting, sonarrImportJobId, onSonarrImportDone, selectedSonarrSeries, setSelectedSonarrSeries, showProfilesList, qualityProfilesList, libraryTypesList, sonarrTypeConfig, setSonarrTypeConfig, sonarrTypesPresent, visibleSonarrSeries, sonarrImportFn, jellyfin, setJellyfin, showJellyfinKey, setShowJellyfinKey, jellyfinTesting, jellyfinStatus, jellyfinTestingFn, jellyfinSyncing, jellyfinSyncResult, jellyfinSyncFn, saveSonarr, config, updateApiKey, }: {
   sonarr: any; setSonarr: any;
   showSonarrKey: boolean; setShowSonarrKey: (v: boolean) => void;
   sonarrTesting: boolean; sonarrStatus: any;
   sonarrTestingFn: () => void;
   sonarrSeries: any[] | null; sonarrSeriesLoading: boolean; sonarrFetchSeries: () => void;
-  sonarrImporting: boolean; sonarrImportResults: any[]; sonarrImportTotal: number;
+  sonarrImporting: boolean; sonarrImportJobId: string | null; onSonarrImportDone: () => void;
   selectedSonarrSeries: Set<number>; setSelectedSonarrSeries: (v: Set<number>) => void;
-  showProfilesList: any[]; qualityProfilesList: any[];
-  sonarrTypeConfig: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }>;
+  showProfilesList: any[]; qualityProfilesList: any[]; libraryTypesList: any[];
+  sonarrTypeConfig: Record<string, { included: boolean; showProfileId: string; qualityProfileId: string; libraryTypeId: string }>;
   setSonarrTypeConfig: (v: any) => void;
   sonarrTypesPresent: any[]; visibleSonarrSeries: any[];
   sonarrImportFn: () => void;
@@ -25,9 +26,73 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
   jellyfinTesting: boolean; jellyfinStatus: any; jellyfinTestingFn: () => void;
   jellyfinSyncing: boolean; jellyfinSyncResult: any; jellyfinSyncFn: () => void;
   saveSonarr: () => void;
+  config: any;
+  updateApiKey: (provider: string, value: string) => void;
 }) {
+  const [showTmdbKey, setShowTmdbKey] = React.useState(false);
+  const [showTvdbKey, setShowTvdbKey] = React.useState(false);
+  const [showTvdbPin, setShowTvdbPin] = React.useState(false);
+
   return (
     <>
+      <GlassPanel className="p-6 space-y-5">
+        <div>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Metadata Providers</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">API keys for show metadata (required by Sonarr import)</p>
+        </div>
+        <FieldRow label="TVDB API Key" description="thetvdb.com API key for show metadata">
+          <div className="relative">
+            <Input
+              type={showTvdbKey ? "text" : "password"}
+              value={config.apiKeys?.tvdb || ""}
+              onChange={e => updateApiKey("tvdb", e.target.value)}
+              placeholder="TVDB_API_KEY"
+            />
+            <button
+              type="button"
+              onClick={() => setShowTvdbKey(!showTvdbKey)}
+              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+            >
+              {showTvdbKey ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+            </button>
+          </div>
+        </FieldRow>
+        <FieldRow label="TVDB PIN" description="PIN for TVDB v4 API authentication (optional)">
+          <div className="relative">
+            <Input
+              type={showTvdbPin ? "text" : "password"}
+              value={config.apiKeys?.tvdb_pin || ""}
+              onChange={e => updateApiKey("tvdb_pin", e.target.value)}
+              placeholder="TVDB_PIN"
+            />
+            <button
+              type="button"
+              onClick={() => setShowTvdbPin(!showTvdbPin)}
+              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+            >
+              {showTvdbPin ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+            </button>
+          </div>
+        </FieldRow>
+        <FieldRow label="TMDB API Key" description="themoviedb.org API key for show metadata">
+          <div className="relative">
+            <Input
+              type={showTmdbKey ? "text" : "password"}
+              value={config.apiKeys?.tmdb || ""}
+              onChange={e => updateApiKey("tmdb", e.target.value)}
+              placeholder="TMDB_API_KEY"
+            />
+            <button
+              type="button"
+              onClick={() => setShowTmdbKey(!showTmdbKey)}
+              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+            >
+              {showTmdbKey ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+            </button>
+          </div>
+        </FieldRow>
+      </GlassPanel>
+
       <GlassPanel className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
@@ -131,7 +196,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                   Series Type Mapping
                 </p>
                 {sonarrTypesPresent.map(([type, count]: [string, number]) => {
-                  const tc = sonarrTypeConfig[type] || { included: true, showProfileId: "", qualityProfileId: "" };
+                  const tc = sonarrTypeConfig[type] || { included: true, showProfileId: "", qualityProfileId: "", libraryTypeId: "" };
                   return (
                     <div key={type} className="flex items-center gap-3">
                       <Switch
@@ -140,31 +205,59 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                       />
                       <span className="font-mono text-sm min-w-[100px]">{type} ({count})</span>
                       <Select
-                        value={tc.showProfileId}
-                        onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, showProfileId: v } }))}
+                        value={tc.libraryTypeId}
+                        onValueChange={v => {
+                          const libType = libraryTypesList.find((lt: any) => lt.id === v);
+                          setSonarrTypeConfig((prev: any) => ({
+                            ...prev,
+                            [type]: {
+                              ...tc,
+                              libraryTypeId: v,
+                              showProfileId: libType?.root_folder_path ? "" : tc.showProfileId,
+                              qualityProfileId: libType?.quality_profile_id || tc.qualityProfileId,
+                            },
+                          }));
+                        }}
                       >
                         <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Root folder" />
+                          <SelectValue placeholder="Library type" />
                         </SelectTrigger>
                         <SelectContent>
-                          {showProfilesList.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          {libraryTypesList.map((lt: any) => (
+                            <SelectItem key={lt.id} value={lt.id}>{lt.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      <Select
-                        value={tc.qualityProfileId}
-                        onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, qualityProfileId: v } }))}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Quality profile" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {qualityProfilesList.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {!tc.libraryTypeId && (
+                        <>
+                          <Select
+                            value={tc.showProfileId}
+                            onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, showProfileId: v } }))}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue placeholder="Root folder" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {showProfilesList.map((p: any) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={tc.qualityProfileId}
+                            onValueChange={v => setSonarrTypeConfig((prev: any) => ({ ...prev, [type]: { ...tc, qualityProfileId: v } }))}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue placeholder="Quality profile" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {qualityProfilesList.map((p: any) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -230,20 +323,9 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                   </div>
                 )}
 
-                {sonarrImportResults.length > 0 && (
-                  <div className="rounded-lg bg-white/[0.03] p-3 space-y-1.5 max-h-40 overflow-y-auto">
-                    <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Import Results ({sonarrImportResults.length})
-                    </p>
-                    {sonarrImportResults.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        {r.status === 'imported' && <CheckIcon className="size-3 text-emerald-400 shrink-0" />}
-                        {r.status === 'existing' && <span className="size-3 shrink-0 text-muted-foreground">•</span>}
-                        {r.status === 'error' && <XIcon className="size-3 text-red-400 shrink-0" />}
-                        <span className="font-mono truncate">{r.title || r.sonarrTitle}</span>
-                        <span className="text-muted-foreground shrink-0">{r.status}</span>
-                      </div>
-                    ))}
+                {sonarrImportJobId && (
+                  <div className="rounded-lg bg-white/[0.03] p-4">
+                    <SonarrImportProgress jobId={sonarrImportJobId} onDone={onSonarrImportDone} />
                   </div>
                 )}
               </div>

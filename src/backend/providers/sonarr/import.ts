@@ -3,6 +3,7 @@ import { ProviderFactory } from '../factory';
 import type { Config } from '../../db';
 import { SonarrClient, type SonarrSeries, type SonarrEpisode } from './client';
 import { SyncManager } from '../../core/sync_manager';
+import { backgroundJobs } from '../../core/background_jobs';
 
 export interface ImportResult {
   seriesId: string;
@@ -23,9 +24,11 @@ export type SonarrSeriesType = 'standard' | 'daily' | 'anime';
  * each type of show should land in ShowFlow, not inheriting Sonarr's layout.
  */
 export type SonarrTypeMapping = Partial<Record<SonarrSeriesType, {
-  /** ShowFlow show_profiles.id — resolved to a root folder path. */
+  /** ShowFlow library_types.id — resolves to root folder + quality profile in one lookup. Takes priority over showProfileId/qualityProfileId when set. */
+  libraryTypeId?: string;
+  /** ShowFlow show_profiles.id — resolved to a root folder path. Only used when libraryTypeId is not set. */
   showProfileId?: string;
-  /** ShowFlow quality_profiles.id (e.g. 'standard' | 'anime'). */
+  /** ShowFlow quality_profiles.id (e.g. 'standard' | 'anime'). Only used when libraryTypeId is not set. */
   qualityProfileId?: string;
 }>>;
 
@@ -42,7 +45,17 @@ export class SonarrImporter {
     return this.client.getSeries();
   }
 
-  async importSeries(seriesIds?: number[], typeMapping?: SonarrTypeMapping): Promise<ImportResult[]> {
+  /**
+   * @param jobId Optional Background Activity registry id
+   * (core/background_jobs.ts). When provided, this method updates that
+   * job's progress after every series - both the wizard's own progress
+   * view and the global header popover read from this same job rather
+   * than each maintaining separate state (design-brief-platform-ux-systems.md §2).
+   * The caller (routes/integrations.ts) is responsible for calling
+   * backgroundJobs.register() before invoking this and complete()/fail()
+   * are called here once the loop finishes.
+   */
+  async importSeries(seriesIds?: number[], typeMapping?: SonarrTypeMapping, jobId?: string): Promise<ImportResult[]> {
     const allSeries = await this.client.getSeries();
     const toImport = seriesIds
       ? allSeries.filter(s => seriesIds.includes(s.id))
@@ -56,6 +69,10 @@ export class SonarrImporter {
       entityId: 'sonarr-import',
       message: `Starting Sonarr import for ${toImport.length} series`,
     });
+
+    if (jobId) {
+      backgroundJobs.update(jobId, { total: toImport.length, completed: 0, detail: `0/${toImport.length} series` });
+    }
 
     for (const series of toImport) {
       try {
@@ -84,15 +101,33 @@ export class SonarrImporter {
           entityId: '',
           message: `Failed to import "${series.title}" from Sonarr: ${err instanceof Error ? err.message : String(err)}`,
         });
+      } finally {
+        if (jobId) {
+          const imported = results.filter(r => r.status === 'imported').length;
+          const existing = results.filter(r => r.status === 'existing').length;
+          const errored = results.filter(r => r.status === 'error').length;
+          backgroundJobs.update(jobId, {
+            completed: results.length,
+            detail: `${results.length}/${toImport.length} processed - ${imported} imported, ${existing} existing, ${errored} errored`,
+          });
+        }
       }
     }
+
+    const imported = results.filter(r => r.status === 'imported').length;
+    const existing = results.filter(r => r.status === 'existing').length;
+    const errored = results.filter(r => r.status === 'error').length;
 
     db.logEvent({
       type: 'import',
       entityType: 'system',
       entityId: 'sonarr-import',
-      message: `Sonarr import complete: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`,
+      message: `Sonarr import complete: ${imported} imported, ${existing} existing, ${errored} errors`,
     });
+
+    if (jobId) {
+      backgroundJobs.complete(jobId, `${imported} imported, ${existing} existing, ${errored} errored`);
+    }
 
     return results;
   }
@@ -142,20 +177,28 @@ export class SonarrImporter {
 
     const providerId = providerType === 'tvdb' ? tvdbId! : tmdbId!;
 
-    // Fetch provider metadata
-    const provider = ProviderFactory.getProvider(providerType as any, this.config);
+    // Fetch provider metadata — try primary provider, then fallback,
+    // then continue with Sonarr data if neither is available
+    let showData: any = null;
+    let resolvedProviderType = providerType;
+    let resolvedProviderId = providerId;
 
-    let showData: any;
-    try {
-      showData = await provider.getShow(providerId);
-    } catch (err) {
-      return {
-        seriesId: '',
-        sonarrSeriesId: series.id,
-        title: series.title,
-        status: 'error',
-        message: `Failed to fetch metadata from ${providerType}: ${err instanceof Error ? err.message : String(err)}`,
-      };
+    const providerCandidates = [
+      { type: providerType, id: providerId },
+      // Try the other provider as fallback
+      ...(tvdbId && tmdbId ? [{ type: providerType === 'tvdb' ? 'tmdb' as const : 'tvdb' as const, id: providerType === 'tvdb' ? tmdbId : tvdbId }] : []),
+    ];
+
+    for (const candidate of providerCandidates) {
+      try {
+        const provider = ProviderFactory.getProvider(candidate.type as any, this.config);
+        showData = await provider.getShow(candidate.id);
+        resolvedProviderType = candidate.type;
+        resolvedProviderId = candidate.id;
+        break;
+      } catch (err) {
+        console.warn(`[sonarr] ${candidate.type} metadata fetch failed for "${series.title}": ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Create show in database
@@ -171,8 +214,23 @@ export class SonarrImporter {
     // for this type, fall back to Sonarr's own rootFolderPath (or the first
     // configured show profile) and let saveShow() pick a default quality
     // profile, matching the previous flat-import behavior.
+    //
+    // When libraryTypeId is set, it resolves to both root folder and quality
+    // profile in one lookup (design-brief-platform-ux-systems.md §1).
     let rootFolderPath: string | undefined;
-    if (mapping?.showProfileId) {
+    let qualityProfileId: string | undefined;
+    let mappedLibraryTypeId: string | undefined;
+
+    if (mapping?.libraryTypeId) {
+      mappedLibraryTypeId = db.resolveLibraryTypeId(mapping.libraryTypeId);
+      const libraryType = mappedLibraryTypeId ? db.getLibraryType(mappedLibraryTypeId) : null;
+      if (libraryType) {
+        rootFolderPath = libraryType.root_folder_path ?? undefined;
+        qualityProfileId = libraryType.quality_profile_id ?? undefined;
+      }
+    }
+
+    if (!rootFolderPath && mapping?.showProfileId) {
       rootFolderPath = db.getShowProfileRootFolder(mapping.showProfileId) ?? undefined;
     }
     if (!rootFolderPath) {
@@ -185,19 +243,23 @@ export class SonarrImporter {
       }
     }
 
-    const qualityProfileId = mapping?.qualityProfileId;
+    if (!qualityProfileId) {
+      qualityProfileId = mapping?.qualityProfileId;
+    }
 
     db.saveShow({
       uuid: showUuid,
-      providerId,
-      type: providerType,
+      providerId: resolvedProviderId,
+      type: resolvedProviderType,
       title: series.title,
-      originalTitle: showData.originalTitle,
-      romanizedTitle: showData.romanizedTitle,
-      metadata: showData.metadata,
+      originalTitle: showData?.originalTitle,
+      romanizedTitle: showData?.romanizedTitle,
+      metadata: showData?.metadata,
+      year: showData?.year,
       rootFolderPath: rootFolderPath ?? undefined,
       profile: qualityProfileId,
       seriesType,
+      libraryTypeId: mappedLibraryTypeId,
       config: {},
     });
 

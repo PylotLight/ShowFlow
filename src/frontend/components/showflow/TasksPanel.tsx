@@ -1,6 +1,7 @@
 import * as React from "react";
-import { ClockIcon, CalendarIcon, DownloadIcon, RefreshCwIcon, PlayIcon, CheckIcon, XIcon, Loader2Icon } from "lucide-react";
+import { ClockIcon, CalendarIcon, DownloadIcon, RefreshCwIcon, PlayIcon, CheckIcon, XIcon, Loader2Icon, RadioIcon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { WatcherPanel } from "@frontend/components/showflow/WatcherPanel";
 import { Switch } from "@frontend/components/ui/switch";
 import { Button } from "@frontend/components/ui/button";
 
@@ -86,17 +87,26 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
     setEditing(null);
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {Object.entries(groupedTasks).map(([category, categoryTasks]) => {
+      <GlassPanel className="overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/5">
+          <div className="flex items-center gap-2">
+            <RadioIcon className="size-4 text-signal" />
+            <h3 className="font-display text-lg font-bold text-white">File Watcher</h3>
+          </div>
+        </div>
+        <div className="px-6 py-4">
+          <WatcherPanel hideLog bare />
+        </div>
+      </GlassPanel>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-32">
+          <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        Object.entries(groupedTasks).map(([category, categoryTasks]) => {
         if (categoryTasks.length === 0) return null;
         const { label, icon: Icon } = categoryLabels[category] || { label: category, icon: ClockIcon };
         
@@ -192,7 +202,8 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
             </div>
           </GlassPanel>
         );
-      })}
+      })
+      )}
     </div>
   );
 }

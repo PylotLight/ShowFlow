@@ -19,6 +19,8 @@ export function configRoutes() {
             db.setSetting(k, v);
           }
           invalidateConfigCache();
+          const keys = Object.keys(body).join(', ');
+          db.logEvent({ type: 'config', entityType: 'system', message: `Settings saved: ${keys}` });
           return json({ ok: true });
         } catch (err) {
           return errorResponse(err);
@@ -57,6 +59,53 @@ export function configRoutes() {
       },
     },
 
+    "/api/library-types": {
+      async GET() {
+        try {
+          return json(db.listLibraryTypes());
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = await req.json() as { id?: string; name?: string; rootFolderPath?: string; qualityProfileId?: string; indexers?: any; isDefault?: boolean };
+          if (!body.id || !body.name) return errorResponse("id and name are required");
+          db.saveLibraryType({
+            id: body.id,
+            name: body.name,
+            rootFolderPath: body.rootFolderPath,
+            qualityProfileId: body.qualityProfileId,
+            indexers: body.indexers,
+            isDefault: body.isDefault,
+          });
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
+    "/api/library-types/:id": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        try {
+          const type = db.getLibraryType(req.params.id!);
+          if (!type) return errorResponse("Library type not found", 404);
+          return json(type);
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async DELETE(req: Request & { params: Record<string, string> }) {
+        try {
+          db.removeLibraryType(req.params.id!);
+          return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
     "/api/settings": {
       async GET() {
         try {
@@ -84,6 +133,7 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Prowlarr configuration saved' });
             return json({ ok: true });
           }
           if (key === "sonarr") {
@@ -101,6 +151,7 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Sonarr configuration saved' });
             return json({ ok: true });
           }
           if (key === "jellyfin") {
@@ -118,10 +169,17 @@ export function configRoutes() {
             }
             db.setSetting(key, result.data);
             invalidateConfigCache();
+            db.logEvent({ type: 'config', entityType: 'system', message: 'Jellyfin configuration saved' });
+            return json({ ok: true });
+          }
+          if (key.startsWith('onboarding.')) {
+            db.setSetting(key, value);
+            invalidateConfigCache();
             return json({ ok: true });
           }
           db.setSetting(key, value);
           invalidateConfigCache();
+          db.logEvent({ type: 'config', entityType: 'system', message: `Setting "${key}" saved` });
           return json({ ok: true });
         } catch (err) {
           return errorResponse(err);

@@ -181,6 +181,14 @@ export class DatabaseManager {
   removeShowProfile(id: string) { return config.removeShowProfile(this, id); }
   getShowProfileRootFolder(profileId: string) { return config.getShowProfileRootFolder(this, profileId); }
 
+  // ---- Library Types (design-brief-platform-ux-systems.md §1) ------------
+
+  listLibraryTypes() { return config.listLibraryTypes(this); }
+  getLibraryType(id: string) { return config.getLibraryType(this, id); }
+  saveLibraryType(t: Parameters<typeof config.saveLibraryType>[1]) { return config.saveLibraryType(this, t); }
+  removeLibraryType(id: string) { return config.removeLibraryType(this, id); }
+  resolveLibraryTypeId(id: string | null | undefined) { return config.resolveLibraryTypeId(this, id); }
+
   // ---- Settings ----------------------------------------------------------
 
   getSetting(key: string) { return config.getSetting(this, key); }

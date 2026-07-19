@@ -142,6 +142,68 @@ export function listProfiles(self: DatabaseManager): any[] {
   });
 }
 
+// ---- Library Types ----
+//
+// See schema.ts's libraryTypes table comment + design-brief-platform-ux-systems.md §1.
+// `indexers` reuses the same JSON shape as the legacy quality_profiles.indexers
+// column, so normalizeIndexers() above covers both.
+
+export function listLibraryTypes(self: DatabaseManager): any[] {
+  const rows = self.drizz.select().from(schema.libraryTypes).orderBy(asc(schema.libraryTypes.name)).all();
+  return rows.map((row) => {
+    const result: any = { ...row };
+    if (result.indexers) {
+      try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
+    }
+    return result;
+  });
+}
+
+export function getLibraryType(self: DatabaseManager, id: string): any {
+  const row = self.drizz.select().from(schema.libraryTypes).where(eq(schema.libraryTypes.id, id)).get();
+  if (!row) return row;
+  const result: any = { ...row };
+  if (result.indexers) {
+    try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
+  }
+  return result;
+}
+
+export function saveLibraryType(self: DatabaseManager, t: { id: string; name: string; rootFolderPath?: string; qualityProfileId?: string; indexers?: Record<string, string[]> | string[]; isDefault?: boolean }) {
+  const values = {
+    id: t.id,
+    name: t.name,
+    root_folder_path: t.rootFolderPath ?? null,
+    quality_profile_id: t.qualityProfileId ?? null,
+    indexers: JSON.stringify(t.indexers ?? []),
+    is_default: t.isDefault ? 1 : 0,
+  };
+  self.drizz
+    .insert(schema.libraryTypes)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.libraryTypes.id, set: values })
+    .run();
+}
+
+export function removeLibraryType(self: DatabaseManager, id: string) {
+  self.drizz.delete(schema.libraryTypes).where(eq(schema.libraryTypes.id, id)).run();
+}
+
+/**
+ * Resolves a library type id to a usable row, falling back to the
+ * system's default (is_default = 1) or, failing that, the first one that
+ * exists. Mirrors resolveProfileId()'s fallback shape so callers that used
+ * to do `resolveProfileId(show.profile)` can switch to this without
+ * reworking their null-handling.
+ */
+export function resolveLibraryTypeId(self: DatabaseManager, id: string | null | undefined): string | undefined {
+  if (id && getLibraryType(self, id)) return id;
+  const types = listLibraryTypes(self);
+  const def = types.find((t) => t.is_default === 1);
+  if (def) return def.id;
+  return types.length > 0 ? types[0]!.id : undefined;
+}
+
 // ---- Custom Formats ----
 
 export function saveCustomFormat(self: DatabaseManager, f: { id: string; name: string; regex: string; score: number }) {

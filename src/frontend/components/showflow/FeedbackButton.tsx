@@ -93,11 +93,11 @@ export function FeedbackButton() {
       <DialogTrigger asChild>
         <Button
           size="icon-sm"
-          variant="outline"
-          className="fixed bottom-24 right-4 z-50 size-10 rounded-full border-signal/30 bg-signal/10 shadow-lg backdrop-blur-sm hover:bg-signal/20 md:bottom-6"
+          variant="ghost"
+          className="relative size-8 rounded-full"
           title="Send feedback"
         >
-          <MessageSquareTextIcon className="size-4 text-signal" />
+          <MessageSquareTextIcon className="size-4" />
         </Button>
       </DialogTrigger>
 

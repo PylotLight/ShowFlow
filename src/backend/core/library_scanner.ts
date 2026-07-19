@@ -11,9 +11,15 @@ export class LibraryScanner {
 
   async scan() {
     const profiles = db.listShowProfiles();
-    const rootFolders = [...new Set(profiles.map(p => p.root_folder_path))];
+    const libraryTypes = db.listLibraryTypes();
+    const rootFolders = [
+      ...new Set([
+        ...profiles.map(p => p.root_folder_path),
+        ...libraryTypes.filter(lt => lt.root_folder_path).map(lt => lt.root_folder_path),
+      ])
+    ];
     if (rootFolders.length === 0) {
-      console.log('No profiles with root folders configured. Nothing to scan.');
+      console.log('No profiles or library types with root folders configured. Nothing to scan.');
       return;
     }
     console.log(`Scanning ${rootFolders.length} root folder(s): ${rootFolders.join(', ')}`);
@@ -123,7 +129,8 @@ export class LibraryScanner {
       return;
     }
 
-    const rootFolder = show.root_folder_path || db.getShowRootFolder(showId);
+    const libraryRoot = show.library_type_id ? (db.getLibraryType(show.library_type_id)?.root_folder_path ?? null) : null;
+    const rootFolder = libraryRoot || show.root_folder_path || db.getShowRootFolder(showId);
     if (!rootFolder) {
       console.log(`No root folder for show "${show.title}". Nothing to scan.`);
       return;

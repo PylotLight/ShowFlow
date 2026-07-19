@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { runBackup, listBackups, uploadBackup, restoreBackup } from "../core/backup";
+import { backgroundJobs } from "../core/background_jobs";
 import { json, errorResponse } from "./_shared";
 import path from "node:path";
 import fs from "node:fs";
@@ -17,12 +18,16 @@ export function backupRoutes() {
         }
       },
       POST: async () => {
+        const jobId = crypto.randomUUID();
+        backgroundJobs.register({ id: jobId, type: 'backup', label: 'Database backup' });
         try {
           const result = await runBackup();
+          backgroundJobs.complete(jobId, `Backup created: ${result.dbFile}`);
           db.logEvent({ type: 'backup', message: `Backup created: ${result.dbFile}` });
           const entries = await listBackups();
           return json({ ...result, entries });
         } catch (err) {
+          backgroundJobs.fail(jobId, err instanceof Error ? err.message : String(err));
           return errorResponse(err, 500);
         }
       },

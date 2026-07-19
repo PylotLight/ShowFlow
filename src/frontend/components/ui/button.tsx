@@ -16,6 +16,7 @@ const buttonVariants = cva(
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+        glass: "relative overflow-hidden bg-white/[0.06] border border-white/10 text-foreground backdrop-filter backdrop-blur-sm shadow-[inset_0_1px_0_rgb(255_255_255/5%)]",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
@@ -46,7 +47,46 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button";
 
+  if (variant === "glass") {
+    const [mousePos, setMousePos] = React.useState<{ x: string; y: string } | null>(null);
+
+    return (
+      <Comp
+        data-slot="button"
+        data-glass=""
+        className={cn(buttonVariants({ variant, size, className }))}
+        style={{
+          "--mouse-x": mousePos?.x ?? "50%",
+          "--mouse-y": mousePos?.y ?? "50%",
+        } as React.CSSProperties}
+        onMouseMove={(e: React.MouseEvent) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setMousePos({
+            x: `${((e.clientX - rect.left) / rect.width) * 100}%`,
+            y: `${((e.clientY - rect.top) / rect.height) * 100}%`,
+          });
+        }}
+        onMouseLeave={() => setMousePos(null)}
+        {...props}
+      />
+    );
+  }
+
   return <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...props} />;
 }
 
-export { Button, buttonVariants };
+/** Reusable glass button — wraps <Button variant="glass"> with sensible defaults. */
+function GlassButton({
+  className,
+  size,
+  children,
+  ...props
+}: Omit<React.ComponentProps<typeof Button>, "variant"> & { children: React.ReactNode }) {
+  return (
+    <Button variant="glass" size={size} className={cn("gap-2", className)} {...props}>
+      {children}
+    </Button>
+  );
+}
+
+export { Button, GlassButton, buttonVariants };

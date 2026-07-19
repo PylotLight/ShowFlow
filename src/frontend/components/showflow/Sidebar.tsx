@@ -15,6 +15,7 @@ import {
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
+import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 
 export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "sources" | "settings" | "manual-import" | "health";
 
@@ -124,6 +125,11 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
   return (
     <>
+      {/* Mobile notification bar */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 md:hidden">
+        <NotificationsPopover />
+      </div>
+
       {/* Desktop Sidebar (visible on md screens and up) */}
       <aside
         className={cn(

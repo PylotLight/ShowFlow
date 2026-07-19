@@ -22,7 +22,7 @@ function LiveDot() {
   );
 }
 
-function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEvent[]) => void; className?: string }) {
+function WatcherPanel({ onEvents, className, hideLog, bare }: { onEvents?: (events: ActivityEvent[]) => void; className?: string; hideLog?: boolean; bare?: boolean }) {
   const [watching, setWatching] = React.useState<boolean | null>(null);
   const [events, setEvents] = React.useState<ActivityEvent[] | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -70,8 +70,10 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
 
   const isLive = watching && events && events.length > 0 && Date.now() - new Date(events[0]!.timestamp).getTime() < 120_000;
 
+  const Wrapper = bare ? 'div' : GlassPanel;
+
   return (
-    <GlassPanel className={cn("flex flex-col gap-4 p-5 min-h-0 overflow-hidden", className)}>
+    <Wrapper className={cn("flex flex-col gap-4", !bare && "p-5 min-h-0 overflow-hidden", className)}>
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="relative flex items-center justify-center">
@@ -80,26 +82,23 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
               <span className="absolute inset-0 size-4 rounded-full bg-signal/15 animate-ping" />
             )}
           </div>
-          <div>
-            <span className="font-display text-sm font-semibold tracking-wide block">Live Events</span>
-            <div className="flex items-center gap-1.5 font-mono text-[9px] text-muted-foreground mt-0.5">
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  watching ? "bg-signal animate-pulse-glow" : "bg-white/25",
-                )}
-              />
-              {watching === null ? "CHECKING STATUS" : watching ? "ACTIVE & WATCHING" : "SERVICE IDLE"}
-              {isLive && (
-                <>
-                  <span className="text-white/20">·</span>
-                  <span className="text-signal font-bold tracking-wider flex items-center gap-1">
-                    <LiveDot />
-                    LIVE
-                  </span>
-                </>
+          <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                watching ? "bg-signal animate-pulse-glow" : "bg-white/25",
               )}
-            </div>
+            />
+            {watching === null ? "CHECKING STATUS" : watching ? "ACTIVE & WATCHING" : "SERVICE IDLE"}
+            {isLive && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="text-signal font-bold tracking-wider flex items-center gap-1">
+                  <LiveDot />
+                  LIVE
+                </span>
+              </>
+            )}
           </div>
         </div>
         <Button 
@@ -114,6 +113,7 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
         </Button>
       </div>
 
+      {!hideLog && (
       <div ref={listRef} className="flex flex-col divide-y divide-white/5 border-t border-white/5 pt-1 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent">
         {events === null ? (
           <div className="flex flex-col gap-2 py-3 px-1">
@@ -185,7 +185,8 @@ function WatcherPanel({ onEvents, className }: { onEvents?: (events: ActivityEve
           })
         )}
       </div>
-    </GlassPanel>
+      )}
+    </Wrapper>
   );
 }
 

@@ -14,13 +14,69 @@ export const shows = sqliteTable('shows', {
   title: text('title').notNull(),
   original_title: text('original_title'),
   year: integer('year'),
+  // --- Legacy columns (pre-Library-Type model) ---
+  // Kept and still written to during the migration window described in
+  // docs/design-brief-platform-ux-systems.md §1 - `library_type_id` below is
+  // the new source of truth once a show has one, but these three stay
+  // populated in parallel until all read paths (grabber_service quality
+  // resolution, Add Show, Sonarr import mapping, library_scanner root-folder
+  // lookup) have been switched over and verified. Do not add new reads of
+  // these three columns; resolve via library_type_id + libraryTypes instead.
   profile: text('profile').default('standard'),
   series_type: text('series_type').default('standard'),
   root_folder_path: text('root_folder_path'),
+  // --- Library Type model ---
+  // Bundles root folder + indexer set + quality profile into one selector.
+  // Nullable during migration (existing rows are backfilled by the
+  // migration's data pass - see migrations/ + the seed step in init.ts -
+  // but nullable rather than NOT NULL so a partially-migrated DB never
+  // fails to boot). A show with a library_type_id set resolves its quality
+  // profile via libraryTypes.quality_profile_id, NOT via `profile` above.
+  library_type_id: text('library_type_id').references(() => libraryTypes.id),
   sort_title: text('sort_title'),
   added_at: text('added_at').default(sql`(datetime('now'))`),
   last_updated: text('last_updated').default(sql`(datetime('now'))`),
 });
+
+// ---- Library Types ----
+//
+// Replaces picking a quality profile AND a series type/root-folder
+// separately (design-brief-platform-ux-systems.md §1). A Library Type
+// bundles:
+//   - a default root folder (root_folder_path, formerly show_profiles-only)
+//   - an associated indexer set (moved out of quality_profiles.indexers)
+//   - a referenced quality profile (quality_profiles.id, now purely about
+//     quality/format rules - indexer routing no longer lives there)
+//
+// `indexers` uses the same JSON shape quality_profiles.indexers used to
+// (see normalizeIndexers() in db/config.ts) so existing indexer-selection
+// UI and grabber_service lookups need minimal reshaping.
+//
+// Migration note: seed data for this table comes from existing
+// quality_profiles rows during migration - a profile that had anime-flagged
+// indexers becomes an auto-generated "Anime" Library Type. See
+// docs/design-brief-platform-ux-systems.md §1 "Migration notes" and the
+// seedDefaultLibraryTypes() step in init.ts.
+export const libraryTypes = sqliteTable('library_types', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  root_folder_path: text('root_folder_path'),
+  quality_profile_id: text('quality_profile_id').references(() => qualityProfiles.id),
+  /** Same JSON shape as the legacy quality_profiles.indexers column. */
+  indexers: text('indexers').default('{}'),
+  is_default: integer('is_default').default(0),
+  created_at: text('created_at').default(sql`(datetime('now'))`),
+}, (table) => ({
+  uniqueName: uniqueIndex('uq_library_types_name').on(table.name),
+}));
+
+export const libraryTypesRelations = relations(libraryTypes, ({ many, one }) => ({
+  shows: many(shows),
+  qualityProfile: one(qualityProfiles, {
+    fields: [libraryTypes.quality_profile_id],
+    references: [qualityProfiles.id],
+  }),
+}));
 
 export const showProviders = sqliteTable('show_providers', {
   show_id: text('show_id')

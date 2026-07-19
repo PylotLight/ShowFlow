@@ -32,7 +32,7 @@ const SETTINGS_TABS = [
   { id: "debug", label: "Debug" },
 ];
 
-export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: { onDone: () => void; initialTab?: string; scrollToSection?: string }) {
+export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onReRunWizard }: { onDone: () => void; initialTab?: string; scrollToSection?: string; onReRunWizard?: () => void }) {
   const [tab, setTab] = React.useState(initialTab || "general");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
@@ -65,13 +65,13 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
   const [sonarrSeries, setSonarrSeries] = React.useState<any[] | null>(null);
   const [sonarrSeriesLoading, setSonarrSeriesLoading] = React.useState(false);
   const [sonarrImporting, setSonarrImporting] = React.useState(false);
-  const [sonarrImportResults, setSonarrImportResults] = React.useState<any[]>([]);
-  const [sonarrImportTotal, setSonarrImportTotal] = React.useState(0);
+  const [sonarrImportJobId, setSonarrImportJobId] = React.useState<string | null>(null);
   const [selectedSonarrSeries, setSelectedSonarrSeries] = React.useState<Set<number>>(new Set());
 
   const [showProfilesList, setShowProfilesList] = React.useState<any[]>([]);
   const [qualityProfilesList, setQualityProfilesList] = React.useState<any[]>([]);
-  const [sonarrTypeConfig, setSonarrTypeConfig] = React.useState<Record<string, { included: boolean; showProfileId: string; qualityProfileId: string }>>({});
+  const [libraryTypesList, setLibraryTypesList] = React.useState<any[]>([]);
+  const [sonarrTypeConfig, setSonarrTypeConfig] = React.useState<Record<string, { included: boolean; showProfileId: string; qualityProfileId: string; libraryTypeId: string }>>({});
 
   const visibleSonarrSeries = React.useMemo(() => {
     if (!sonarrSeries) return [];
@@ -112,14 +112,16 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
       fetch("/api/tasks").then(r => r.json()),
       fetch("/api/show-profiles").then(r => r.json()).catch(() => []),
       fetch("/api/profiles").then(r => r.json()).catch(() => []),
+      fetch("/api/library-types").then(r => r.json()).catch(() => []),
       loadTheme(),
-    ]).then(([cfg, settings, nativeMetaData, tasksData, showProfilesData, qualityProfilesData, loadedTheme]) => {
+    ]).then(([cfg, settings, nativeMetaData, tasksData, showProfilesData, qualityProfilesData, libraryTypesData, loadedTheme]) => {
       setConfig(cfg);
       setTheme(loadedTheme);
       setNativeMeta(Array.isArray(nativeMetaData) ? nativeMetaData : []);
       setTasks(Array.isArray(tasksData) ? tasksData : []);
       setShowProfilesList(Array.isArray(showProfilesData) ? showProfilesData : []);
       setQualityProfilesList(Array.isArray(qualityProfilesData) ? qualityProfilesData : []);
+      setLibraryTypesList(Array.isArray(libraryTypesData) ? libraryTypesData : []);
       const sonarrRaw = settings.find((s: any) => s.key === "sonarr");
       if (sonarrRaw) {
         try {
@@ -331,17 +333,14 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
 
   function importSonarrSeries() {
     setSonarrImporting(true);
-    setSonarrImportResults([]);
+    setSonarrImportJobId(null);
     fetch("/api/sonarr/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seriesIds: [...selectedSonarrSeries], typeMapping: sonarrTypeConfig }),
     }).then(r => r.json()).then(data => {
-      setSonarrImportResults(data.results || []);
-      if (data.results) {
-        setSonarrImportTotal(data.results.length);
-      }
-    }).catch(() => setSonarrImportResults([{ status: 'error', title: 'Import request failed' }]))
+      if (data.jobId) setSonarrImportJobId(data.jobId);
+    }).catch(() => {})
     .finally(() => setSonarrImporting(false));
   }
 
@@ -420,10 +419,23 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
           <GeneralTab
             config={config}
             saveConfig={saveConfig}
-            accent={accent}
-            setAccent={handleAccentChange}
             scrollToSection={scrollToSection}
           />
+        )}
+
+        {tab === "general" && onReRunWizard && (
+          <div className="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+            <p className="text-sm font-medium mb-1">Setup Wizard</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Re-run the onboarding wizard to reconfigure from scratch.
+            </p>
+            <button
+              onClick={onReRunWizard}
+              className="text-sm text-signal hover:underline"
+            >
+              Re-run setup wizard
+            </button>
+          </div>
         )}
 
         {tab === "providers" && (
@@ -478,12 +490,13 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
             sonarrSeriesLoading={sonarrSeriesLoading}
             sonarrFetchSeries={fetchSonarrSeries}
             sonarrImporting={sonarrImporting}
-            sonarrImportResults={sonarrImportResults}
-            sonarrImportTotal={sonarrImportTotal}
+            sonarrImportJobId={sonarrImportJobId}
+            onSonarrImportDone={() => setSonarrImportJobId(null)}
             selectedSonarrSeries={selectedSonarrSeries}
             setSelectedSonarrSeries={setSelectedSonarrSeries}
             showProfilesList={showProfilesList}
             qualityProfilesList={qualityProfilesList}
+            libraryTypesList={libraryTypesList}
             sonarrTypeConfig={sonarrTypeConfig}
             setSonarrTypeConfig={setSonarrTypeConfig}
             sonarrTypesPresent={sonarrTypesPresent}
@@ -500,6 +513,8 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection }: {
             jellyfinSyncResult={jellyfinSyncResult}
             jellyfinSyncFn={syncJellyfin}
             saveSonarr={saveSonarr}
+            config={config}
+            updateApiKey={updateApiKey}
           />
         )}
 

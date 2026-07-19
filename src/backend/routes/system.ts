@@ -2,6 +2,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import type { Scheduler } from "../core/scheduler";
 import type { SystemManager } from "../core/system_manager";
+import { backgroundJobs } from "../core/background_jobs";
 import { json, errorResponse } from "./_shared";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
@@ -12,12 +13,16 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
 
     "/api/system/scan": {
       async POST() {
+        const jobId = crypto.randomUUID();
+        backgroundJobs.register({ id: jobId, type: 'library-scan', label: 'Library scan' });
         try {
           const result = await systemManager.scan();
+          backgroundJobs.complete(jobId, 'Library scan completed');
           db.logEvent({ type: 'scan', entityType: 'system', message: 'Full library scan completed' });
           return json({ ok: true, result });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
+          backgroundJobs.fail(jobId, message);
           db.logEvent({ type: 'error', entityType: 'system', message: `Library scan failed: ${message}` });
           return errorResponse(err, 500);
         }

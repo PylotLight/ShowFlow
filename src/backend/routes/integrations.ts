@@ -1,10 +1,23 @@
 import { db, SonarrConfigSchema, JellyfinConfigSchema } from "../db";
-import { SonarrImporter, type SonarrTypeMapping } from "../providers/sonarr/import";
+import { SonarrImporter, type SonarrTypeMapping, type ImportResult } from "../providers/sonarr/import";
 import { JellyfinSync } from "../providers/jellyfin/sync";
+import { backgroundJobs } from "../core/background_jobs";
+import { LibraryScanner } from "../core/library_scanner";
 import { json, errorResponse, loadConfig, invalidateConfigCache, getSonarrClient, getJellyfinClient } from "./_shared";
+
+/** Stores import results by jobId so the frontend can fetch them after completion. */
+const importResultsStore = new Map<string, ImportResult[]>();
 
 export function integrationRoutes() {
   return {
+
+    "/api/sonarr/import/:jobId/results": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        const results = importResultsStore.get(req.params.jobId!);
+        if (!results) return errorResponse("Results not found", 404);
+        return json(results);
+      },
+    },
 
     "/api/sonarr/settings": {
       async GET() {
@@ -83,21 +96,52 @@ export function integrationRoutes() {
           const appConfig = loadConfig();
           const importer = new SonarrImporter(config.baseUrl, config.apiKey, config.apiVersion ?? 'v3', appConfig);
 
-          const importPromise = importer.importSeries(body?.seriesIds, body?.typeMapping);
-
           const series = body?.seriesIds;
-          if (!series || series.length <= 5) {
-            const results = await importPromise;
-            return json({ results });
-          }
 
-          importPromise.then(results => {
+          // Every import - regardless of size - registers against the
+          // Background Activity registry (design-brief-platform-ux-systems.md
+          // §2) so it's visible from the header the moment it starts, whether
+          // the caller is the onboarding wizard's "wait here" path or the
+          // "keep configuring" background path. The wizard/UI polls
+          // GET /api/background-jobs/:id (or the list endpoint) rather than a
+          // Sonarr-specific status route, so this same job also shows up for
+          // an import kicked off from IntegrationsTab.tsx outside onboarding
+          // (design-brief-platform-ux-systems.md §4) with no separate code path.
+          const jobId = crypto.randomUUID();
+          backgroundJobs.register({
+            id: jobId,
+            type: 'sonarr-import',
+            label: `Importing ${series?.length ?? 'all'} series from Sonarr`,
+            total: series?.length,
+          });
+
+          const runImport = async () => {
+            try {
+              const results = await importer.importSeries(series, body?.typeMapping, jobId);
+              importResultsStore.set(jobId, results);
+              // Post-import library scan (design-brief-onboarding-wizard.md §2 /
+              // design-brief-platform-ux-systems.md §5): newly imported shows
+              // should immediately reflect files already present in their root
+              // folders rather than waiting for the next scheduled scan.
+              try {
+                await new LibraryScanner(appConfig).scan();
+              } catch (scanErr) {
+                console.warn('[sonarr] Post-import library scan failed:', scanErr);
+              }
+              return results;
+            } catch (err) {
+              backgroundJobs.fail(jobId, err instanceof Error ? err.message : String(err));
+              throw err;
+            }
+          };
+
+          runImport().then(results => {
             console.log(`[sonarr] Import completed: ${results.filter(r => r.status === 'imported').length} imported, ${results.filter(r => r.status === 'existing').length} existing, ${results.filter(r => r.status === 'error').length} errors`);
           }).catch(err => {
             console.error('[sonarr] Import failed:', err);
           });
 
-          return json({ message: `Import started for ${series.length} series. Check server logs for results.` });
+          return json({ jobId });
         } catch (err) {
           return errorResponse(err, 500);
         }
