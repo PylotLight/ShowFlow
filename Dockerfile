@@ -42,6 +42,7 @@ WORKDIR /data
 COPY --from=build /app/dist/supervisor /supervisor
 COPY --from=build /app/showflow /bootstrap/showflow
 COPY --from=build /app/manifest.json /bootstrap/manifest.json
+COPY --from=build /app/src/backend/db/migrations /bootstrap/migrations
 
 ENV NODE_ENV=production \
     PORT=3000

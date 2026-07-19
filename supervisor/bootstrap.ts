@@ -2,13 +2,14 @@
 // recovery). Without this, `Restoring` in the state machine has nothing to
 // terminate at — v1 skipped this entirely.
 
-import { mkdir, chmod } from "node:fs/promises";
+import { mkdir, chmod, cp } from "node:fs/promises";
 import {
   RELEASES_DIR,
   STATE_DIR,
   DOWNLOADS_DIR,
   BOOTSTRAP_APP,
   BOOTSTRAP_MANIFEST,
+  BOOTSTRAP_MIGRATIONS,
   verifyArtifact,
   releasePath,
   readState,
@@ -58,6 +59,10 @@ export async function ensureBootstrapInstalled(): Promise<string | null> {
   await mkdir(dir, { recursive: true });
   await Bun.write(`${dir}/${manifest.artifact.name}`, bootstrapAppFile);
   await Bun.write(`${dir}/manifest.json`, JSON.stringify(manifest, null, 2));
+
+  // Copy bootstrap migrations alongside the binary so the compiled app can
+  // find them at runtime relative to process.execPath.
+  await cp(BOOTSTRAP_MIGRATIONS, `${dir}/migrations`, { recursive: true });
 
   // chmod +x — Bun.write doesn't preserve the executable bit from a compiled
   // binary source file automatically. Uses node:fs directly rather than

@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'bun';
+import { dirname, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
@@ -60,7 +62,8 @@ export class DatabaseManager {
     // `bunx drizzle-kit generate` after changing schema.ts to produce a new
     // migration, then just start the app - no separate `migrate` command
     // to remember to run.
-    migrate(this.drizz, { migrationsFolder: new URL('./migrations', import.meta.url).pathname });
+    const binaryDir = dirname(process.execPath);
+    migrate(this.drizz, { migrationsFolder: resolve(binaryDir, 'migrations') });
 
     seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
     migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);

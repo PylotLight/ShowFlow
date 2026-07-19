@@ -10,6 +10,7 @@ export const DOWNLOADS_DIR = `${DATA_DIR}/downloads`;
 export const STATE_FILE = `${STATE_DIR}/active.json`;
 export const BOOTSTRAP_APP = process.env.SHOWFLOW_BOOTSTRAP_APP ?? "/bootstrap/showflow";
 export const BOOTSTRAP_MANIFEST = process.env.SHOWFLOW_BOOTSTRAP_MANIFEST ?? "/bootstrap/manifest.json";
+export const BOOTSTRAP_MIGRATIONS = process.env.SHOWFLOW_BOOTSTRAP_MIGRATIONS ?? "/bootstrap/migrations";
 
 export const PUBLIC_PORT = Number(process.env.PORT ?? 3000);
 // Loopback-only admin surface. kubectl exec runs inside the same network
