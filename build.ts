@@ -49,7 +49,7 @@ const manifest = {
     name: OUTFILE,
     sha256,
   },
-  minimumSupervisorVersion: process.env.SUPERVISOR_VERSION ?? "0.1.0",
+  minimumSupervisorVersion: process.env.SUPERVISOR_VERSION ?? "0.0.0",
 };
 
 await Bun.write("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
