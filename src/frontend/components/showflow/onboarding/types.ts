@@ -58,8 +58,7 @@ export interface StepProps {
 
 export const STEPS = [
   { id: 'welcome', label: 'Welcome', short: 'Start' },
-  { id: 'folders', label: 'Root Folders', short: 'Folders' },
-  { id: 'library-type', label: 'Library & Quality', short: 'Library' },
+  { id: 'library', label: 'Root Folders & Library Type', short: 'Library' },
   { id: 'integrations', label: 'Integrations', short: 'Integrate' },
   { id: 'theme', label: 'Theme', short: 'Theme' },
   { id: 'done', label: 'Done', short: 'Done' },

@@ -41,7 +41,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: showflow
-          image: ghcr.io/PylotLight/ShowFlow:latest
+          image: ghcr.io/pylotlight/showflow:v0.1.1
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

@@ -90,7 +90,7 @@ export class GrabberService {
     const profileId = libraryType?.quality_profile_id ?? db.resolveProfileId(show.profile) ?? '';
     const seriesType = this.getSeriesType(show);
     const anime = seriesType === 'anime' || seriesType === 'absolute';
-    const indexers = this.getEnabledIndexers({ profileId, libraryType });
+    const indexers = this.getEnabledIndexers({ libraryType });
     if (indexers.length === 0) {
       const message = 'No indexers configured. Add a Prowlarr or Native indexer in Settings > Indexers.';
       db.logPipelineEvent({
@@ -411,7 +411,7 @@ export class GrabberService {
     return { success: true, message: `Grabbed ${release.title}`, release };
   }
 
-  private getEnabledIndexers(opts?: { profileId?: string; libraryType?: any }): Indexer[] {
+  private getEnabledIndexers(opts?: { libraryType?: any }): Indexer[] {
     const all: { id: string; instance: Indexer }[] = [];
 
     // Load Prowlarr if configured and enabled
@@ -450,19 +450,13 @@ export class GrabberService {
       }
     }
 
-    // If a library type specifies indexers, intersect with enabled indexers
-    // (library type's indexers replace quality_profiles.indexers as the
-    // source of truth - see design-brief-platform-ux-systems.md §1)
+    // If a library type specifies indexers, intersect with enabled indexers.
+    // library_types.indexers is the sole source of truth here - the legacy
+    // quality_profiles.indexers fallback that used to sit below this was
+    // removed along with the column (design-brief-quality-profile-library-type-rework.md §4).
+    // An empty/absent indexers array means "use all enabled indexers".
     if (opts?.libraryType?.indexers && Array.isArray(opts.libraryType.indexers) && opts.libraryType.indexers.length > 0) {
       return all.filter(i => opts.libraryType.indexers.includes(i.id)).map(i => i.instance);
-    }
-
-    // Legacy path: profile-based indexer filtering from quality_profiles.indexers
-    if (opts?.profileId) {
-      const allowed = db.getProfileIndexers(opts.profileId);
-      if (allowed.length > 0) {
-        return all.filter(i => allowed.includes(i.id)).map(i => i.instance);
-      }
     }
 
     return all.map(i => i.instance);

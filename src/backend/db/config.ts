@@ -83,32 +83,13 @@ export function listQualities(self: DatabaseManager) {
 
 // ---- Quality Profiles ----
 
-export function saveProfile(self: DatabaseManager, p: { id: string; name: string; cutoffId?: string; indexers?: string }) {
-  const indexersStr = p.indexers ?? '{}';
-  const values = { id: p.id, name: p.name, cutoff_quality_id: p.cutoffId ?? null, indexers: indexersStr };
+export function saveProfile(self: DatabaseManager, p: { id: string; name: string; cutoffId?: string }) {
+  const values = { id: p.id, name: p.name, cutoff_quality_id: p.cutoffId ?? null };
   self.drizz
     .insert(schema.qualityProfiles)
     .values(values)
     .onConflictDoUpdate({ target: schema.qualityProfiles.id, set: values })
     .run();
-}
-
-export function saveProfileIndexers(self: DatabaseManager, id: string, indexers: Record<string, string[]>) {
-  self.drizz
-    .update(schema.qualityProfiles)
-    .set({ indexers: JSON.stringify(indexers) })
-    .where(eq(schema.qualityProfiles.id, id))
-    .run();
-}
-
-export function getProfileIndexers(self: DatabaseManager, id: string): string[] {
-  const row = self.drizz.select({ indexers: schema.qualityProfiles.indexers }).from(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).get();
-  if (!row?.indexers) return [];
-  try {
-    return normalizeIndexers(JSON.parse(row.indexers));
-  } catch {
-    return [];
-  }
 }
 
 export function resolveProfileId(self: DatabaseManager, id: string | null | undefined): string | undefined {
@@ -118,13 +99,7 @@ export function resolveProfileId(self: DatabaseManager, id: string | null | unde
 }
 
 export function getProfile(self: DatabaseManager, id: string): any {
-  const row = self.drizz.select().from(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).get();
-  if (!row) return row;
-  const result: any = { ...row };
-  if (result.indexers) {
-    try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
-  }
-  return result;
+  return self.drizz.select().from(schema.qualityProfiles).where(eq(schema.qualityProfiles.id, id)).get();
 }
 
 export function removeProfile(self: DatabaseManager, id: string) {
@@ -132,21 +107,14 @@ export function removeProfile(self: DatabaseManager, id: string) {
 }
 
 export function listProfiles(self: DatabaseManager): any[] {
-  const rows = self.drizz.select().from(schema.qualityProfiles).all();
-  return rows.map((row) => {
-    const result: any = { ...row };
-    if (result.indexers) {
-      try { result.indexers = normalizeIndexers(JSON.parse(result.indexers)); } catch { result.indexers = []; }
-    }
-    return result;
-  });
+  return self.drizz.select().from(schema.qualityProfiles).all();
 }
 
 // ---- Library Types ----
 //
 // See schema.ts's libraryTypes table comment + design-brief-platform-ux-systems.md §1.
-// `indexers` reuses the same JSON shape as the legacy quality_profiles.indexers
-// column, so normalizeIndexers() above covers both.
+// `indexers` is the sole source of indexer routing now that
+// quality_profiles.indexers has been dropped (design-brief-quality-profile-library-type-rework.md §4).
 
 export function listLibraryTypes(self: DatabaseManager): any[] {
   const rows = self.drizz.select().from(schema.libraryTypes).orderBy(asc(schema.libraryTypes.name)).all();

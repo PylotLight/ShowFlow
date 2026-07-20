@@ -1,6 +1,6 @@
 # Architecture Overview
 
-ShowFlow is an automated media library manager inspired by Sonarr/Radarr, distributed as a single Docker image with its own self-hosted over-the-air update mechanism. Regenerated 2026-07-16 against the current codebase (`src/backend`, `src/frontend`, `supervisor/`) — see `docs/codebase-mapping.md` for the file-level directory map and `docs/sonarr-parity.md` for a feature-by-feature gap analysis against Sonarr.
+ShowFlow is an automated media library manager inspired by Sonarr/Radarr, distributed as a single Docker image with its own self-hosted over-the-air update mechanism. Regenerated 2026-07-16 against the current codebase (`src/backend`, `src/frontend`, `supervisor/`) — see `docs/codebase-mapping.md` for the file-level directory map and `docs/archive/sonarr-parity.md` for a feature-by-feature gap analysis against Sonarr (archived 2026-07-19 as a point-in-time snapshot; remaining open items were pulled forward into `docs/tasklist-remaining-items.md`).
 
 ## Core Architecture
 
@@ -81,7 +81,7 @@ The app process itself has no way to reach the supervisor's admin API from outsi
 - `POST /api/admin/updates/activate` — triggers activation. Fire-and-forget from the app's own point of view: activating necessarily kills *this* process, so it structurally cannot await the supervisor's full response on the success path. The frontend's contract is to poll `/internal/ready` afterward, not trust this response as final.
 - `GET /api/admin/updates/status` — supervisor phase + active release, merged with the app's own build info.
 
-All four require a bearer token (`checkAdminAuth()`), generated once on first boot and persisted to the DB — the only authenticated routes in the API today (see `docs/sonarr-parity.md` → "Known bugs" #7 for the rest of the API's auth posture and why it's currently open by design).
+All four require a bearer token (`checkAdminAuth()`), generated once on first boot and persisted to the DB — the only authenticated routes in the API today (see `docs/archive/sonarr-parity.md` → "Known bugs" #7 for the rest of the API's auth posture and why it's currently open by design).
 
 ### Current gaps in this pipeline (as of 2026-07-16)
 - **CI/manifest inconsistency**: the standalone release tarball built by `.github/workflows/docker-image.yml`'s `publish-release-assets` job does not set `SUPERVISOR_VERSION` when generating `manifest.json`, so `minimumSupervisorVersion` always falls back to `build.ts`'s hardcoded default (`"0.1.0"`) rather than reflecting the actual release tag the way the Docker image build does.

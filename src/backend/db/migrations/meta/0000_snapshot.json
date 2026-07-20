@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8f3c4f41-e5f8-4747-a38e-41440c7b33f0",
+  "id": "5a74c2b2-acc8-47fd-b84a-c2f7e240a73a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit_logs": {
@@ -698,14 +698,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "indexers": {
-          "name": "indexers",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "default": "'{}'"
         }
       },
       "indexes": {},

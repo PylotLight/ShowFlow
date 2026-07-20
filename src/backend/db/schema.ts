@@ -262,7 +262,6 @@ export const qualityProfiles = sqliteTable('quality_profiles', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   cutoff_quality_id: text('cutoff_quality_id').references(() => qualityDefinitions.id),
-  indexers: text('indexers').default('{}'),
 });
 
 // ---- Custom formats ----

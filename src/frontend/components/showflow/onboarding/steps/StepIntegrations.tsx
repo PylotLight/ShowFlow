@@ -77,8 +77,8 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
 
   const { sonarr, prowlarr, downloadClient } = data;
 
-  // Per-folder type mapping (rootFolder -> libraryTypeId)
-  const [typeMapping, setTypeMapping] = React.useState<Record<string, string>>({});
+  // Maps Sonarr series types (Anime, Standard) to library type IDs
+  const [sonarrTypeMapping, setSonarrTypeMapping] = React.useState<Record<string, string>>({});
 
   // Unique seriesType values present in Sonarr's data
   const seriesTypes = React.useMemo(() => {
@@ -105,22 +105,18 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
     fetch("/api/library-types").then(res => res.json()).then(setLibraryTypes).catch(() => {});
   }, []);
 
-  // Seed new folders only; never reset existing selections
+  // Seed Sonarr type mapping; never reset existing selections
   React.useEffect(() => {
     const defaultId = data.libraryTypeId ?? (libraryTypes.find(lt => lt.is_default) ?? libraryTypes[0])?.id ?? '';
-    setTypeMapping(prev => {
+    setSonarrTypeMapping(prev => {
       const next = { ...prev };
       let changed = false;
-      for (const folder of data.rootFolders) {
-        if (!next[folder]) { next[folder] = defaultId; changed = true; }
-      }
-      // Remove entries for folders that no longer exist
-      for (const key of Object.keys(next)) {
-        if (!data.rootFolders.includes(key)) { delete next[key]; changed = true; }
+      for (const st of seriesTypes) {
+        if (!next[st]) { next[st] = defaultId; changed = true; }
       }
       return changed ? next : prev;
     });
-  }, [data.rootFolders, data.libraryTypeId, libraryTypes.length]);
+  }, [seriesTypes, data.libraryTypeId, libraryTypes]);
 
   // Watch-mode import takes over the page. The job itself lives only in an
   // in-memory registry on the server (see /api/background-jobs) — it is NOT
@@ -259,9 +255,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
     setImporting(true);
     try {
       const ids = [...selectedIds];
-      const mapping: Record<string, string> = {};
-      data.rootFolders.forEach(folder => {
-        mapping[folder] = typeMapping[folder] ?? data.libraryTypeId ?? 'standard';
+      const mapping: Record<string, { libraryTypeId: string }> = {};
+      seriesTypes.forEach(st => {
+        const libId = sonarrTypeMapping[st] ?? data.libraryTypeId ?? '';
+        if (libId) mapping[st] = { libraryTypeId: libId };
       });
       const res = await fetch("/api/sonarr/import", {
         method: "POST",
@@ -694,7 +691,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           the viewport. */}
       <div
         className={cn(
-          "absolute left-full top-1/2 -translate-y-1/2 ml-4 w-[420px] max-h-[min(800px,90vh)] z-50",
+          "absolute left-full top-1/2 -translate-y-1/2 ml-4 w-[480px] max-h-[min(800px,90vh)] z-50",
           "bg-[#15181f] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden",
           "transition-all duration-300 ease-out",
           sonarrPanelOpen ? "opacity-100 translate-x-0 pointer-events-auto" : "opacity-0 translate-x-4 pointer-events-none"
@@ -704,10 +701,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
             <TvIcon className="size-5 text-signal" />
-            <div>
-              <p className="text-sm font-semibold">Sonarr Import</p>
-              <p className="text-xs text-muted-foreground">{sonarr.series.length} series from {sonarr.baseUrl || "Sonarr"}</p>
-            </div>
+          <div>
+            <p className="text-sm font-semibold">Sonarr Import</p>
+            <p className="text-xs text-muted-foreground">{selectedIds.size} of {sonarr.series.length} series selected</p>
+          </div>
           </div>
           <button onClick={() => setSonarrPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/60 hover:text-foreground transition-colors">
             <XCircleIcon className="size-4" />
@@ -805,29 +802,31 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
 
         {/* Type mapping + Import actions */}
         <div className="shrink-0 space-y-3">
-          {data.rootFolders.length > 0 && (
-            <div className="mx-6 px-4 py-3 rounded-lg bg-white/[0.02] border border-white/10">
-              <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/40 mb-2">
-                Type mapping
-              </p>
+          {seriesTypes.length > 0 && (
+            <div className="mx-6 px-5 py-4 rounded-lg bg-white/[0.02] border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/40">
+                  Type Routing
+                </p>
+                <span className="text-xs text-muted-foreground/30">— Route Sonarr series types into your libraries</span>
+              </div>
               {libraryTypes.length > 0 ? (
-              <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
-              {data.rootFolders.map(folder => {
-                const folderName = folder.split('/').pop() ?? folder;
-                const currentTypeId = typeMapping[folder];
+              <div className="space-y-2.5 max-h-40 overflow-y-auto pr-1">
+              {seriesTypes.map(st => {
+                const currentLibId = sonarrTypeMapping[st] ?? '';
                 return (
-                  <div key={folder} className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-muted-foreground/60 truncate flex-1">
-                      {folderName}
-                    </span>
+                  <div key={st} className="grid grid-cols-[auto_1fr_auto_1fr] items-center gap-2">
+                    <div className="font-mono text-[10px] text-muted-foreground/40 shrink-0">SONARR</div>
+                    <span className="text-sm font-mono text-muted-foreground/70 capitalize">{st}</span>
+                    <div className="text-muted-foreground/40">→</div>
                     <Select
-                      value={currentTypeId}
+                      value={currentLibId}
                       onValueChange={(v) => {
-                        setTypeMapping(prev => ({ ...prev, [folder]: v }));
+                        setSonarrTypeMapping(prev => ({ ...prev, [st]: v }));
                       }}
                     >
-                      <SelectTrigger className="h-7 w-36 text-xs">
-                        <SelectValue />
+                      <SelectTrigger className="h-8 w-40 text-sm">
+                        <SelectValue placeholder="Choose library" />
                       </SelectTrigger>
                       <SelectContent>
                         {libraryTypes.map(lt => (
@@ -842,8 +841,8 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               })}
               </div>
               ) : (
-                <p className="text-xs text-muted-foreground/40 italic">
-                  Complete the Library & Quality step first
+                <p className="text-sm text-muted-foreground/40 italic">
+                  Complete the Create Libraries step first
                 </p>
               )}
             </div>

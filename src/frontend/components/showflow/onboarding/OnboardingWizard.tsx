@@ -7,8 +7,7 @@ import type { WizardData, StepProps } from "./types";
 import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 
 import { StepWelcome } from "./steps/StepWelcome";
-import { StepRootFolders } from "./steps/StepRootFolders";
-import { StepLibraryType } from "./steps/StepLibraryType";
+import { StepLibrary } from "./steps/StepLibrary";
 import { StepIntegrations } from "./steps/StepIntegrations";
 import { StepTheme } from "./steps/StepTheme";
 import { StepDone } from "./steps/StepDone";
@@ -99,16 +98,15 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
   const renderStep = () => {
     switch (step) {
       case 0: return <StepWelcome {...stepProps} />;
-      case 1: return <StepRootFolders {...stepProps} />;
-      case 2: return <StepLibraryType {...stepProps} />;
-      case 3: return <StepIntegrations {...stepProps} />;
-      case 4: return <StepTheme {...stepProps} />;
-      case 5: return <StepDone {...stepProps} />;
+      case 1: return <StepLibrary {...stepProps} />;
+      case 2: return <StepIntegrations {...stepProps} />;
+      case 3: return <StepTheme {...stepProps} />;
+      case 4: return <StepDone {...stepProps} />;
       default: return null;
     }
   };
 
-  const HAS_OWN_NAV = new Set([1, 2, 3, 4, 5]);
+  const HAS_OWN_NAV = new Set([1, 2, 3, 4]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col animate-fade-in">
@@ -124,7 +122,7 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className={cn(
           "w-full max-w-2xl glass-panel rounded-2xl p-8 shadow-2xl animate-page-enter transition-transform duration-300 ease-out",
-          step === 3 && sonarrPanelOpen && "-translate-x-[218px]"
+          step === 2 && sonarrPanelOpen && "-translate-x-[218px]"
         )}>
           <StepIndicator current={step} onGoTo={goTo} />
 
@@ -132,7 +130,7 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
             "transition-all duration-500 ease-out",
             direction === 'forward' ? "animate-slide-in-right" : "animate-slide-in-left"
           )}>
-            {step > 3 && data.sonarr.importJobId && data.sonarr.importForkMode === 'background' && (
+            {step > 2 && data.sonarr.importJobId && data.sonarr.importForkMode === 'background' && (
               <div className="mb-6">
                 <SonarrImportProgress jobId={data.sonarr.importJobId} compact silent>
                   {({ job, done }) => job ? (

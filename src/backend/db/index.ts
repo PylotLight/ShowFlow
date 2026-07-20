@@ -206,8 +206,6 @@ export class DatabaseManager {
   // ---- Quality Profiles --------------------------------------------------
 
   saveProfile(p: Parameters<typeof config.saveProfile>[1]) { return config.saveProfile(this, p); }
-  saveProfileIndexers(id: string, indexers: Record<string, string[]>) { return config.saveProfileIndexers(this, id, indexers); }
-  getProfileIndexers(id: string) { return config.getProfileIndexers(this, id); }
   resolveProfileId(id: string | null | undefined) { return config.resolveProfileId(this, id); }
   getProfile(id: string) { return config.getProfile(this, id); }
   removeProfile(id: string) { return config.removeProfile(this, id); }
