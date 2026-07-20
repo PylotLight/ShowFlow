@@ -1,7 +1,7 @@
 // Bridges the app's public, authenticated /api/admin/updates/* routes to
 // two things that must never be exposed outside the pod:
-//   1. GitHub's Releases API (for release discovery + private-repo asset
-//      download — needs GITHUB_TOKEN, which must stay server-side)
+//   1. GitHub's Releases API (for release discovery + asset download — for
+//      public repos no auth is needed; set GITHUB_TOKEN for private repos)
 //   2. The supervisor's loopback-only admin API on 127.0.0.1:9090 (install /
 //      activate / status — no auth of its own by design)
 //
@@ -51,22 +51,25 @@ export interface ReleaseSummary {
   assets: { id: number; name: string; sizeBytes: number }[];
 }
 
-function githubConfig(): { token: string; repo: string } {
+function githubConfig(): { token?: string; repo: string } {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
-  if (!token || !repo) {
-    throw new Error("Release updates are not configured — set GITHUB_TOKEN and GITHUB_REPO environment variables.");
+  if (!repo) {
+    throw new Error("Release updates are not configured — set GITHUB_REPO environment variable.");
   }
-  return { token, repo };
+  return { token: token || undefined, repo };
 }
 
-function githubHeaders(token: string, accept = "application/vnd.github+json"): HeadersInit {
-  return {
-    Authorization: `Bearer ${token}`,
+function githubHeaders(token: string | undefined, accept = "application/vnd.github+json"): HeadersInit {
+  const headers: Record<string, string> = {
     Accept: accept,
     "User-Agent": "showflow-updates",
     "X-GitHub-Api-Version": "2022-11-28",
   };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 // ---- Release discovery -----------------------------------------------
@@ -74,7 +77,16 @@ function githubHeaders(token: string, accept = "application/vnd.github+json"): H
 const RELEASES_PER_PAGE = 100;
 
 export async function listReleases(currentVersion: string, page = 1): Promise<{ releases: ReleaseSummary[]; hasMore: boolean }> {
-  const { token, repo } = githubConfig();
+  let token: string | undefined;
+  let repo: string | undefined;
+  try {
+    const cfg = githubConfig();
+    token = cfg.token;
+    repo = cfg.repo;
+  } catch {
+    // GITHUB_REPO not set — local/dev deployment without GitHub integration
+    return { releases: [], hasMore: false };
+  }
   const res = await fetch(`${GITHUB_API}/repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`, {
     headers: githubHeaders(token),
   });
@@ -105,7 +117,7 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
 
 // ---- Download + local install (writes to /data/downloads/<releaseId>) -
 
-async function downloadAsset(assetId: number, token: string, repo: string): Promise<ArrayBuffer> {
+async function downloadAsset(assetId: number, token: string | undefined, repo: string): Promise<ArrayBuffer> {
   // The asset-by-id endpoint (not the asset's browser_download_url) is what
   // works for private repos — it accepts the same Bearer token as the rest
   // of the API. `Accept: application/octet-stream` tells GitHub to return

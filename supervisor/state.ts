@@ -27,7 +27,7 @@ export type Phase = "stable" | "quiescing" | "stopped" | "starting" | "restoring
  * supervisor knows its own version and can reject release manifests that
  * require a newer version than what's running.
  */
-export const SUPERVISOR_VERSION: string = "0.0.0";
+export const SUPERVISOR_VERSION: string = "0.1.0";
 
 export interface Manifest {
   releaseId: string;

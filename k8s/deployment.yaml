@@ -41,8 +41,8 @@ spec:
         fsGroup: 65532
       containers:
         - name: showflow
-          image: showflow:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/PylotLight/ShowFlow:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -51,6 +51,8 @@ spec:
               value: "production"
             - name: PORT
               value: "3000"
+            - name: GITHUB_REPO
+              value: "PylotLight/ShowFlow"
           volumeMounts:
             - name: data
               mountPath: /data

@@ -177,7 +177,7 @@ export function UpdatesPanel() {
         {!loading && releases.length === 0 && (
           <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
             <p className="font-mono text-xs text-muted-foreground">
-              No releases found. Check that GITHUB_TOKEN and GITHUB_REPO environment variables are set on the server.
+              No releases found. Set the GITHUB_REPO environment variable for update discovery.
             </p>
           </div>
         )}
