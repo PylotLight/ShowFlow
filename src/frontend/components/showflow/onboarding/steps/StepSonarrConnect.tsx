@@ -16,7 +16,6 @@ import {
   Loader2Icon,
   TvIcon,
   SearchIcon,
-  ImportIcon,
   EyeIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -30,6 +29,7 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
   const [fetching, setFetching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
+  const [sonarrTypes, setSonarrTypes] = React.useState<string[]>([]);
 
   const { sonarr } = data;
 
@@ -79,6 +79,18 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
     });
   };
 
+  const updateTypeMapping = (libraryTypeId: string, sonarrType: string) => {
+    setData({
+      sonarr: {
+        ...sonarr,
+        typeMapping: {
+          ...(sonarr.typeMapping || {}),
+          [libraryTypeId]: sonarrType,
+        },
+      },
+    });
+  };
+
   const startImport = async (mode: 'background' | 'watch') => {
     setImporting(true);
     try {
@@ -86,7 +98,7 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
       const res = await fetch("/api/sonarr/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seriesIds: ids, typeMapping: { default: data.libraryTypeId ?? 'standard' } }),
+        body: JSON.stringify({ seriesIds: ids, typeMapping: sonarr.typeMapping || {} }),
       });
       if (res.ok) {
         const result = await res.json();
@@ -111,6 +123,64 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
       </div>
     );
   }
+
+  const TypeMappingSection = () => {
+    if (!data.libraryTypes?.length) return null;
+
+    return (
+      <div className="mt-6 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold">Type Mapping</h3>
+          <p className="text-xs text-muted-foreground">
+            Map ShowFlow library types to Sonarr types
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {data.libraryTypes.map((libType: any) => {
+            const currentValue = sonarr.typeMapping?.[libType.id] || "";
+            return (
+              <div key={libType.id} className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 group">
+                <div>
+                  <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-1">
+                    SHOWFLOW LIBRARY TYPE
+                  </div>
+                  <div className="font-medium">{libType.name}</div>
+                </div>
+
+                <div className="flex justify-center text-signal opacity-70 group-hover:opacity-100 transition-opacity">
+                  <ArrowRightIcon className="size-4" />
+                </div>
+
+                <div>
+                  <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-1">
+                    SONARR TYPE
+                  </div>
+                  <Select 
+                    value={currentValue} 
+                    onValueChange={(value) => updateTypeMapping(libType.id, value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Sonarr type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sonarrTypes.length > 0 ? (
+                        sonarrTypes.map((t) => (
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="" disabled>No types available</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="py-4">
@@ -259,6 +329,8 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
               </button>
             ))}
           </div>
+
+          <TypeMappingSection />
 
           <div className="grid grid-cols-2 gap-3 mt-4">
             <button
