@@ -23,36 +23,19 @@ import {
   BookIcon,
   SparklesIcon,
   StarIcon,
+  InfoIcon,
 } from "lucide-react";
 import type { StepProps } from "../types";
 
-// Presets a folder can be tagged as. Each maps to its own library_types row
-// on Continue - see handleContinue below. Only one seeded quality profile
-// ('standard') exists today, so every preset points at it; a user can
-// later create additional profiles and repoint a library type at one from
-// Settings (design-brief-quality-profile-library-type-rework.md §0).
-const TYPE_OPTIONS = [
+const NAMING_OPTIONS = [
   { id: 'Standard', label: 'Standard', icon: BookIcon },
   { id: 'Anime', label: 'Anime', icon: SparklesIcon },
   { id: 'Movies', label: 'Movies', icon: StarIcon },
 ] as const;
 
-/**
- * Combined "Root Folders" + "Library Type" onboarding step
- * (design-brief-quality-profile-library-type-rework.md §9 addendum: these
- * used to be two separate steps - add all folders, then map each to a
- * type on the next screen - which meant no visual link between a folder
- * and its type until you got there. Now each folder row carries its own
- * type picker inline, and Continue creates one library_types row per
- * folder in a single pass.
- *
- * This step (and only this step, per that same decision) is what creates
- * library_types rows - there's no backend default-seeding fallback
- * anymore, so skipping this step via "Skip and set up manually" leaves
- * library_types empty until the user adds one from Settings.
- */
 export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
   const [browseOpen, setBrowseOpen] = React.useState(false);
+  const [browseTarget, setBrowseTarget] = React.useState<string | null>(null);
   const [currentPath, setCurrentPath] = React.useState("");
   const [dirs, setDirs] = React.useState<string[]>([]);
   const [parentPath, setParentPath] = React.useState<string | null>(null);
@@ -64,11 +47,22 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
   const [newFolderSaving, setNewFolderSaving] = React.useState(false);
   const [newFolderError, setNewFolderError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [typeByFolder, setTypeByFolder] = React.useState<Record<string, string>>({});
+  const [libraryNames, setLibraryNames] = React.useState<Record<string, string>>({});
+  const [namingByFolder, setNamingByFolder] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     if (!data.rootFolders.length) return;
-    setTypeByFolder(prev => {
+    setLibraryNames(prev => {
+      const next = { ...prev };
+      for (const folder of data.rootFolders) {
+        if (!next[folder]) {
+          const folderName = folder.split('/').pop() ?? 'My Library';
+          next[folder] = folderName;
+        }
+      }
+      return next;
+    });
+    setNamingByFolder(prev => {
       const next = { ...prev };
       for (const folder of data.rootFolders) {
         if (!next[folder]) next[folder] = 'Standard';
@@ -128,35 +122,43 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
     }
   }, [newFolderName, currentPath, loadDir]);
 
-  const addFolder = React.useCallback((folderPath: string) => {
-    if (!data.rootFolders.includes(folderPath)) {
+  const openBrowser = (existingFolder?: string) => {
+    setBrowseTarget(existingFolder ?? null);
+    setBrowseOpen(true);
+  };
+
+  const selectFolder = (folderPath: string) => {
+    if (browseTarget) {
+      setData({ rootFolders: data.rootFolders.map(f => f === browseTarget ? folderPath : f) });
+    } else if (!data.rootFolders.includes(folderPath)) {
       setData({ rootFolders: [...data.rootFolders, folderPath] });
     }
     setBrowseOpen(false);
+    setBrowseTarget(null);
     setCustomPath("");
-  }, [data.rootFolders, setData]);
+  };
 
   const removeFolder = React.useCallback((folderPath: string) => {
     setData({ rootFolders: data.rootFolders.filter(f => f !== folderPath) });
-    setTypeByFolder(prev => {
-      const next = { ...prev };
-      delete next[folderPath];
-      return next;
-    });
+    setLibraryNames(prev => { const n = { ...prev }; delete n[folderPath]; return n; });
+    setNamingByFolder(prev => { const n = { ...prev }; delete n[folderPath]; return n; });
   }, [data.rootFolders, setData]);
 
   const handleContinue = async () => {
     setSaving(true);
     try {
       for (const folder of data.rootFolders) {
-        const typeName = typeByFolder[folder] ?? 'Standard';
-        const slug = `lt_${typeName.toLowerCase()}_${folder.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')}`;
+        const libName = libraryNames[folder]?.trim() || (folder.split('/').pop() ?? 'Library');
+        const namingType = namingByFolder[folder] ?? 'Standard';
+        const slug = `lt_${libName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`;
+        const uniqueSlug = `${slug}_${folder.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')}`;
         await fetch("/api/library-types", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            id: slug,
-            name: typeName,
+            id: uniqueSlug,
+            name: libName,
+            namingConvention: namingType,
             rootFolderPath: folder,
             qualityProfileId: 'standard',
             isDefault: false,
@@ -171,56 +173,107 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
   };
 
   return (
-    <div className="py-4">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold tracking-tight mb-2">Root Folders &amp; Library Type</h2>
+    <div className="py-4 flex flex-col" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+      <div className="mb-6 shrink-0">
+        <h2 className="text-2xl font-bold tracking-tight mb-2">Create Libraries</h2>
         <p className="text-muted-foreground">
-          Choose where your media lives, and what kind of library each folder is.
-          This sets quality profiles and how each folder is organized.
+          Define your media libraries. Each library has a name, a folder on disk,
+          and a naming convention that controls how files are organised.
         </p>
       </div>
 
       {data.rootFolders.length > 0 && (
-        <div className="space-y-2 mb-6">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 mb-4 -mx-1 px-1">
           {data.rootFolders.map(folder => {
-            const currentType = typeByFolder[folder] || 'Standard';
+            const libName = libraryNames[folder] ?? (folder.split('/').pop() ?? '');
+            const namingType = namingByFolder[folder] ?? 'Standard';
             return (
               <div
                 key={folder}
-                className="p-4 rounded-xl border bg-white/[0.02] border-white/10 space-y-3"
+                className="p-5 rounded-xl border bg-white/[0.02] border-white/10 space-y-4"
               >
+                {/* Library name + delete */}
                 <div className="flex items-center gap-3">
-                  <FolderIcon className="size-4 shrink-0 text-signal" />
-                  <span className="flex-1 text-sm font-mono truncate">{folder}</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50 mb-1.5 block">
+                      Library Name
+                    </label>
+                    <Input
+                      value={libName}
+                      onChange={e => setLibraryNames(prev => ({ ...prev, [folder]: e.target.value }))}
+                      placeholder="e.g. TV Shows, Anime, Movies"
+                      className="font-medium text-sm"
+                    />
+                  </div>
                   <Button
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => removeFolder(folder)}
-                    className="text-muted-foreground/50 hover:text-red-400 shrink-0"
+                    className="text-muted-foreground/50 hover:text-red-400 shrink-0 mt-5"
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
                 </div>
-                <div className="flex gap-1.5 pl-7">
-                  {TYPE_OPTIONS.map(opt => {
-                    const isActive = currentType === opt.id;
-                    const OptIcon = opt.icon;
-                    return (
-                      <button
-                        key={opt.id}
-                        onClick={() => setTypeByFolder(prev => ({ ...prev, [folder]: opt.id }))}
-                        className={cn(
-                          "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
-                          isActive
-                            ? "bg-signal/10 text-signal ring-1 ring-signal/30"
-                            : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
-                        )}
-                      >
-                        <OptIcon className="size-3" />
-                        {opt.label}
-                      </button>
-                    );
-                  })}
+
+                {/* Root folder */}
+                <div>
+                  <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50 mb-1.5 block">
+                    Root Folder
+                  </label>
+                  <button
+                    onClick={() => openBrowser(folder)}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg bg-black/30 border border-white/10 hover:border-white/20 transition-colors text-left"
+                  >
+                    <FolderIcon className="size-4 shrink-0 text-signal" />
+                    <span className="flex-1 text-sm font-mono truncate text-muted-foreground/80">{folder}</span>
+                    <ChevronRightIcon className="size-3.5 text-muted-foreground/40 shrink-0" />
+                  </button>
+                </div>
+
+                {/* Naming convention */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50">
+                      Naming Convention
+                    </label>
+                    <span className="text-[10px] text-muted-foreground/30">(can be changed later)</span>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {NAMING_OPTIONS.map(opt => {
+                      const isActive = namingType === opt.id;
+                      const OptIcon = opt.icon;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => setNamingByFolder(prev => ({ ...prev, [folder]: opt.id }))}
+                          className={cn(
+                            "flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-all duration-200",
+                            isActive
+                              ? "bg-signal/10 text-signal ring-1 ring-signal/30"
+                              : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
+                          )}
+                        >
+                          <OptIcon className="size-3.5" />
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/30 mt-1.5">
+                    Controls episode/file naming format per {namingType.toLowerCase()} standard. Configured per-series in Sonarr.
+                  </p>
+                </div>
+
+                {/* Quality profile */}
+                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                  <InfoIcon className="size-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground/70">Quality Profile: Standard (default)</p>
+                    <p className="text-[10px] text-muted-foreground/30 mt-0.5">
+                      Controls resolution &amp; file format preferences. Additional profiles
+                      can be created and assigned in Settings later.
+                    </p>
+                  </div>
                 </div>
               </div>
             );
@@ -228,11 +281,12 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
         </div>
       )}
 
+      <div className="shrink-0">
       <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
         <DialogTrigger asChild>
           <Button variant="outline" className="gap-2 w-full h-12 rounded-xl border-dashed border-white/20">
             <PlusIcon className="size-4" />
-            {data.rootFolders.length === 0 ? "Add a root folder" : "Add another folder"}
+            {data.rootFolders.length === 0 ? "Add a library folder" : "Add another library"}
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-xl p-0 max-h-[90vh] overflow-hidden">
@@ -241,13 +295,11 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
           </DialogHeader>
 
           <div className="px-6 py-4 space-y-4 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(90vh - 140px)' }}>
-            {/* Path */}
             <div className="flex items-center gap-2 p-3 rounded-lg bg-white/[0.03] border border-white/10 font-mono text-xs text-muted-foreground">
               <HardDriveIcon className="size-3.5 shrink-0" />
               <span className="truncate">{currentPath}</span>
             </div>
 
-            {/* Custom path input */}
             <div className="flex gap-2">
               <Input
                 value={customPath}
@@ -261,7 +313,6 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
               </Button>
             </div>
 
-            {/* Directory listing - strong horizontal + vertical control */}
             <div className="flex-1 min-h-0 border border-white/10 rounded-xl overflow-hidden bg-black/30">
               <div className="h-full overflow-auto space-y-0.5 overflow-x-hidden">
                 {loading ? (
@@ -302,10 +353,8 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
               </div>
             </div>
 
-            {/* Footer actions */}
             <div className="flex items-center gap-2 pt-2 flex-shrink-0">
               {newFolderOpen ? (
-                // ... your new folder block unchanged ...
                 <div className="flex items-center gap-2 flex-1 p-1.5 rounded-lg border border-white/10 bg-white/[0.02]">
                   <Input
                     value={newFolderName}
@@ -346,7 +395,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
               <Button
                 variant="glass"
                 className="ml-auto gap-2 h-10 rounded-xl"
-                onClick={() => addFolder(currentPath)}
+                onClick={() => selectFolder(currentPath)}
               >
                 <FolderIcon className="size-4" />
                 Select this folder
@@ -356,11 +405,11 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
         </DialogContent>
       </Dialog>
 
-      <div className="mt-8 flex items-center justify-between">
+      <div className="mt-6 flex items-center justify-between shrink-0">
         <div>
           {data.rootFolders.length === 0 && (
             <p className="text-xs text-muted-foreground/50">
-              You need at least one root folder to continue
+              Add at least one library to continue
             </p>
           )}
         </div>
@@ -373,6 +422,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
           {saving ? "Saving..." : "Next step"}
           <ArrowRightIcon className="size-4" />
         </Button>
+      </div>
       </div>
     </div>
   );

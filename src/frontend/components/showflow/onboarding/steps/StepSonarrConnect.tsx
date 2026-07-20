@@ -128,40 +128,29 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
     if (!data.libraryTypes?.length) return null;
 
     return (
-      <div className="mt-6 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
-        <div className="mb-4">
+      <div className="mt-8 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center gap-2 mb-4">
           <h3 className="text-sm font-semibold">Type Mapping</h3>
-          <p className="text-xs text-muted-foreground">
-            Map ShowFlow library types to Sonarr types
-          </p>
+          <span className="text-xs text-muted-foreground">— Map your library types to Sonarr</span>
         </div>
 
-        <div className="space-y-4">
+        <div>
           {data.libraryTypes.map((libType: any) => {
             const currentValue = sonarr.typeMapping?.[libType.id] || "";
             return (
-              <div key={libType.id} className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 group">
-                <div>
-                  <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-1">
-                    SHOWFLOW LIBRARY TYPE
-                  </div>
-                  <div className="font-medium">{libType.name}</div>
-                </div>
+              <div key={libType.id} className="grid grid-cols-[auto_1fr_auto_1fr] items-center gap-3 py-3 border-t border-white/10 first:border-t-0">
+                <div className="font-mono text-xs text-muted-foreground">SHOWFLOW</div>
+                <div className="font-medium">{libType.name}</div>
 
-                <div className="flex justify-center text-signal opacity-70 group-hover:opacity-100 transition-opacity">
-                  <ArrowRightIcon className="size-4" />
-                </div>
+                <div className="text-signal">→</div>
 
                 <div>
-                  <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-1">
-                    SONARR TYPE
-                  </div>
                   <Select 
                     value={currentValue} 
                     onValueChange={(value) => updateTypeMapping(libType.id, value)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select Sonarr type..." />
+                      <SelectValue placeholder="Choose Sonarr type" />
                     </SelectTrigger>
                     <SelectContent>
                       {sonarrTypes.length > 0 ? (

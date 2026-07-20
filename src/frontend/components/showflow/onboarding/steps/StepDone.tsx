@@ -5,15 +5,30 @@ import {
   SparklesIcon,
   TvIcon,
   LibraryIcon,
-  SettingsIcon,
 } from "lucide-react";
 import type { StepProps } from "../types";
 
 export function StepDone({ data, onNext }: StepProps) {
+  const [libraryCount, setLibraryCount] = React.useState<number | null>(null);
+  const [typeNames, setTypeNames] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    fetch("/api/shows")
+      .then(r => r.json())
+      .then(shows => setLibraryCount(Array.isArray(shows) ? shows.length : 0))
+      .catch(() => setLibraryCount(0));
+    fetch("/api/library-types")
+      .then(r => r.json())
+      .then(types => setTypeNames(Array.isArray(types) ? types.map((t: any) => t.name) : []))
+      .catch(() => setTypeNames([]));
+  }, []);
+
+  const foldersLabel = data.rootFolders.length === 1 ? "folder" : "folders";
+  const typesLabel = typeNames.length > 0 ? typeNames.join(", ") : "...";
+
   const summary = [
-    { icon: LibraryIcon, label: 'Root folders', value: data.rootFolders.length.toString() },
-    { icon: SettingsIcon, label: 'Library type', value: data.libraryTypeId ? 'Configured' : 'Default' },
-    { icon: TvIcon, label: 'Sonarr series', value: data.sonarr.series.length > 0 ? `${data.sonarr.series.length} series` : 'Not connected' },
+    { icon: LibraryIcon, label: `Library`, value: `${typesLabel} (${data.rootFolders.length} ${foldersLabel})` },
+    { icon: TvIcon, label: 'Library series', value: libraryCount !== null ? `${libraryCount} series` : '...' },
   ];
 
   return (
