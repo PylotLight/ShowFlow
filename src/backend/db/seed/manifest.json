@@ -1,0 +1,46 @@
+{
+  "qualities": [
+    { "id": "q_sdtv", "name": "SDTV", "rank": 1 },
+    { "id": "q_dvd", "name": "DVD", "rank": 2 },
+    { "id": "q_480p", "name": "480p", "rank": 10 },
+    { "id": "q_webrip_480p", "name": "WEBRip-480p", "rank": 11 },
+    { "id": "q_webdl_480p", "name": "WEBDL-480p", "rank": 12 },
+    { "id": "q_720p", "name": "720p", "rank": 20 },
+    { "id": "q_hdtv_720p", "name": "HDTV-720p", "rank": 21 },
+    { "id": "q_webrip_720p", "name": "WEBRip-720p", "rank": 22 },
+    { "id": "q_webdl_720p", "name": "WEBDL-720p", "rank": 23 },
+    { "id": "q_bluray_720p", "name": "Bluray-720p", "rank": 24 },
+    { "id": "q_1080p", "name": "1080p", "rank": 30 },
+    { "id": "q_hdtv_1080p", "name": "HDTV-1080p", "rank": 31 },
+    { "id": "q_webrip_1080p", "name": "WEBRip-1080p", "rank": 32 },
+    { "id": "q_webdl_1080p", "name": "WEBDL-1080p", "rank": 33 },
+    { "id": "q_bluray_1080p", "name": "Bluray-1080p", "rank": 34 },
+    { "id": "q_remux_1080p", "name": "Remux-1080p", "rank": 35 },
+    { "id": "q_2160p", "name": "2160p", "rank": 40 },
+    { "id": "q_hdtv_2160p", "name": "HDTV-2160p", "rank": 41 },
+    { "id": "q_webrip_2160p", "name": "WEBRip-2160p", "rank": 42 },
+    { "id": "q_webdl_2160p", "name": "WEBDL-2160p", "rank": 43 },
+    { "id": "q_bluray_2160p", "name": "Bluray-2160p", "rank": 44 },
+    { "id": "q_remux_2160p", "name": "Remux-2160p", "rank": 45 }
+  ],
+  "customFormats": [
+    { "id": "f_hdr", "name": "HDR", "regex": "HDR", "score": 50 },
+    { "id": "f_x265", "name": "x265", "regex": "x265", "score": 10 },
+    { "id": "f_hevc", "name": "HEVC", "regex": "HEVC", "score": 10 },
+    { "id": "f_h265", "name": "H265", "regex": "H265", "score": 10 }
+  ],
+  "qualityProfiles": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "bonusFormats": ["f_hdr", "f_x265", "f_h265"],
+      "allowedQualities": []
+    },
+    {
+      "id": "anime",
+      "name": "Anime",
+      "bonusFormats": ["f_x265", "f_hevc", "f_h265"],
+      "allowedQualities": []
+    }
+  ]
+}

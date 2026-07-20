@@ -8,6 +8,7 @@ dist
 # bun build outputs
 chunk-*.js.map
 manifest.json
+!src/backend/db/seed/manifest.json
 server.js.map
 /showflow
 main.js
