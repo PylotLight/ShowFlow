@@ -25,7 +25,6 @@ interface Profile {
   id: string;
   name: string;
   cutoff_quality_id: string | null;
-  indexers?: string[];
 }
 
 interface ProfileFormat extends CustomFormat {
@@ -82,15 +81,6 @@ const SCORE_PRESETS = [
   { label: "Slightly avoid", value: -10 },
   { label: "Avoid", value: -50 },
   { label: "Strongly avoid", value: -100 },
-];
-
-const ALL_INDEXERS: { id: string; name: string }[] = [
-  { id: 'prowlarr', name: 'Prowlarr' },
-  { id: 'nyaa', name: 'Nyaa.si' },
-  { id: 'subsplease', name: 'SubsPlease' },
-  { id: 'tpb', name: 'The Pirate Bay' },
-  { id: 'knaben', name: 'Knaben' },
-  { id: 'rarbg', name: 'TheRARBG' },
 ];
 
 const PROFILE_NAME_PRESETS = ["Any", "SD", "HD - 720p", "HD - 1080p", "Ultra HD - 2160p", "Anime"];
@@ -620,54 +610,6 @@ function ProfileQualitiesEditor({ profileId, qualities }: { profileId: string; q
   );
 }
 
-function ProfileIndexersEditor({ profileId, indexers }: { profileId: string; indexers?: string[] }) {
-  const [current, setCurrent] = React.useState<string[]>(indexers ?? []);
-  const [saving, setSaving] = React.useState(false);
-
-  function toggle(id: string) {
-    const next = current.includes(id) ? current.filter(i => i !== id) : [...current, id];
-    setCurrent(next);
-    setSaving(true);
-    fetch(`/api/profiles/${profileId}/indexers`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next),
-    }).finally(() => setSaving(false));
-  }
-
-  return (
-    <div className="space-y-3">
-      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-        Indexers
-        {current.length === 0 && (
-          <span className="text-muted-foreground/60 font-normal">(all enabled indexers will be used)</span>
-        )}
-      </span>
-      <div className="flex flex-wrap gap-1.5">
-        {ALL_INDEXERS.map(ix => {
-          const checked = current.includes(ix.id);
-          return (
-            <button
-              key={ix.id}
-              type="button"
-              onClick={() => toggle(ix.id)}
-              disabled={saving}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-xs transition-colors disabled:opacity-50",
-                checked
-                  ? "bg-signal/15 border-signal/30 text-signal"
-                  : "bg-white/[0.04] hover:bg-white/[0.08] border-white/5 text-foreground/70",
-              )}
-            >
-              {ix.name}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ProfileRow({ profile, qualities, allFormats, onChange }: {
   profile: Profile;
   qualities: Quality[];
@@ -725,7 +667,6 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
         <div className="px-4 pb-4 space-y-3">
           <ProfileQualitiesEditor profileId={profile.id} qualities={qualities} />
           <ProfileFormatsEditor profileId={profile.id} allFormats={allFormats} />
-          <ProfileIndexersEditor profileId={profile.id} indexers={profile.indexers} />
         </div>
       )}
     </div>

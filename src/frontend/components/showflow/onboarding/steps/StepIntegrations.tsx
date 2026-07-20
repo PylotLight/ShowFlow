@@ -843,7 +843,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               </div>
               ) : (
                 <p className="text-xs text-muted-foreground/40 italic">
-                  Complete the Library & Quality step first
+                  Complete the Root Folders & Library Type step first
                 </p>
               )}
             </div>

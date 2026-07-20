@@ -122,18 +122,6 @@ export function mediaManagementRoutes() {
       },
     },
 
-    "/api/profiles/:id/indexers": {
-      async PUT(req: Request & { params: Record<string, string> }) {
-        try {
-          const body = await req.json();
-          db.saveProfileIndexers(req.params.id!, body);
-          return json({ ok: true });
-        } catch (err) {
-          return errorResponse(err);
-        }
-      },
-    },
-
     "/api/custom-formats": {
       async GET() {
         try {

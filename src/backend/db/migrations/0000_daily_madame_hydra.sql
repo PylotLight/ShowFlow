@@ -104,7 +104,6 @@ CREATE TABLE `quality_profiles` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`cutoff_quality_id` text,
-	`indexers` text DEFAULT '{}',
 	FOREIGN KEY (`cutoff_quality_id`) REFERENCES `quality_definitions`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
