@@ -2,7 +2,7 @@ import * as React from "react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
-import { ShowProfileManager } from "./ShowProfileManager";
+import { LibraryTypeManager } from "./LibraryTypeManager";
 import { UpdatesPanel } from "./UpdatesPanel";
 import { FieldRow } from "./SettingsShared";
 
@@ -23,10 +23,10 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
     <>
       <GlassPanel className="p-6 space-y-5">
         <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Profiles &amp; Root Folders</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Each profile maps to a root folder. Shows assigned to a profile are organized under its root folder.</p>
+          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Libraries</h3>
+          <p className="text-muted-foreground text-xs mt-0.5">Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates.</p>
         </div>
-        <ShowProfileManager />
+        <LibraryTypeManager />
       </GlassPanel>
 
       <GlassPanel className="p-6 space-y-5">

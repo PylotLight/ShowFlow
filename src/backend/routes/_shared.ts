@@ -68,6 +68,18 @@ export function loadConfig(): Config {
     return loadConfig();
   }
 
+  // Backfill: pre-v0.x the watch dir was stored under the orphaned "importFolder"
+  // key. Fold it into blackhole.watchFolder so existing installs keep their setting.
+  if (configObj.importFolder && typeof configObj.importFolder === 'string' && configObj.importFolder.trim()) {
+    const dc = (configObj.downloadClient && typeof configObj.downloadClient === 'object' ? configObj.downloadClient : {});
+    const bh = (dc.blackhole && typeof dc.blackhole === 'object' ? dc.blackhole : {});
+    if (!bh.watchFolder) {
+      bh.watchFolder = configObj.importFolder.trim();
+      dc.blackhole = bh;
+      configObj.downloadClient = dc;
+    }
+  }
+
   cachedConfig = ConfigSchema.parse(configObj);
   cachedConfigTime = now;
   return cachedConfig;

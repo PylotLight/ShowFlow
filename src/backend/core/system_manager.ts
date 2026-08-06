@@ -4,23 +4,32 @@ import { db, type Config } from '../db';
 
 export class SystemManager {
   private config: Config;
+  private getConfig: () => Config;
   private watcher: DownloadManager | null = null;
 
-  constructor(config: Config) {
-    this.config = config;
+  constructor(getConfig: () => Config) {
+    this.getConfig = getConfig;
+    this.config = getConfig();
+  }
+
+  private refreshConfig() {
+    this.config = this.getConfig();
   }
 
   async scan() {
+    this.refreshConfig();
     const scanner = new LibraryScanner(this.config);
     return await scanner.scan();
   }
 
   async scanShow(showId: string) {
+    this.refreshConfig();
     const scanner = new LibraryScanner(this.config);
     await scanner.scanShow(showId);
   }
 
   async startWatcher() {
+    this.refreshConfig();
     if (this.watcher) {
       throw new Error('Watcher is already running.');
     }
@@ -51,6 +60,7 @@ export class SystemManager {
   }
 
   async rescanWatcher() {
+    this.refreshConfig();
     if (!this.watcher) {
       throw new Error('Watcher is not running.');
     }

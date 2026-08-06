@@ -196,7 +196,7 @@ function wrapRouteHandlers(defs: Record<string, any>): any {
 
 const config = loadConfig();
 const scheduler = new Scheduler(config);
-const systemManager = new SystemManager(config);
+const systemManager = new SystemManager(() => loadConfig());
 
 // Merge lazy routes (which need scheduler/systemManager) into routeDefinitions
 Object.assign(routeDefinitions, lazyRoutes());

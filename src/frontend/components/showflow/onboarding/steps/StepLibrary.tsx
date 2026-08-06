@@ -47,6 +47,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
   const [newFolderSaving, setNewFolderSaving] = React.useState(false);
   const [newFolderError, setNewFolderError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [libraryNames, setLibraryNames] = React.useState<Record<string, string>>({});
   const [namingByFolder, setNamingByFolder] = React.useState<Record<string, string>>({});
 
@@ -146,27 +147,45 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
 
   const handleContinue = async () => {
     setSaving(true);
+    setSaveError(null);
+    const failures: string[] = [];
     try {
-      for (const folder of data.rootFolders) {
+      for (let i = 0; i < data.rootFolders.length; i++) {
+        const folder = data.rootFolders[i]!;
         const libName = libraryNames[folder]?.trim() || (folder.split('/').pop() ?? 'Library');
         const namingType = namingByFolder[folder] ?? 'Standard';
         const slug = `lt_${libName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`;
         const uniqueSlug = `${slug}_${folder.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')}`;
-        await fetch("/api/library-types", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: uniqueSlug,
-            name: libName,
-            namingConvention: namingType,
-            rootFolderPath: folder,
-            qualityProfileId: 'standard',
-            isDefault: false,
-          }),
-        });
+        try {
+          const res = await fetch("/api/library-types", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: uniqueSlug,
+              name: libName,
+              namingConvention: namingType,
+              rootFolderPath: folder,
+              qualityProfileId: 'standard',
+              // First library created becomes the default so grabber/resolve
+              // logic has something to fall back to (see resolveLibraryTypeId).
+              isDefault: i === 0,
+            }),
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            failures.push(`"${libName}": ${body.error || res.statusText}`);
+          }
+        } catch (err) {
+          failures.push(`"${libName}": ${err instanceof Error ? err.message : 'network error'}`);
+        }
       }
+
+      if (failures.length > 0) {
+        setSaveError(`Couldn't save ${failures.length} librar${failures.length === 1 ? 'y' : 'ies'}: ${failures.join('; ')}`);
+        return;
+      }
+
       onNext();
-    } catch {
     } finally {
       setSaving(false);
     }
@@ -404,6 +423,12 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {saveError && (
+        <div className="mt-4 shrink-0 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-xs text-red-400">
+          {saveError}
+        </div>
+      )}
 
       <div className="mt-6 flex items-center justify-between shrink-0">
         <div>

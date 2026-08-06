@@ -6,6 +6,7 @@ import * as React from "react";
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
+import { formatAirtime } from "@frontend/lib/airtime";
 import { cn } from "@frontend/lib/utils";
 
 interface UpcomingEpisode {
@@ -323,6 +324,11 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                               <span className="font-mono text-[9px] text-signal/80 shrink-0">
                                 S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                               </span>
+                              {formatAirtime(ep.airDate) && (
+                                <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">
+                                  {formatAirtime(ep.airDate)}
+                                </span>
+                              )}
                             </div>
                           </button>
                         ))}
@@ -382,6 +388,9 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                         {ep.showTitle}
                                       </span>
                                       <EpisodeChip season={ep.season} episode={ep.episode} state={available ? "tracked" : "airing"} className="shrink-0 text-[9px]" />
+                                      {formatAirtime(ep.airDate) && (
+                                        <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">{formatAirtime(ep.airDate)}</span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">
                                       {ep.episodeTitle && (

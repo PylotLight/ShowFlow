@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'bun';
 import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
@@ -62,8 +63,22 @@ export class DatabaseManager {
     // `bunx drizzle-kit generate` after changing schema.ts to produce a new
     // migration, then just start the app - no separate `migrate` command
     // to remember to run.
+    //
+    // Two ways this process can be running, each needing a different path:
+    //   - Compiled binary (production/Docker): the Dockerfile copies
+    //     src/backend/db/migrations to /bootstrap/migrations, sitting
+    //     alongside the compiled `showflow` executable - so migrations
+    //     live next to process.execPath.
+    //   - Running from source (bun --hot src/backend/server.ts, i.e. `bun
+    //     run dev`): process.execPath points at the bun runtime itself
+    //     (e.g. /opt/homebrew/bin/bun), which has no migrations folder
+    //     next to it. Here migrations live next to *this source file*.
+    // Try both and use whichever actually has a migrations journal.
     const binaryDir = dirname(process.execPath);
-    migrate(this.drizz, { migrationsFolder: resolve(binaryDir, 'migrations') });
+    const sourceDir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [resolve(binaryDir, 'migrations'), resolve(sourceDir, 'migrations')];
+    const migrationsFolder = candidates.find(dir => existsSync(resolve(dir, 'meta/_journal.json'))) ?? resolve(binaryDir, 'migrations');
+    migrate(this.drizz, { migrationsFolder });
 
     seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
     migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);

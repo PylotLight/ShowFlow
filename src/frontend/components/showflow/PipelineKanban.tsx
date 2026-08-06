@@ -20,6 +20,7 @@ import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearch
 import { TraceDialog } from "@frontend/components/showflow/TraceDialog";
 import { DiagnoseDialog } from "@frontend/components/showflow/DiagnoseDialog";
 import { cn } from "@frontend/lib/utils";
+import { groupByShow } from "@frontend/lib/pipelineGrouping";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -244,9 +245,71 @@ function KanbanCard({
   );
 }
 
+// ── Grouped lane items ────────────────────────────────────────────────────
+
+function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbedKeys, onSearch, onGrab, onTrace, onDiagnose }: {
+  items: KanbanEpisode[];
+  expandedShows: Set<string>;
+  onToggleShow: (showId: string) => void;
+  grabbing: string | null;
+  grabbedKeys: Set<string>;
+  onSearch: (ep: KanbanEpisode) => void;
+  onGrab: (ep: KanbanEpisode) => void;
+  onTrace: (ep: KanbanEpisode) => void;
+  onDiagnose: (ep: KanbanEpisode) => void;
+}) {
+  const groups = groupByShow(items);
+
+  return (
+    <div className="space-y-2">
+      {groups.map(group => {
+        const expanded = expandedShows.has(group.showId);
+        const count = group.items.length;
+        return (
+          <div key={group.showId}>
+            <button
+              type="button"
+              onClick={() => onToggleShow(group.showId)}
+              className="w-full flex items-center gap-2.5 rounded-lg border glass-panel p-2.5 text-left hover:border-white/15 hover:bg-white/[0.04] transition-all"
+            >
+              <PosterImage showId={group.showId} alt={group.showTitle} className="w-7 h-10 shrink-0 rounded" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="truncate text-xs font-semibold text-white/90">{group.showTitle}</p>
+                <p className="text-[10px] text-muted-foreground/70">
+                  {count} episode{count !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+                {expanded ? "−" : "+"}
+              </span>
+            </button>
+            {expanded && (
+              <div className="space-y-2 pl-2 mt-2">
+                {group.items.map((ep, i) => (
+                  <KanbanCard
+                    key={epKey(ep)}
+                    ep={ep}
+                    index={i}
+                    grabbing={grabbing === epKey(ep)}
+                    grabbed={grabbedKeys.has(epKey(ep))}
+                    onSearch={() => onSearch(ep)}
+                    onGrab={() => onGrab(ep)}
+                    onTrace={() => onTrace(ep)}
+                    onDiagnose={() => onDiagnose(ep)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Lane column ───────────────────────────────────────────────────────────
 
-function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, onSearch, onTrace, onDiagnose, onGrab }: {
+function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, onSearch, onTrace, onDiagnose, onGrab, expandedShows, onToggleShow }: {
   lane: KanbanLane;
   shows: ShowSummary[];
   onShowSelect: (show: ShowSummary | null) => void;
@@ -256,6 +319,8 @@ function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, on
   onTrace: (ep: KanbanEpisode) => void;
   onDiagnose: (ep: KanbanEpisode) => void;
   onGrab: (ep: KanbanEpisode) => void;
+  expandedShows: Set<string>;
+  onToggleShow: (showId: string) => void;
 }) {
   const Icon = LANE_ICONS[lane.stage] ?? LayersIcon;
   const color = LANE_COLORS[lane.stage] ?? "";
@@ -278,19 +343,17 @@ function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, on
             <p className="text-[10px]">Empty</p>
           </div>
         ) : (
-          lane.items.map((ep, i) => (
-            <KanbanCard
-              key={epKey(ep)}
-              ep={ep}
-              index={i}
-              grabbing={grabbing === epKey(ep)}
-              grabbed={grabbedKeys.has(epKey(ep))}
-              onSearch={() => onSearch(ep)}
-              onGrab={() => onGrab(ep)}
-              onTrace={() => onTrace(ep)}
-              onDiagnose={() => onDiagnose(ep)}
-            />
-          ))
+          <GroupedLaneItems
+            items={lane.items}
+            expandedShows={expandedShows}
+            onToggleShow={onToggleShow}
+            grabbing={grabbing}
+            grabbedKeys={grabbedKeys}
+            onSearch={onSearch}
+            onGrab={onGrab}
+            onTrace={onTrace}
+            onDiagnose={onDiagnose}
+          />
         )}
       </div>
     </div>
@@ -309,6 +372,7 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
   const [searchTarget, setSearchTarget] = React.useState<KanbanEpisode | null>(null);
   const [traceTarget, setTraceTarget] = React.useState<KanbanEpisode | null>(null);
   const [diagnoseTarget, setDiagnoseTarget] = React.useState<KanbanEpisode | null>(null);
+  const [expandedShows, setExpandedShows] = React.useState<Set<string>>(new Set());
 
   const load = React.useCallback(() => {
     Promise.all([
@@ -334,6 +398,15 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
 
   function findShow(showId: string) {
     return shows.find(s => s.id === showId);
+  }
+
+  function toggleShowGroup(showId: string) {
+    setExpandedShows(prev => {
+      const next = new Set(prev);
+      if (next.has(showId)) next.delete(showId);
+      else next.add(showId);
+      return next;
+    });
   }
 
   async function handleGrab(ep: KanbanEpisode) {
@@ -428,6 +501,8 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
                   onTrace={setTraceTarget}
                   onDiagnose={setDiagnoseTarget}
                   onGrab={handleGrab}
+                  expandedShows={expandedShows}
+                  onToggleShow={toggleShowGroup}
                 />
               </div>
             ))}
@@ -442,21 +517,17 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
                   <span className="text-xs font-semibold uppercase tracking-wider">{lane.label}</span>
                   <span className={cn("ml-auto font-mono text-[10px] opacity-60", LANE_COLORS[lane.stage])}>{lane.count}</span>
                 </div>
-                <div className="space-y-2">
-                  {lane.items.map((ep, i) => (
-                    <KanbanCard
-                      key={epKey(ep)}
-                      ep={ep}
-                      index={i}
-                      grabbing={grabbing === epKey(ep)}
-                      grabbed={grabbedKeys.has(epKey(ep))}
-                      onSearch={() => setSearchTarget(ep)}
-                      onGrab={() => handleGrab(ep)}
-                      onTrace={() => setTraceTarget(ep)}
-                      onDiagnose={() => setDiagnoseTarget(ep)}
-                    />
-                  ))}
-                </div>
+                <GroupedLaneItems
+                  items={lane.items}
+                  expandedShows={expandedShows}
+                  onToggleShow={toggleShowGroup}
+                  grabbing={grabbing}
+                  grabbedKeys={grabbedKeys}
+                  onSearch={setSearchTarget}
+                  onGrab={handleGrab}
+                  onTrace={setTraceTarget}
+                  onDiagnose={setDiagnoseTarget}
+                />
               </div>
             ))}
           </div>

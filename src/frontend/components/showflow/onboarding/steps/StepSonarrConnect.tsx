@@ -30,8 +30,19 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
   const [importing, setImporting] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
   const [sonarrTypes, setSonarrTypes] = React.useState<string[]>([]);
+  const [libraryTypes, setLibraryTypes] = React.useState<{ id: string; name: string; is_default?: boolean }[]>([]);
 
   const { sonarr } = data;
+
+  React.useEffect(() => {
+    fetch("/api/library-types").then(res => res.json()).then(setLibraryTypes).catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    if (!sonarr.series.length) return;
+    const types = [...new Set(sonarr.series.map(s => s.seriesType).filter(Boolean))];
+    setSonarrTypes(types);
+  }, [sonarr.series]);
 
   const saveConfig = async () => {
     const res = await fetch("/api/settings", {
@@ -125,7 +136,7 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
   }
 
   const TypeMappingSection = () => {
-    if (!data.libraryTypes?.length) return null;
+    if (!libraryTypes.length) return null;
 
     return (
       <div className="mt-8 p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
@@ -135,7 +146,7 @@ export function StepSonarrConnect({ data, setData, onNext, onSkip }: StepProps) 
         </div>
 
         <div>
-          {data.libraryTypes.map((libType: any) => {
+          {libraryTypes.map((libType: any) => {
             const currentValue = sonarr.typeMapping?.[libType.id] || "";
             return (
               <div key={libType.id} className="grid grid-cols-[auto_1fr_auto_1fr] items-center gap-3 py-3 border-t border-white/10 first:border-t-0">

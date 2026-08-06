@@ -103,8 +103,16 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
         </div>
         <FieldRow label="Watch Folder" description="Directory where download clients place completed files">
           <FolderPicker
-            value={config.importFolder || ""}
-            onChange={v => saveConfig({ importFolder: v })}
+            value={config.downloadClient?.blackhole?.watchFolder || ""}
+            onChange={v => saveConfig({
+              downloadClient: {
+                ...(config.downloadClient || {}),
+                blackhole: {
+                  ...(config.downloadClient?.blackhole || {}),
+                  watchFolder: v || undefined,
+                },
+              },
+            })}
           />
         </FieldRow>
         <FieldRow label="Season Folder Format" description="Template for season subdirectories">

@@ -193,6 +193,10 @@ button[data-glass]:hover::before {
   animation: fadeIn 0.35s ease-out both;
 }
 
+@utility animate-fade-out {
+  animation: fadeIn 0.2s ease-in reverse both;
+}
+
 @utility animate-page-enter {
   animation: slideUp 0.25s ease-out both;
 }
