@@ -6,6 +6,7 @@ import { Oracle } from '../../parser/oracle';
 import { db } from '../../db';
 import type { ProviderType } from '../../providers/factory';
 import { debugLog } from '../debug';
+import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
@@ -208,6 +209,7 @@ export class BlackholeClient implements DownloadClient {
         BlackholeClient.mem('before handle: ' + filename.slice(0, 40));
         await this.handleFile(folder, filename);
         BlackholeClient.mem('after handle: ' + filename.slice(0, 40));
+        maybeForcedGc();
       }
     } finally {
       this.queueWorkerRunning = false;
@@ -375,6 +377,7 @@ export class BlackholeClient implements DownloadClient {
 
       const hash = await this.hashFile(fullPath);
       BlackholeClient.mem('after hash ' + filename.slice(0, 30));
+      maybeForcedGc();
       if (db.isProcessed(hash)) {
         if (opts?.force) {
           console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
@@ -388,6 +391,7 @@ export class BlackholeClient implements DownloadClient {
 
       const result = await this.oracle.resolve(filename, this.config.defaultProvider as ProviderType, this.config);
       BlackholeClient.mem('after oracle ' + filename.slice(0, 30));
+      maybeForcedGc();
 
       debugLog('Oracle resolve result', { filename, result });
       if (!result) {
@@ -610,6 +614,7 @@ export class BlackholeClient implements DownloadClient {
       const movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
       if (movedTo === null) return;
       BlackholeClient.mem('after move ' + filename.slice(0, 30));
+      maybeForcedGc();
 
       console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
       debugLog('File moved successfully', { filename, movedTo });
@@ -740,7 +745,34 @@ export class BlackholeClient implements DownloadClient {
       await rename(src, finalDest);
     } catch (err: any) {
       if (err?.code === 'EXDEV') {
-        await Bun.write(finalDest, Bun.file(src));
+        // Cross-device copy — done in bounded slices so peak memory never
+        // scales with file size, regardless of how the runtime streams
+        // Bun.file()/Bun.write (macOS may stream but the Linux build may not).
+        const srcFile = Bun.file(src);
+        const copyChunk = 16 * 1024 * 1024; // 16MiB
+        const { createWriteStream } = await import('node:fs');
+        const ws = createWriteStream(finalDest, { flags: 'w' });
+        try {
+          for (let off = 0; off < srcFile.size; off += copyChunk) {
+            const end = Math.min(off + copyChunk, srcFile.size);
+            const buf = await srcFile.slice(off, end).arrayBuffer();
+            const chunk = new Uint8Array(buf);
+            if (!ws.write(chunk)) {
+              await new Promise<void>((res, rej) => {
+                ws.once('drain', res);
+                ws.once('error', rej);
+              });
+            }
+          }
+          await new Promise<void>((res, rej) => {
+            ws.end();
+            ws.once('finish', res);
+            ws.once('error', rej);
+          });
+        } catch (e) {
+          ws.destroy();
+          throw e;
+        }
         await unlink(src);
       } else {
         throw err;

@@ -2,6 +2,7 @@ import { db, type Config, JellyfinConfigSchema } from '../db';
 import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
+import { maybeForcedGc } from './memory_guard';
 import { runBackup } from "./backup";
 import { GrabberService } from './grabber_service';
 import { JellyfinSync } from '../providers/jellyfin/sync';
@@ -178,6 +179,7 @@ const TASKS: Record<TaskName, TaskDefinition> = {
 
 export class Scheduler {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private gcHandle: ReturnType<typeof setInterval> | null = null;
 
   constructor(private config: Config) {}
 
@@ -322,6 +324,7 @@ export class Scheduler {
     // (60 seconds), not synchronously at boot, so heavy tasks (scan-library,
     // sync-shows, backup, etc.) don't block startup.
     this.intervalHandle = setInterval(() => this.runPendingTasks(), 60 * 1000);
+    this.gcHandle = setInterval(() => maybeForcedGc(), 15 * 1000);
   }
 
   /**
@@ -334,6 +337,10 @@ export class Scheduler {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
+    }
+    if (this.gcHandle) {
+      clearInterval(this.gcHandle);
+      this.gcHandle = null;
     }
   }
 }
