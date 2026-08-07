@@ -655,9 +655,13 @@ export class BlackholeClient implements DownloadClient {
   }
 
   private async hashFile(filePath: string): Promise<string> {
-    const buffer = await Bun.file(filePath).arrayBuffer();
     const hasher = new Bun.CryptoHasher('sha256');
-    hasher.update(new Uint8Array(buffer));
+    // Stream the file in chunks rather than arrayBuffer()ing it — release
+    // files are often multi-GB (1080p MKVs), and loading the whole thing
+    // into memory OOMs the container (1Gi limit).
+    for await (const chunk of Bun.file(filePath).stream()) {
+      hasher.update(chunk);
+    }
     return hasher.digest('hex');
   }
 
