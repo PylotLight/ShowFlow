@@ -192,14 +192,23 @@ export class Oracle {
 
     const provider = ProviderFactory.getProvider(preferredProvider, config);
     const strategies = this.buildSearchStrategies(parsed.show);
-    const searchResults = await this.searchProvider(provider, strategies);
+
+    let searchResults: Show[] = [];
+    let resolvedProvider = provider;
+    let resolvedProviderType = preferredProvider;
+
+    if (!provider.isConfigured()) {
+      debugLog('Skipping provider search: provider is not configured (missing API key)', {
+        provider: preferredProvider,
+      });
+    } else {
+      searchResults = await this.searchProvider(provider, strategies);
+    }
 
     this.lastSearchResults = searchResults;
     this.lastProviderAttempts = [];
 
     let matchedShow = this.matchProviderShow(parsed.show, searchResults);
-    let resolvedProvider = provider;
-    let resolvedProviderType = preferredProvider;
 
     this.lastProviderAttempts.push({
       provider: preferredProvider,
@@ -224,6 +233,12 @@ export class Oracle {
 
       for (const fallbackType of remainingProviders) {
         const fallbackProvider = ProviderFactory.getProvider(fallbackType, config);
+        if (!fallbackProvider.isConfigured()) {
+          debugLog('Skipping fallback provider: not configured (missing API key)', {
+            provider: fallbackType,
+          });
+          continue;
+        }
         const fallbackResults = await this.searchProvider(fallbackProvider, strategies);
 
         this.lastProviderAttempts.push({

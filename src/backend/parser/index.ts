@@ -16,11 +16,12 @@ export class FilenameParser {
 
   /**
    * Square and curly brackets are normally release groups, hashes, or tags.
-   * Parentheses are retained initially because they can contain part of a
-   * real series title; resolution tags inside them are stripped by noise
-   * cleanup instead.
+   * Parentheses are also treated as release-group tags — they frequently
+   * contain release groups or resolution tags that shouldn't leak into the
+   * search title. Season/episode data is captured by the patterns below
+   * before this cleanup, not from bracketed content.
    */
-  private static readonly BRACKETED_TAG_PATTERN = /\[[^\]]*]|\{[^}]*}/g;
+  private static readonly BRACKETED_TAG_PATTERN = /\[[^\]\[]*]|\{[^}{]*}|\([^()]*\)/g;
 
   /**
    * Order matters. Explicit season/episode formats must be resolved before
@@ -38,6 +39,11 @@ export class FilenameParser {
 
     // Show Season 2 Ep 3, Show Season 2 E03
     /^(?<show>.+?)[. _-]+Season[. _-]+(?<season>\d{1,2})[. _-]+E(?:p(?:isode)?)?[. _-]*(?<episode>\d{1,3}(?:[. _,-]+\d{1,3})*)\b/i,
+
+    // Season without an explicit 'E' marker:
+    // "Youjo Senki S2 - 05", "Show S2 05", "Show.S2.05",
+    // And also the E-prefixed variant, which is tried first by the SxxExx pattern.
+    /^(?<show>.+?)[. _-]+S(?<season>\d{1,2})[. _-]+(?:E(?:p(?:isode)?)?[. _-]*)?(?<episode>\d{1,3}(?:[. _,-]+\d{1,3})*)\b/i,
   ];
 
   parse(filename: string): ParsedFilename | null {
@@ -61,8 +67,10 @@ export class FilenameParser {
       };
     }
 
+    // Single absolute episode number (no season marker), possibly preceded
+    // by an E prefix: "One Piece E1050", "Show.E1050"
     const absoluteMatch = normalized.match(
-      /^(?<show>.+?)(?:[. _-]+E)?[. _-]+(?<absolute>\d{1,4}(?:[. _,-]+\d{1,4})*)\b/i
+      /^(?<show>.+?)[. _-]*(?:^|[. _-])E?(?<absolute>\d{1,4}(?:[. _,-]+\d{1,4})*)\b/i
     );
 
     if (!absoluteMatch?.groups) return null;

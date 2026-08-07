@@ -96,4 +96,30 @@ describe('FilenameParser', () => {
     expect(result?.season).toBe(1);
     expect(result?.episodes).toContain(5);
   });
+
+  test('parses "Season 2 style S2 - 05" anime release without E marker', () => {
+    const result = parser.parse('[SubsPlease] Youjo Senki S2 - 05 (1080p) [CAA6CA3D].mkv');
+    expect(result?.show).toBe('Youjo Senki');
+    expect(result?.season).toBe(2);
+    expect(result?.episodes).toContain(5);
+  });
+
+  test('parses braced S2 anime release without E marker', () => {
+    const result = parser.parse('[ASW] Youjo Senki S2 - 04 [1080p HEVC][12B04780].mkv');
+    expect(result?.show).toBe('Youjo Senki');
+    expect(result?.season).toBe(2);
+    expect(result?.episodes).toContain(4);
+  });
+
+  test('parses absolute E1050 anime release', () => {
+    const result = parser.parse('One.Piece.E1050.mkv');
+    expect(result?.show).toBe('One Piece');
+    expect(result?.absoluteNumbers).toContain(1050);
+  });
+
+  test('parses absolute number without E prefix', () => {
+    const result = parser.parse('Some Anime 12.mkv');
+    expect(result?.show).toBe('Some Anime');
+    expect(result?.absoluteNumbers).toContain(12);
+  });
 });

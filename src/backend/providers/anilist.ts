@@ -6,6 +6,7 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
   name = 'anilist';
   protected apiBaseUrl = 'https://graphql.anilist.co';
   override apiKey = ''; // AniList GraphQL doesn't require a key for public search
+  protected override requiresApiKey = false;
 
   protected override async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     // AniList uses GraphQL: the query lives in the body, endpoint is always

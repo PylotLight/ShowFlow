@@ -10,8 +10,17 @@ export abstract class BaseProvider {
   abstract getEpisodes(showId: string, seasonNumber?: number): Promise<any[]>;
   protected abstract readonly apiBaseUrl: string;
   protected apiKey: string = '';
+  protected requiresApiKey = true;
 
   constructor(protected config: any = {}) {}
+
+  /** Whether this provider has the credentials needed to actually work.
+   *  Providers that don't require a key (e.g. AniList's public GraphQL)
+   *  override requiresApiKey to false. Skipping unconfigured providers
+   *  avoids spammy guaranteed-to-fail API calls (401s) in a hot loop. */
+  isConfigured(): boolean {
+    return this.requiresApiKey ? (this.apiKey?.length ?? 0) > 0 : true;
+  }
 
   /**
     * Builds a stable cache key for a request. Overridden by providers whose

@@ -96,6 +96,9 @@ export interface EpisodeQuery {
 export interface IMetadataProvider {
   name: string;
 
+  /** Whether this provider has the credentials it needs to make API calls. */
+  isConfigured(): boolean;
+
   searchShow(query: string): Promise<Show[]>;
 
   getShow(id: string): Promise<Show>;

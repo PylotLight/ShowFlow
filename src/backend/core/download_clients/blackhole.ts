@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { Oracle } from '../../parser/oracle';
 import { db } from '../../db';
 import type { ProviderType } from '../../providers/factory';
-import { debugLog } from '../debug';
+import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
 import type { Config } from '../../db';
@@ -53,6 +53,7 @@ export class BlackholeClient implements DownloadClient {
   }
 
   private static mem(label: string): void {
+    if (!DEBUG) return;
     const u = process.memoryUsage();
     const tag = `[${process.pid}] mem(${label}) rss=${(u.rss / 1048576).toFixed(0)}MB heap=${(u.heapUsed / 1048576).toFixed(0)}MB ext=${(u.external / 1048576).toFixed(0)}MB ab=${(u.arrayBuffers / 1048576).toFixed(0)}MB cgroup=${this.readCgroupMemory()} vmrss=${this.readVmRss()}`;
     console.log(tag);
