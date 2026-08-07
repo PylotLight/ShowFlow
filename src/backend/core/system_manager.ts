@@ -118,4 +118,34 @@ export class SystemManager {
     }
     return 0;
   }
+
+  getMemoryStats(): Record<string, unknown> {
+    const u = process.memoryUsage();
+    let cgroup: Record<string, number> | null = null;
+    try {
+      const cur = Number(require('node:fs').readFileSync('/sys/fs/cgroup/memory.current', 'utf8'));
+      const max = Number(require('node:fs').readFileSync('/sys/fs/cgroup/memory.max', 'utf8'));
+      cgroup = { currentBytes: cur, maxBytes: max, currentMB: +(cur / 1048576).toFixed(0), maxMB: +(max / 1048576).toFixed(0) };
+    } catch {
+      try {
+        const cur = Number(require('node:fs').readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8'));
+        const max = Number(require('node:fs').readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8'));
+        cgroup = { currentBytes: cur, maxBytes: max, currentMB: +(cur / 1048576).toFixed(0), maxMB: +(max / 1048576).toFixed(0) };
+      } catch {}
+    }
+    let vmrss: string | null = null;
+    try {
+      vmrss = require('node:fs').readFileSync('/proc/self/status', 'utf8').match(/VmRSS:\s+(\d+\s+\w+)/)?.[1] ?? null;
+    } catch {}
+    return {
+      rssMB: +(u.rss / 1048576).toFixed(0),
+      heapUsedMB: +(u.heapUsed / 1048576).toFixed(0),
+      externalMB: +(u.external / 1048576).toFixed(0),
+      arrayBuffersMB: +((u.arrayBuffers || 0) / 1048576).toFixed(0),
+      cgroup,
+      vmrss,
+      pid: process.pid,
+      ts: new Date().toISOString(),
+    };
+  }
 }

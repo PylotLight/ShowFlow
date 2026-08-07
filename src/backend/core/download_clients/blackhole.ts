@@ -374,6 +374,7 @@ export class BlackholeClient implements DownloadClient {
       debugLog('Processing file', { filename, fullPath });
 
       const hash = await this.hashFile(fullPath);
+      BlackholeClient.mem('after hash ' + filename.slice(0, 30));
       if (db.isProcessed(hash)) {
         if (opts?.force) {
           console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
@@ -386,6 +387,7 @@ export class BlackholeClient implements DownloadClient {
       }
 
       const result = await this.oracle.resolve(filename, this.config.defaultProvider as ProviderType, this.config);
+      BlackholeClient.mem('after oracle ' + filename.slice(0, 30));
 
       debugLog('Oracle resolve result', { filename, result });
       if (!result) {
@@ -607,6 +609,7 @@ export class BlackholeClient implements DownloadClient {
 
       const movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
       if (movedTo === null) return;
+      BlackholeClient.mem('after move ' + filename.slice(0, 30));
 
       console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
       debugLog('File moved successfully', { filename, movedTo });
@@ -694,11 +697,15 @@ export class BlackholeClient implements DownloadClient {
   private async hashFile(filePath: string): Promise<string> {
     BlackholeClient.mem('hash start');
     const hasher = new Bun.CryptoHasher('sha256');
-    // Stream the file in chunks rather than arrayBuffer()ing it — release
-    // files are often multi-GB (1080p MKVs), and loading the whole thing
-    // into memory OOMs the container (1Gi limit).
-    for await (const chunk of Bun.file(filePath).stream()) {
-      hasher.update(chunk);
+    // Read in fixed-size slices rather than relying on Bun.file().stream()
+    // chunking — the runtime (esp. linux binaries) may yield the whole file
+    // as one buffer. A fixed slice bounds memory to HASH_CHUNK regardless.
+    const file = Bun.file(filePath);
+    const HASH_CHUNK = 4 * 1024 * 1024; // 4MiB
+    for (let off = 0; off < file.size; off += HASH_CHUNK) {
+      const end = Math.min(off + HASH_CHUNK, file.size);
+      const buf = await file.slice(off, end).arrayBuffer();
+      hasher.update(new Uint8Array(buf));
     }
     BlackholeClient.mem('hash end');
     return hasher.digest('hex');

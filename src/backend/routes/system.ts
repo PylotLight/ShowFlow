@@ -85,6 +85,16 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
       },
     },
 
+    "/api/system/memory": {
+      async GET() {
+        try {
+          return json(systemManager.getMemoryStats());
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/system/processing": {
       async GET() {
         try {
