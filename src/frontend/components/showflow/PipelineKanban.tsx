@@ -247,7 +247,7 @@ function KanbanCard({
 
 // ── Grouped lane items ────────────────────────────────────────────────────
 
-function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbedKeys, onSearch, onGrab, onTrace, onDiagnose }: {
+function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbedKeys, onSearch, onGrab, onTrace, onDiagnose, onShowSelect, shows }: {
   items: KanbanEpisode[];
   expandedShows: Set<string>;
   onToggleShow: (showId: string) => void;
@@ -257,6 +257,8 @@ function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbe
   onGrab: (ep: KanbanEpisode) => void;
   onTrace: (ep: KanbanEpisode) => void;
   onDiagnose: (ep: KanbanEpisode) => void;
+  onShowSelect: (show: ShowSummary | null) => void;
+  shows: ShowSummary[];
 }) {
   const groups = groupByShow(items);
 
@@ -265,24 +267,33 @@ function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbe
       {groups.map(group => {
         const expanded = expandedShows.has(group.showId);
         const count = group.items.length;
+        const show = shows.find(s => s.id === group.showId);
         return (
           <div key={group.showId}>
-            <button
-              type="button"
-              onClick={() => onToggleShow(group.showId)}
-              className="w-full flex items-center gap-2.5 rounded-lg border glass-panel p-2.5 text-left hover:border-white/15 hover:bg-white/[0.04] transition-all"
-            >
-              <PosterImage showId={group.showId} alt={group.showTitle} className="w-7 h-10 shrink-0 rounded" />
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="truncate text-xs font-semibold text-white/90">{group.showTitle}</p>
-                <p className="text-[10px] text-muted-foreground/70">
-                  {count} episode{count !== 1 ? "s" : ""}
-                </p>
-              </div>
-              <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+            <div className="flex items-center gap-2 rounded-lg border glass-panel p-2.5 text-left hover:border-white/15 hover:bg-white/[0.04] transition-all">
+              <button
+                type="button"
+                onClick={() => show && onShowSelect(show)}
+                title="Open show"
+                className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+              >
+                <PosterImage showId={group.showId} alt={group.showTitle} className="w-7 h-10 shrink-0 rounded" />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="truncate text-xs font-semibold text-white/90">{group.showTitle}</p>
+                  <p className="text-[10px] text-muted-foreground/70">
+                    {count} episode{count !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleShow(group.showId)}
+                title={expanded ? "Collapse" : "Expand"}
+                className="font-mono text-[10px] text-muted-foreground/60 shrink-0 p-1 rounded hover:bg-white/10"
+              >
                 {expanded ? "−" : "+"}
-              </span>
-            </button>
+              </button>
+            </div>
             {expanded && (
               <div className="space-y-2 pl-2 mt-2">
                 {group.items.map((ep, i) => (
@@ -353,6 +364,8 @@ function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, on
             onGrab={onGrab}
             onTrace={onTrace}
             onDiagnose={onDiagnose}
+            onShowSelect={onShowSelect}
+            shows={shows}
           />
         )}
       </div>
@@ -527,6 +540,8 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
                   onGrab={handleGrab}
                   onTrace={setTraceTarget}
                   onDiagnose={setDiagnoseTarget}
+                  onShowSelect={onSelectShow ?? (() => {})}
+                  shows={shows}
                 />
               </div>
             ))}

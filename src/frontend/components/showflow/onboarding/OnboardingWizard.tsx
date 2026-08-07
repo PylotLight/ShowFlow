@@ -79,9 +79,18 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
   }, []);
 
   const finish = React.useCallback(() => {
-    setData(prev => ({ ...prev, completed: true, step: TOTAL_STEPS - 1 }));
+    const completedData: WizardData = { ...data, completed: true, step: TOTAL_STEPS - 1 };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(completedData));
+    } catch {}
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "onboarding.wizard", value: JSON.stringify(completedData) }),
+    }).catch(() => {});
+    setData(completedData);
     onFinish();
-  }, [onFinish]);
+  }, [data, onFinish]);
 
   const stepProps: StepProps = {
     data,

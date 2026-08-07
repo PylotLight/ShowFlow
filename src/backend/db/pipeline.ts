@@ -168,6 +168,22 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
     ORDER BY s.title ASC, e.season_number ASC, e.episode_number ASC
   `).all() as any[];
 
+  const now = Date.now();
+  const seasonKey = (showId: string, season: number) => `${showId}::${season}`;
+
+  // A season "has started" once any of its episodes has aired (past air date)
+  // or exists on disk. Seasons that haven't started (whole upcoming season is
+  // "TBA" with no air dates yet, e.g. a not-yet-premiered S2) have nothing to
+  // grab, so their tracked episodes must not surface as WANTED.
+  const startedSeasons = new Set<string>();
+  for (const r of rows) {
+    const aired = r.air_date !== null && new Date(r.air_date).getTime() <= now;
+    const onDisk = r.file_path !== null && r.file_path !== '';
+    if (aired || onDisk) {
+      startedSeasons.add(seasonKey(r.show_id, r.season_number));
+    }
+  }
+
   return rows.map(r => {
     const hasFile = r.file_path !== null && r.file_path !== '';
     const isFuture = r.air_date !== null && new Date(r.air_date) > new Date();
@@ -195,7 +211,7 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
 
     const stage = r.current_stage ?? 'WANTED';
 
-    if (stage === 'WANTED' && isFuture) {
+    if (stage === 'WANTED' && (isFuture || !startedSeasons.has(seasonKey(r.show_id, r.season_number)))) {
       return null;
     }
 

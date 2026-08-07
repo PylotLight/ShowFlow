@@ -58,11 +58,34 @@ export class BlackholeClient implements DownloadClient {
 
     await this.scanExistingFiles(folder);
 
-    this.watchHandle = watch(folder, (eventType, filename) => {
-      if (eventType === 'rename' && filename) {
-        this.enqueue(folder, filename);
-      }
-    });
+    try {
+      this.watchHandle = watch(folder, (eventType, filename) => {
+        if (eventType === 'rename' && filename) {
+          this.enqueue(folder, filename);
+        }
+      });
+      // An unhandled 'error' event on the FSWatcher is fatal to the process
+      // (e.g. when the watch folder is unmounted or loses write access
+      // mid-run, macOS fires an async 'error'). Surface it as a logged event
+      // instead of letting Bun die.
+      this.watchHandle.on('error', (err: Error) => {
+        const message = err?.message ?? String(err);
+        console.error(`[${this.name}] Watch error on "${folder}": ${message}`);
+        db.logEvent({
+          type: 'error',
+          entityType: 'system',
+          message: `Watch folder "${folder}" became unavailable: ${message}`,
+        });
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[${this.name}] Failed to watch watch folder "${folder}": ${message}`);
+      db.logEvent({
+        type: 'error',
+        entityType: 'system',
+        message: `Watch folder "${folder}" is missing or not writable: ${message}`,
+      });
+    }
 
     this.safetyRescanHandle = setInterval(() => {
       if (this.watchFolder) {
