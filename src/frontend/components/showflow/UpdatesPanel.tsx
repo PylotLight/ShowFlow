@@ -5,6 +5,7 @@ import { Button } from "@frontend/components/ui/button";
 
 export function UpdatesPanel() {
   const [token, setToken] = React.useState<string | null>(null);
+  const tokenRef = React.useRef<string | null>(null);
   const [status, setStatus] = React.useState<any>(null);
   const [releases, setReleases] = React.useState<any[]>([]);
   const [hasMore, setHasMore] = React.useState(false);
@@ -16,7 +17,7 @@ export function UpdatesPanel() {
   const pageRef = React.useRef(1);
 
   function headers(): Record<string, string> {
-    return { Authorization: `Bearer ${token}` };
+    return { Authorization: `Bearer ${token ?? tokenRef.current}` };
   }
 
   function fetchAll() {
@@ -53,7 +54,7 @@ export function UpdatesPanel() {
   React.useEffect(() => {
     fetch("/api/admin/token")
       .then(r => r.json())
-      .then(d => { setToken(d.token); fetchAll(); })
+      .then(d => { tokenRef.current = d.token; setToken(d.token); fetchAll(); })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -192,7 +193,8 @@ export function UpdatesPanel() {
                       <span className="font-mono text-xs text-white/90 truncate">{r.tagName}</span>
                       {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded">current</span>}
                       {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">pre</span>}
-                      {!r.hasRequiredAssets && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded">missing assets</span>}
+                      {r.buildInProgress && <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded">building</span>}
+                      {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded">missing assets</span>}
                     </div>
                     {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
                     <p className="text-[10px] text-muted-foreground mt-0.5">{r.publishedAt ? new Date(r.publishedAt).toLocaleDateString() : "—"}</p>

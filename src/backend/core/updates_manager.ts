@@ -48,6 +48,12 @@ export interface ReleaseSummary {
    */
   isLikelyCurrent: boolean;
   hasRequiredAssets: boolean;
+  /**
+   * True when the release's GitHub Actions workflow that produces the tarball
+   * asset is still running — i.e. assets are "missing" only because the build
+   * hasn't finished, not because publishing failed.
+   */
+  buildInProgress: boolean;
   assets: { id: number; name: string; sizeBytes: number }[];
 }
 
@@ -95,24 +101,45 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
   }
   const raw = (await res.json()) as any[];
 
-  const releases = raw
-    .filter((r) => !r.draft)
-    .map((r): ReleaseSummary => {
-      const assets = (r.assets ?? []) as any[];
-      const hasTarball = assets.some((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
-      return {
-        githubReleaseId: r.id,
-        tagName: r.tag_name,
-        name: r.name ?? null,
-        publishedAt: r.published_at ?? null,
-        prerelease: !!r.prerelease,
-        isLikelyCurrent: r.tag_name === currentVersion,
-        hasRequiredAssets: hasTarball,
-        assets: assets.map((a) => ({ id: a.id, name: a.name, sizeBytes: a.size })),
-      };
-    });
+  const releases = await Promise.all(
+    raw
+      .filter((r) => !r.draft)
+      .map(async (r): Promise<ReleaseSummary> => {
+        const assets = (r.assets ?? []) as any[];
+        const hasTarball = assets.some((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
+        return {
+          githubReleaseId: r.id,
+          tagName: r.tag_name,
+          name: r.name ?? null,
+          publishedAt: r.published_at ?? null,
+          prerelease: !!r.prerelease,
+          isLikelyCurrent: r.tag_name === currentVersion,
+          hasRequiredAssets: hasTarball,
+          buildInProgress: hasTarball ? false : await isBuildInProgress(token, repo, r.tag_name),
+          assets: assets.map((a) => ({ id: a.id, name: a.name, sizeBytes: a.size })),
+        };
+      }),
+  );
 
   return { releases, hasMore: raw.length === RELEASES_PER_PAGE };
+}
+
+/**
+ * Best-effort check: does the GitHub Actions workflow that publishes the
+ * release's tarball asset still have an in-progress run for this tag?
+ * Used to distinguish "publish failed" (missing assets) from "still building"
+ * (asset on its way) in the updates UI.
+ */
+async function isBuildInProgress(token: string | undefined, repo: string, tagName: string): Promise<boolean> {
+  try {
+    const params = new URLSearchParams({ event: "release", branch: tagName, per_page: "1" });
+    const res = await fetch(`${GITHUB_API}/repos/${repo}/actions/runs?${params}`, { headers: githubHeaders(token) });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { workflow_runs?: { status: string }[] };
+    return (data.workflow_runs ?? []).some((run) => run.status === "in_progress");
+  } catch {
+    return false;
+  }
 }
 
 // ---- Download + local install (writes to /data/downloads/<releaseId>) -
