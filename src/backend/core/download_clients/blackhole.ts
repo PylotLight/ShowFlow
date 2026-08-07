@@ -1,4 +1,4 @@
-import { watch } from 'node:fs';
+import { watch, readFileSync } from 'node:fs';
 import { rename, mkdir, unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -21,6 +21,41 @@ export class BlackholeClient implements DownloadClient {
 
   private watchHandle: any = null;
   private watchFolder: string | null = null;
+
+  /** Read-only diagnostic helpers that work inside a shell-less (distroless)
+   *  container: the app process reads its own cgroup/proc files. */
+  private static readCgroupMemory(): string {
+    // cgroup v2: /sys/fs/cgroup/memory.current & memory.max
+    try {
+      const cur = Number(readFileSync('/sys/fs/cgroup/memory.current', 'utf8'));
+      const max = Number(readFileSync('/sys/fs/cgroup/memory.max', 'utf8'));
+      return `${(cur / 1048576).toFixed(0)}/${(max / 1048576).toFixed(0)}MB`;
+    } catch {
+      try {
+        // cgroup v1
+        const cur = Number(readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8'));
+        const max = Number(readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8'));
+        return `${(cur / 1048576).toFixed(0)}/${(max / 1048576).toFixed(0)}MB`;
+      } catch {
+        return 'n/a';
+      }
+    }
+  }
+
+  private static readVmRss(): string {
+    try {
+      const status = readFileSync('/proc/self/status', 'utf8');
+      return status.match(/VmRSS:\s+(\d+\s+\w+)/)?.[1] ?? 'n/a';
+    } catch {
+      return 'n/a';
+    }
+  }
+
+  private static mem(label: string): void {
+    const u = process.memoryUsage();
+    const tag = `[${process.pid}] mem(${label}) rss=${(u.rss / 1048576).toFixed(0)}MB heap=${(u.heapUsed / 1048576).toFixed(0)}MB ext=${(u.external / 1048576).toFixed(0)}MB ab=${(u.arrayBuffers / 1048576).toFixed(0)}MB cgroup=${this.readCgroupMemory()} vmrss=${this.readVmRss()}`;
+    console.log(tag);
+  }
 
   private static readonly SAFETY_RESCAN_INTERVAL_MS = 3 * 60 * 1000;
   private safetyRescanHandle: ReturnType<typeof setInterval> | null = null;
@@ -170,7 +205,9 @@ export class BlackholeClient implements DownloadClient {
         const fullPath = path.join(folder, filename);
         this.pendingSet.delete(fullPath);
 
+        BlackholeClient.mem('before handle: ' + filename.slice(0, 40));
         await this.handleFile(folder, filename);
+        BlackholeClient.mem('after handle: ' + filename.slice(0, 40));
       }
     } finally {
       this.queueWorkerRunning = false;
@@ -655,6 +692,7 @@ export class BlackholeClient implements DownloadClient {
   }
 
   private async hashFile(filePath: string): Promise<string> {
+    BlackholeClient.mem('hash start');
     const hasher = new Bun.CryptoHasher('sha256');
     // Stream the file in chunks rather than arrayBuffer()ing it — release
     // files are often multi-GB (1080p MKVs), and loading the whole thing
@@ -662,6 +700,7 @@ export class BlackholeClient implements DownloadClient {
     for await (const chunk of Bun.file(filePath).stream()) {
       hasher.update(chunk);
     }
+    BlackholeClient.mem('hash end');
     return hasher.digest('hex');
   }
 
