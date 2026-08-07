@@ -284,6 +284,28 @@ export class Oracle {
       return null;
     }
 
+    // Persist all resolved aliases/alt-titles back into the local DB so that
+    // future files for the same series hit the fast exact lookup instead of
+    // re-querying providers. No extra API calls; only re-uses what we already fetched.
+    try {
+      const existingLocal = db.getShowByProvider(resolvedProviderType, matchedShow.id);
+      if (existingLocal?.id) {
+        db.syncAllShowTitles(existingLocal.id, existingLocal.provider_type, {
+          title: matchedShow.title,
+          originalTitle: matchedShow.originalTitle,
+          romanizedTitle: (matchedShow as { romanizedTitle?: string }).romanizedTitle,
+          aliases: matchedShow.aliases,
+          alternateTitles: matchedShow.alternateTitles,
+          translations: matchedShow.translations,
+          metadata: (matchedShow.metadata as Record<string, unknown>) ?? {},
+        });
+      }
+    } catch (err) {
+      debugLog('Failed to persist resolved show titles (non-fatal)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     debugLog('Resolved show from external provider', {
       parsedTitle: parsed.show,
       providerType: resolvedProviderType,

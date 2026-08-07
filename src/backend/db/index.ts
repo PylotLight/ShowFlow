@@ -96,6 +96,7 @@ export class DatabaseManager {
   getLocalShowCandidates() { return shows.getLocalShowCandidates(this); }
   saveShow(show: Parameters<typeof shows.saveShow>[1]) { return shows.saveShow(this, show); }
   updateShowSyncData(showId: string, providerType: string, data: Parameters<typeof shows.updateShowSyncData>[3]) { return shows.updateShowSyncData(this, showId, providerType, data); }
+  syncAllShowTitles(showId: string, providerType: string, show: Parameters<typeof shows.syncAllShowTitles>[3]) { return shows.syncAllShowTitles(this, showId, providerType, show); }
   getShow(showId: string) { return shows.getShow(this, showId); }
   getShowConfig(showId: string) { return shows.getShowConfig(this, showId); }
   getProviderForRole(showId: string, role: 'metadata' | 'airtime') { return shows.getProviderForRole(this, showId, role); }

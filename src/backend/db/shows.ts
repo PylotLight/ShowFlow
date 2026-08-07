@@ -76,7 +76,7 @@ function syncCoreShowTitles(self: DatabaseManager, input: {
   }
 }
 
-function syncAllShowTitles(
+export function syncAllShowTitles(
   self: DatabaseManager,
   showId: string,
   providerType: string,
