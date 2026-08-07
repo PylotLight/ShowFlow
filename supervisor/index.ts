@@ -13,11 +13,13 @@
 //   kubectl exec deploy/showflow -- /supervisor activate v0.2.0
 //   kubectl exec deploy/showflow -- /supervisor status
 
-import { mkdir, chmod } from "node:fs/promises";
+import { mkdir, chmod, cp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import {
   ADMIN_PORT,
   PUBLIC_PORT,
   DOWNLOADS_DIR,
+  BOOTSTRAP_MIGRATIONS,
   readManifest,
   verifyArtifact,
   releasePath,
@@ -223,6 +225,18 @@ async function installRelease(releaseId: string): Promise<{ ok: boolean; message
   await Bun.write(`${dest}/${manifest.artifact.name}`, Bun.file(`${src}/${manifest.artifact.name}`));
   await Bun.write(`${dest}/manifest.json`, Bun.file(`${src}/manifest.json`));
   await chmod(`${dest}/${manifest.artifact.name}`, 0o755);
+
+  // Copy the migrations folder alongside the binary — the compiled app
+  // resolves migrations relative to process.execPath (db/index.ts), so an
+  // update release without them can't start. The bootstrap path copies these
+  // too (supervisor/bootstrap.ts); keep them in sync.
+  if (existsSync(`${src}/migrations`)) {
+    await cp(`${src}/migrations`, `${dest}/migrations`, { recursive: true });
+  } else if (existsSync(BOOTSTRAP_MIGRATIONS)) {
+    // Legacy tarballs predate migrations being shipped — fall back to the
+    // migrations baked into the image so older releases can still install.
+    await cp(BOOTSTRAP_MIGRATIONS, `${dest}/migrations`, { recursive: true });
+  }
 
   return { ok: true, message: `Installed release "${releaseId}". Run "activate ${releaseId}" to switch to it.` };
 }

@@ -76,7 +76,8 @@ export class DatabaseManager {
     // Try both and use whichever actually has a migrations journal.
     const binaryDir = dirname(process.execPath);
     const sourceDir = dirname(fileURLToPath(import.meta.url));
-    const candidates = [resolve(binaryDir, 'migrations'), resolve(sourceDir, 'migrations')];
+    const bootstrapMigrations = process.env.SHOWFLOW_BOOTSTRAP_MIGRATIONS ?? "/bootstrap/migrations";
+    const candidates = [resolve(binaryDir, 'migrations'), resolve(sourceDir, 'migrations'), bootstrapMigrations];
     const migrationsFolder = candidates.find(dir => existsSync(resolve(dir, 'meta/_journal.json'))) ?? resolve(binaryDir, 'migrations');
     migrate(this.drizz, { migrationsFolder });
 

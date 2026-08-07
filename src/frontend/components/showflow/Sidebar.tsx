@@ -322,7 +322,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-[10px] text-white/50 hidden lg:inline">
-                    v{appVersion || "—"}
+                    {appVersion || "—"}
                   </span>
                   <button
                     onClick={() => { onChange("settings"); onSettingsTab?.("general", "updates"); }}

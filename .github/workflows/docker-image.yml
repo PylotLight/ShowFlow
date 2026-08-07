@@ -79,7 +79,7 @@ jobs:
         run: GITHUB_SHA=${{ github.sha }} GITHUB_REF_NAME=${{ github.ref_name }} BUILD_TARGET=bun-linux-x64 bun run build.ts
 
       - name: Package release assets
-        run: tar -czf showflow-${{ github.sha }}.tar.gz showflow manifest.json
+        run: tar -czf showflow-${{ github.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations
 
       - name: Upload release asset
         run: gh release upload ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
