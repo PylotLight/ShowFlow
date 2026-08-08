@@ -9,6 +9,20 @@ export class SystemManager {
   private watcher: DownloadManager | null = null;
   private manualClient: BlackholeClient | null = null;
 
+  /**
+   * Short-lived cache for the manual-import file listing. Resolving every
+   * watch-folder file on every page load is expensive (the previous
+   * implementation pulled multi-GB episode payloads per file from providers,
+   * OOMing the pod); listing the UI is much cheaper when a refresh within a
+   * few seconds returns the cached result.
+   */
+  private manualImportCache: {
+    expires: number;
+    data: any[];
+  } | null = null;
+
+  private static readonly MANUAL_IMPORT_CACHE_TTL_MS = 30 * 1000;
+
   constructor(getConfig: () => Config) {
     this.getConfig = getConfig;
     this.config = getConfig();
@@ -104,21 +118,38 @@ export class SystemManager {
   }
 
   async listManualImportFiles(): Promise<any[]> {
+    const now = Date.now();
+    if (this.manualImportCache && this.manualImportCache.expires > now) {
+      return this.manualImportCache.data;
+    }
     const client = this.getManualImportClient();
     if (!client) return [];
-    return client.listWatchFolderFiles();
+    const data = await client.listWatchFolderFiles();
+    this.manualImportCache = {
+      expires: now + SystemManager.MANUAL_IMPORT_CACHE_TTL_MS,
+      data,
+    };
+    return data;
+  }
+
+  invalidateManualImportCache(): void {
+    this.manualImportCache = null;
   }
 
   async forceImportFile(filename: string): Promise<{ ok: boolean; message: string }> {
     const client = this.getManualImportClient();
     if (!client) return { ok: false, message: 'No watch folder configured.' };
-    return client.forceImport(filename);
+    const res = await client.forceImport(filename);
+    if (res.ok) this.invalidateManualImportCache();
+    return res;
   }
 
   async deleteWatchFile(filename: string): Promise<{ ok: boolean; message: string }> {
     const client = this.getManualImportClient();
     if (!client) return { ok: false, message: 'No watch folder configured.' };
-    return client.deleteFile(filename);
+    const res = await client.deleteFile(filename);
+    if (res.ok) this.invalidateManualImportCache();
+    return res;
   }
 
   async countWatchFiles(): Promise<number> {

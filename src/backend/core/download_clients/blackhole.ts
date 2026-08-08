@@ -274,7 +274,7 @@ export class BlackholeClient implements DownloadClient {
 
         const entry: any = { filename, fullPath, resolved: false };
         try {
-          const result = await this.oracle.resolveWithGrabHint(
+          const result = await this.oracle.resolveForList(
             filename,
             this.config.defaultProvider as any,
             this.config as any,
@@ -284,12 +284,12 @@ export class BlackholeClient implements DownloadClient {
           if (result) {
             entry.show = result.show.title;
             entry.showId = result.show.id;
-            entry.season = result.episodes[0]?.season;
-            entry.episodes = result.episodes.map((e: any) => e.episode);
+            entry.season = result.season;
+            entry.episodes = result.episodes;
             entry.resolved = true;
 
             const existingShow = db.getShowByProvider(result.show.provider, result.show.id);
-            if (existingShow && entry.season != null && entry.episodes?.[0] != null) {
+            if (existingShow && entry.season != null && entry.episodes?.length) {
               const existingEp = db.getEpisode(existingShow.id, entry.season, entry.episodes[0]);
               if (existingEp?.file_path) {
                 entry.existingFile = path.basename(existingEp.file_path);

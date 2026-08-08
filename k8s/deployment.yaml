@@ -53,6 +53,11 @@ spec:
               value: "3000"
             - name: GITHUB_REPO
               value: "PylotLight/ShowFlow"
+            # Enable memory diagnostics — BlackholeClient.mem() logs rss/heap/
+            # cgroup per file-hash/oracle/move step so OOM spikes during the
+            # watch-folder scan are traceable from pod logs.
+            - name: SHOWFLOW_DEBUG
+              value: "true"
           volumeMounts:
             - name: data
               mountPath: /data
