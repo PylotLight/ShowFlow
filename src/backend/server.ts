@@ -192,6 +192,34 @@ function wrapRouteHandlers(defs: Record<string, any>): any {
   return defs;
 }
 
+// ---- Fatal crash capture ---------------------------------------------------
+//
+// Bun treats an uncaught exception or unhandled promise rejection as a fatal
+// process error: the app exits and the supervisor relaunches lastKnownGood,
+// which presents as a "crash loop" with no breadcrumb unless we capture it
+// here. Persist a durable crash log (file + DB event) before the process dies
+// so the next restore has something to read, even when a WebSocket debug
+// session was never attached.
+
+function appendCrashLog(fatal: unknown, context: string): void {
+  const stack = fatal instanceof Error ? (fatal.stack ?? fatal.message) : String(fatal);
+  const line = `${new Date().toISOString()} [${context}] ${stack}\n`;
+  for (const dest of [
+    process.env.CRASH_LOG_FILE,
+    process.env.SHOWFLOW_DATA_DIR ? `${process.env.SHOWFLOW_DATA_DIR}/crash.log` : undefined,
+  ]) {
+    if (!dest) continue;
+    try { require("node:fs").appendFileSync(dest, line); } catch {}
+  }
+  try {
+    db.logEvent({ type: 'error', entityType: 'system', message: `Fatal crash (${context}): ${fatal instanceof Error ? fatal.message : String(fatal)}` });
+  } catch {}
+  console.error(line.trim());
+}
+
+process.on("uncaughtException", (err) => appendCrashLog(err, "uncaughtException"));
+process.on("unhandledRejection", (reason) => appendCrashLog(reason, "unhandledRejection"));
+
 // ---- Server bootstrap -----------------------------------------------------
 
 const config = loadConfig();

@@ -45,7 +45,7 @@ export class TorboxDownloadClient implements DownloadClient {
     this.config = {
       apiKey: raw?.apiKey || '',
       baseUrl: raw?.baseUrl || 'https://api.torbox.app',
-      inputFolder: raw?.inputFolder || './hotio',
+      inputFolder: raw?.inputFolder || '',
       outputFolder: raw?.outputFolder || './downloads',
       concurrency: raw?.concurrency || 3,
     };
@@ -61,28 +61,43 @@ export class TorboxDownloadClient implements DownloadClient {
       return;
     }
 
-    await mkdir(this.config.inputFolder!, { recursive: true });
+    if (!this.config.inputFolder) {
+      console.log(`[${this.name}] No input folder configured. Skipping local torrent watch (TorBox polling only).`);
+    } else {
+      await mkdir(this.config.inputFolder, { recursive: true });
+    }
     await mkdir(this.config.outputFolder!, { recursive: true });
 
-    console.log(`[${this.name}] Watching ${this.config.inputFolder} for torrent/magnet files`);
+    console.log(`[${this.name}] ${this.config.inputFolder ? `Watching ${this.config.inputFolder} for torrent/magnet files` : 'Torrent hash/magnet submissions enabled'}`);
     console.log(`[${this.name}] Output folder: ${this.config.outputFolder}`);
 
-    try {
-      const files = await readdir(this.config.inputFolder!);
-      for (const file of files) {
-        if (file.endsWith('.torrent') || file.endsWith('.magnet') || file.endsWith('.txt')) {
-          this.processFile(path.join(this.config.inputFolder!, file));
+    if (this.config.inputFolder) {
+      try {
+        const files = await readdir(this.config.inputFolder);
+        for (const file of files) {
+          if (file.endsWith('.torrent') || file.endsWith('.magnet') || file.endsWith('.txt')) {
+            this.processFile(path.join(this.config.inputFolder!, file));
+          }
         }
-      }
-    } catch { }
+      } catch { }
 
-    this.watchHandle = watch(this.config.inputFolder!, (eventType, filename) => {
-      if (eventType !== 'rename' || !filename) return;
-      const fullPath = path.join(this.config.inputFolder!, filename);
-      if (!existsSync(fullPath)) return;
-      if (!filename.endsWith('.torrent') && !filename.endsWith('.magnet') && !filename.endsWith('.txt')) return;
-      this.processFile(fullPath);
-    });
+      this.watchHandle = watch(this.config.inputFolder, (eventType, filename) => {
+        if (eventType !== 'rename' || !filename) return;
+        const fullPath = path.join(this.config.inputFolder!, filename);
+        if (!existsSync(fullPath)) return;
+        if (!filename.endsWith('.torrent') && !filename.endsWith('.magnet') && !filename.endsWith('.txt')) return;
+        this.processFile(fullPath);
+      });
+
+      // An unhandled 'error' event on the FSWatcher is fatal to the process
+      // (same crash class we guard against in BlackholeClient). Surface it as
+      // a logged event instead of letting Bun die.
+      this.watchHandle.on('error', (err: Error) => {
+        const message = err?.message ?? String(err);
+        console.error(`[${this.name}] Watch error on "${this.config.inputFolder}": ${message}`);
+        try { db.logEvent({ type: 'error', entityType: 'system', message: `TorBox input folder "${this.config.inputFolder}" became unavailable: ${message}` }); } catch {}
+      });
+    }
 
     console.log(`[${this.name}] Running.`);
   }
