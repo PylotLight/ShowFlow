@@ -279,6 +279,8 @@ export class BlackholeClient implements DownloadClient {
             this.config.defaultProvider as any,
             this.config as any,
           );
+          maybeForcedGc();
+          BlackholeClient.mem('manual list resolve ' + filename.slice(0, 40));
           if (result) {
             entry.show = result.show.title;
             entry.showId = result.show.id;

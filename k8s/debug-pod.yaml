@@ -1,0 +1,22 @@
+# Ephemeral debug pod that mounts the same showflow-data PVC so we can
+# read /data/crash.log (and inspect the DB). Pinned to the app's node
+# (luxai) because the PVC is ReadWriteOnce on a local-path provisioner.
+# Uses busybox because the distroless app image has no shell.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: showflow-debug
+  namespace: showflow
+spec:
+  nodeName: luxai
+  containers:
+    - name: debug
+      image: busybox:1.36
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: showflow-data

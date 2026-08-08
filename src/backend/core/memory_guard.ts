@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 
-const HIGH_WATER_FRACTION = 0.65;
-const LOW_WATER_FRACTION = 0.45;
+const HIGH_WATER_FRACTION = 0.5;
+const LOW_WATER_FRACTION = 0.35;
 let lastForcedGcMs = 0;
+let lastLoggedGcMs = 0;
 let armed = true;
 const MIN_GC_INTERVAL_MS = 2000;
+const MIN_LOG_INTERVAL_MS = 30 * 1000;
 
 export interface CgroupMemory {
   currentBytes: number;
@@ -77,6 +79,11 @@ export function maybeForcedGc(now = Date.now()): boolean {
   try {
     (Bun as any).gc?.(true);
   } catch {}
+  if (now - lastLoggedGcMs >= MIN_LOG_INTERVAL_MS) {
+    lastLoggedGcMs = now;
+    const pct = Math.round(fraction * 100);
+    console.log(`[memory-guard] Forced GC at ${pct}% of cgroup limit (${(mem.currentBytes / 1048576).toFixed(0)}/${(mem.maxBytes / 1048576).toFixed(0)}MB)`);
+  }
   return true;
 }
 
