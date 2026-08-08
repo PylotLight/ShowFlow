@@ -841,6 +841,131 @@ export class Oracle {
     return value.replace(/[<>:"/\\|?*]/g, '').trim();
   }
 
+  /**
+   * Resolve a file, falling back to the series->release->episode grab
+   * tracking when the normal parse+search path fails. When we know exactly
+   * which show/season/episode a release was grabbed for, skip the show-name
+   * search entirely and resolve the episode(s) straight from that show's
+   * provider.
+   */
+  async resolveWithGrabHint(
+    filename: string,
+    preferredProvider: ProviderType = 'tmdb',
+    config: Record<string, unknown> = {},
+  ): Promise<{
+    show: Show;
+    episodes: Episode[];
+    proposedPath: string;
+    parsed?: unknown;
+    usedHint: boolean;
+  } | null> {
+    const normal = await this.resolve(filename, preferredProvider, config);
+    if (normal) return { ...normal, usedHint: false };
+
+    const parsed = this.parser.parse(filename);
+    const seasonNum = parsed?.season;
+    const singleEpisode = parsed?.episodes?.length === 1 ? parsed.episodes[0] : undefined;
+    if (seasonNum == null || singleEpisode == null) return null;
+
+    const grab = db.findGrabbedReleaseForEpisode(seasonNum, singleEpisode);
+    if (!grab) return null;
+
+    const hinted = await this.resolveGrabbed(filename, {
+      showId: grab.show_id,
+      season: grab.season_number ?? seasonNum,
+      episode: grab.episode_number ?? singleEpisode,
+    }, preferredProvider, config);
+
+    if (!hinted) return null;
+    return { ...hinted, usedHint: true };
+  }
+
+  /**
+   * Resolve a file whose name is too generic for the normal parse+search
+   * path, using an explicit hint of which show/season/episode it was
+   * grabbed for. Skips the show-name search entirely and resolves the
+   * episode(s) straight from that show's provider.
+   */
+  async resolveGrabbed(
+    filename: string,
+    hint: { showId: string; season?: number; episode?: number },
+    preferredProvider: ProviderType = 'tmdb',
+    config: Record<string, unknown> = {},
+  ): Promise<{
+    show: Show;
+    episodes: Episode[];
+    proposedPath: string;
+    parsed?: unknown;
+  } | null> {
+    const parsed = this.parser.parse(filename);
+    this.lastParsed = parsed;
+    this.lastSearchResults = [];
+
+    const showRow = db.getShow(hint.showId) as any;
+    if (!showRow) return null;
+
+    const providers = db.listShowProviders(hint.showId) as any[];
+    const primary = providers.find((p: any) => p.is_primary) ?? providers[0];
+    if (!primary) return null;
+
+    const providerType = isProviderType(primary.provider_type) ? primary.provider_type : preferredProvider;
+    const provider = ProviderFactory.getProvider(providerType, config);
+
+    const show: Show = {
+      id: primary.provider_id,
+      title: showRow.title,
+      originalTitle: showRow.original_title ?? undefined,
+      year: showRow.year ?? undefined,
+      provider: providerType,
+      metadata: this.safeJsonObject(primary.metadata_json),
+    };
+
+    const season = parsed?.season ?? hint.season;
+    const episodeNumbers = parsed?.episodes?.length
+      ? parsed.episodes
+      : hint.episode != null
+        ? [hint.episode]
+        : [];
+
+    if (season == null || episodeNumbers.length === 0) {
+      debugLog('Grab hint missing season/episode numbers; falling back to normal resolution', {
+        filename,
+        showId: hint.showId,
+        parsed,
+      });
+      return null;
+    }
+
+    debugLog('Resolving via grab hint (skipping show-name search)', {
+      filename,
+      showId: hint.showId,
+      show: show.title,
+      season,
+      episodes: episodeNumbers,
+    });
+
+    const { episodes, errors } = await this.resolveEpisodes(
+      provider,
+      primary.provider_id,
+      { season, episodes: episodeNumbers },
+      show,
+    );
+
+    if (episodes.length === 0) {
+      debugLog('Grab-hint episode resolution failed', {
+        show: show.title,
+        season,
+        episodes: episodeNumbers,
+        errors,
+      });
+      return null;
+    }
+
+    const proposedPath = this.buildPath(show, episodes, filename, config as Record<string, unknown>);
+
+    return { show, episodes, proposedPath, parsed };
+  }
+
   getDiagnostics(): {
     parsed: ParsedFilename | null;
     searchResults: Show[];

@@ -227,6 +227,19 @@ const server = serve({
 
 scheduler.start();
 
+// Auto-start the download watcher when a blackhole watch folder is
+// configured. Without this, /api/manual-import/* and the Queue page's "watch
+// folder" reader would 500 ("Watcher is not running.") on every fresh boot
+// until the user manually clicked Start. BlackholeClient.start() is
+// fault-tolerant — a missing/unwritable folder logs an event instead of
+// throwing — so this can never take the server down.
+try {
+  await systemManager.startWatcher();
+  console.log("🚀 Download watcher auto-started");
+} catch (err) {
+  console.error("Failed to auto-start download watcher:", err instanceof Error ? err.message : err);
+}
+
 console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, version ${BUILD_VERSION})`);
 
 // ---- Graceful shutdown ----------------------------------------------------

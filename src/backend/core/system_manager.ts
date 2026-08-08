@@ -1,11 +1,13 @@
 import { LibraryScanner } from '../core/library_scanner';
 import { DownloadManager } from '../core/download_manager';
+import { BlackholeClient } from './download_clients/blackhole';
 import { db, type Config } from '../db';
 
 export class SystemManager {
   private config: Config;
   private getConfig: () => Config;
   private watcher: DownloadManager | null = null;
+  private manualClient: BlackholeClient | null = null;
 
   constructor(getConfig: () => Config) {
     this.getConfig = getConfig;
@@ -14,6 +16,30 @@ export class SystemManager {
 
   private refreshConfig() {
     this.config = this.getConfig();
+  }
+
+  /**
+   * Resolve the blackhole client for Manual Import operations WITHOUT
+   * depending on the watcher process. Manual Import must stay usable even
+   * when the download watcher has crashed/stopped — the ops only read the
+   * configured watch folder, they don't need the OS file watcher attached.
+   * Prefers the live watcher's client when it exists so state (in-flight
+   * queue etc.) stays consistent; otherwise spins up a folder-only client
+   * whose folder comes from the live config.
+   */
+  private getManualImportClient(): BlackholeClient | null {
+    this.refreshConfig();
+    const folder = this.config.downloadClient?.blackhole?.watchFolder;
+    if (!folder?.trim()) return null;
+
+    const liveClient = (this.watcher as any)?.clients?.get('blackhole') as BlackholeClient | undefined;
+    if (liveClient?.getWatchFolder()) return liveClient;
+
+    if (!this.manualClient?.getWatchFolder()) {
+      this.manualClient = new BlackholeClient(this.config);
+      this.manualClient.attachFolderForManualOps();
+    }
+    return this.manualClient;
   }
 
   async scan() {
@@ -78,45 +104,27 @@ export class SystemManager {
   }
 
   async listManualImportFiles(): Promise<any[]> {
-    if (!this.watcher) {
-      throw new Error('Watcher is not running.');
-    }
-    const client = (this.watcher as any).clients?.get('blackhole');
-    if (client && typeof client.listWatchFolderFiles === 'function') {
-      return client.listWatchFolderFiles();
-    }
-    throw new Error('Blackhole client not available.');
+    const client = this.getManualImportClient();
+    if (!client) return [];
+    return client.listWatchFolderFiles();
   }
 
   async forceImportFile(filename: string): Promise<{ ok: boolean; message: string }> {
-    if (!this.watcher) {
-      return { ok: false, message: 'Watcher is not running.' };
-    }
-    const client = (this.watcher as any).clients?.get('blackhole');
-    if (client && typeof client.forceImport === 'function') {
-      return client.forceImport(filename);
-    }
-    return { ok: false, message: 'Blackhole client not available.' };
+    const client = this.getManualImportClient();
+    if (!client) return { ok: false, message: 'No watch folder configured.' };
+    return client.forceImport(filename);
   }
 
   async deleteWatchFile(filename: string): Promise<{ ok: boolean; message: string }> {
-    if (!this.watcher) {
-      return { ok: false, message: 'Watcher is not running.' };
-    }
-    const client = (this.watcher as any).clients?.get('blackhole');
-    if (client && typeof client.deleteFile === 'function') {
-      return client.deleteFile(filename);
-    }
-    return { ok: false, message: 'Blackhole client not available.' };
+    const client = this.getManualImportClient();
+    if (!client) return { ok: false, message: 'No watch folder configured.' };
+    return client.deleteFile(filename);
   }
 
   async countWatchFiles(): Promise<number> {
-    if (!this.watcher) return 0;
-    const client = (this.watcher as any).clients?.get('blackhole');
-    if (client && typeof client.countWatchFolderFiles === 'function') {
-      return client.countWatchFolderFiles();
-    }
-    return 0;
+    const client = this.getManualImportClient();
+    if (!client) return 0;
+    return client.countWatchFolderFiles();
   }
 
   getMemoryStats(): Record<string, unknown> {

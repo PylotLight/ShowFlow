@@ -36,15 +36,21 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     setImportResults(null);
     setDeleteResults(null);
     fetch("/api/manual-import/list")
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to load");
+      .then(async (r) => {
+        if (!r.ok) {
+          const data = await r.json().catch(() => null);
+          throw new Error(data?.error || `Failed to load watch folder (${r.status})`);
+        }
         return r.json();
       })
       .then((data: WatchFile[]) => {
         setFiles(Array.isArray(data) ? data : []);
         setSelected(new Set());
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setFiles(null);
+      });
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
@@ -164,7 +170,24 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
           </div>
         )}
 
-        {files === null ? (
+        {error ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <div className="flex items-center gap-2 mb-2">
+              <XIcon className="size-5 text-destructive" />
+              <span className="text-xs text-destructive font-medium">Watch folder unavailable</span>
+            </div>
+            <p className="text-xs text-center max-w-md">{error}</p>
+            {error.toLowerCase().includes("watcher is not running") && (
+              <p className="text-xs text-muted-foreground/70 mt-2 text-center max-w-md">
+                The download watcher isn't running. Start it from the Queue page to scan this watch folder.
+              </p>
+            )}
+            <Button variant="outline" size="sm" onClick={load} className="mt-4 gap-1.5">
+              <RefreshCwIcon className="size-3.5" />
+              Retry
+            </Button>
+          </div>
+        ) : files === null ? (
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2Icon className="size-5 animate-spin mr-2" />
             <span className="text-xs">Loading watch folder...</span>

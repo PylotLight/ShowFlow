@@ -15,6 +15,7 @@ import * as system from './system';
 import * as pipeline from './pipeline';
 import * as analytics from './analytics';
 import * as health from './health';
+import * as grabs from './grabs';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -149,6 +150,12 @@ export class DatabaseManager {
   logProcessedFile(hash: string, original: string, final: string) { return system.logProcessedFile(this, hash, original, final); }
   isProcessed(hash: string) { return system.isProcessed(this, hash); }
   removeProcessedFile(hash: string) { return system.removeProcessedFile(this, hash); }
+
+  // ---- Grabbed releases (series -> release -> episode tracking) -----------
+
+  recordGrabbedRelease(input: Parameters<typeof grabs.recordGrabbedRelease>[1]) { return grabs.recordGrabbedRelease(this, input); }
+  findGrabbedReleaseForEpisode(season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForEpisode(this, season, episode, withinDays); }
+  findMostRecentGrabForShow(showId: string, withinDays?: number) { return grabs.findMostRecentGrabForShow(this, showId, withinDays); }
 
   // ---- Metadata cache ----------------------------------------------------
 

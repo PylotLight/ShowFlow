@@ -336,6 +336,26 @@ export class GrabberService {
       message: `Grabbing "${release.title}" (score: ${release.score.totalScore})`,
     });
 
+    // Persistent series -> release -> episode tracking. When we later import
+    // a file whose name is too generic to resolve, this lets the import step
+    // narrow the search to the exact show/season/episode this grab target.
+    const trackGrab = () => {
+      if (!context?.showId) return;
+      try {
+        db.recordGrabbedRelease({
+          showId: context.showId,
+          season: context.season ?? null,
+          episode: context.episode ?? null,
+          releaseTitle: release.title,
+          indexerName: release.indexer.name,
+        });
+      } catch (err) {
+        debugLog('Failed to record grabbed release (non-fatal)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
     // When TorBox is configured, send the release directly instead of writing
     // .torrent/.magnet files to a blackhole folder. This resolves once TorBox
     // has accepted the torrent - the actual download continues in the
@@ -351,6 +371,7 @@ export class GrabberService {
       if (result.ok) {
         logDebug({ type: 'grabber', level: 'info', source: 'TorBox', message: result.message });
         db.logEvent({ type: 'grab', entityType: 'release', message: result.message });
+        trackGrab();
         if (context) {
           db.logPipelineEvent({
             showId: context.showId, seasonNumber: context.season, episodeNumber: context.episode,
@@ -400,6 +421,7 @@ export class GrabberService {
     });
 
     db.logEvent({ type: 'grab', entityType: 'release', message: `Grabbed ${release.title}` });
+    trackGrab();
     if (context) {
       db.logPipelineEvent({
         showId: context.showId, seasonNumber: context.season, episodeNumber: context.episode,

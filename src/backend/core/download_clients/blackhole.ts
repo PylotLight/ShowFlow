@@ -23,6 +23,20 @@ export class BlackholeClient implements DownloadClient {
   private watchHandle: any = null;
   private watchFolder: string | null = null;
 
+  /**
+   * Point this client at the configured watch folder without attaching the
+   * OS watcher or running the scan queue. Manual Import operations depend
+   * only on the folder path, so they must keep working even when the
+   * download watcher process is stopped/crashed — this lets SystemManager
+   * build a lightweight standalone client for those ops.
+   */
+  attachFolderForManualOps(): boolean {
+    const folder = this.config.downloadClient?.blackhole?.watchFolder;
+    if (!folder?.trim()) return false;
+    this.watchFolder = folder.trim();
+    return true;
+  }
+
   /** Read-only diagnostic helpers that work inside a shell-less (distroless)
    *  container: the app process reads its own cgroup/proc files. */
   private static readCgroupMemory(): string {
@@ -260,7 +274,7 @@ export class BlackholeClient implements DownloadClient {
 
         const entry: any = { filename, fullPath, resolved: false };
         try {
-          const result = await this.oracle.resolve(
+          const result = await this.oracle.resolveWithGrabHint(
             filename,
             this.config.defaultProvider as any,
             this.config as any,
@@ -390,7 +404,11 @@ export class BlackholeClient implements DownloadClient {
         }
       }
 
-      const result = await this.oracle.resolve(filename, this.config.defaultProvider as ProviderType, this.config);
+      const result = await this.oracle.resolveWithGrabHint(
+        filename,
+        this.config.defaultProvider as ProviderType,
+        this.config,
+      );
       BlackholeClient.mem('after oracle ' + filename.slice(0, 30));
       maybeForcedGc();
 
@@ -407,7 +425,7 @@ export class BlackholeClient implements DownloadClient {
         } else if (parsed?.show) {
           errorMessage = `Could not find show "${parsed.show}" on any configured provider.`;
         } else {
-          errorMessage = `Could not parse show name from filename "${filename}".`;
+          errorMessage = `Could not parse show name from filename "${filename}" and no grab hint matched.`;
         }
 
         console.error(`[${this.name}] Could not resolve metadata for ${filename}`);

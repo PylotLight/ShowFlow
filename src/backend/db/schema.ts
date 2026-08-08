@@ -227,6 +227,27 @@ export const processedFiles = sqliteTable('processed_files', {
   timestamp: text('timestamp').default(sql`(CURRENT_TIMESTAMP)`),
 });
 
+// ---- Grabbed releases (series -> release -> episode tracking) ----------
+//
+// Records which release was grabbed for which show/episode, so that when a
+// file later lands in the watch folder with a generic or single-word episode
+// name that the filename parser can't resolve on its own, the import step can
+// narrow the search to the exact series it was grabbed for instead of failing.
+// See also drag-based hint resolution in oracle.ts/blackhole.ts.
+export const grabbedReleases = sqliteTable('grabbed_releases', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  show_id: text('show_id').notNull(),
+  season_number: integer('season_number'),
+  episode_number: integer('episode_number'),
+  release_title: text('release_title').notNull(),
+  normalized_title: text('normalized_title').notNull(),
+  indexer_name: text('indexer_name'),
+  grabbed_at: text('grabbed_at').default(sql`(datetime('now'))`),
+}, (table) => ({
+  releaseTitleIndex: index('idx_grabbed_releases_title').on(table.normalized_title),
+  showIndex: index('idx_grabbed_releases_show').on(table.show_id),
+}));
+
 // ---- Metadata cache ----
 
 export const metadataCache = sqliteTable('metadata_cache', {
