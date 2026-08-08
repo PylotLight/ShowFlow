@@ -968,18 +968,23 @@ export class Oracle {
 
   /**
    * Lightweight resolver used by the manual-import list view. It deliberately
-   * avoids the heavy provider flows used by resolve()/resolveWithGrabHint():
+   * avoids ANY provider flow so the list page cannot OOM the pod:
+   *   • never calls provider.searchShow() — its per-result hydration pulls
+   *     ~120MB of extended-series JSON per candidate
    *   • never calls provider.getEpisode()/getEpisodes()/fetchExtendedSeries()
-   *   • never paginates a show's episode list
-   *   • never pulls translation payloads
-   * Instead, it tries the local DB (alias index + fuzzy fallback) first, and
-   * only falls back to a single provider searchShow() round-trip per
-   * configured provider to guess a display name when nothing matches locally.
+   *     — its paginated TVDB episode listing pulled ~1GB per file
+   *   • never calls provider.getShow()
    *
-   * This is essential for the manual-import page, which lists every file in
-   * the watch folder; a full resolve() per file would pull multi-GB episode
-   * payloads and OOM the pod (the JS heap climbs to ~1GB per file in the
-   * db-backed scan loop, accumulating across 30+ files).
+   * It only consults the local DB (show_titles alias index + fuzzy fallback).
+   * If a file matches a previously-imported show, the row is returned so the
+   * UI can display the title/season/episode and show whether the file is a
+   * duplicate of an existing import. Files with no local match are returned
+   * as resolved:false — the user can still import them, and the full
+   * (expensive) resolveWithGrabHint() runs then inside handleFile().
+   *
+   * This matters because /api/manual-import/list enumerates every file in
+   * the watch folder; running the heavy path per file accumulated GBs of
+   * episode payloads on the JS heap before the kernel OOM-killed the pod.
    */
   async resolveForList(
     filename: string,
@@ -1004,66 +1009,27 @@ export class Oracle {
     debugLog('List-resolve: parsed filename', { filename, parsed });
 
     const localCandidate = this.findLocalShow(parsed.show);
-    if (localCandidate) {
-      debugLog('List-resolve: local match', {
+    if (!localCandidate) {
+      debugLog('List-resolve: no local match; returning unresolved', {
         parsedTitle: parsed.show,
-        title: localCandidate.show.title,
-        providerType: localCandidate.providerType,
-        providerId: localCandidate.providerId,
-        score: localCandidate.score,
       });
-      return {
-        show: localCandidate.show,
-        season: parsed.season,
-        episodes: parsed.episodes ?? [],
-        parsed,
-      };
+      return null;
     }
 
-    // No local match — try ONE lightweight search per provider (no episode data
-    // hydration) just to get a display title. This makes the manual-import
-    // page usable for shows that have never been imported, without paying
-    // the 1GB+ episode-list cost of a full resolve().
-    const strategies = this.buildSearchStrategies(parsed.show);
-    const providerOrder: ProviderType[] = [
-      preferredProvider,
-      ...PROVIDER_TYPES.filter(p => p !== preferredProvider),
-    ];
+    debugLog('List-resolve: local match', {
+      parsedTitle: parsed.show,
+      title: localCandidate.show.title,
+      providerType: localCandidate.providerType,
+      providerId: localCandidate.providerId,
+      score: localCandidate.score,
+    });
 
-    for (const provType of providerOrder) {
-      const provider = ProviderFactory.getProvider(provType, config);
-      if (!provider.isConfigured()) continue;
-
-      const results = await this.searchProvider(provider, strategies);
-      this.lastProviderAttempts.push({
-        provider: provType,
-        strategies,
-        candidateCount: results.length,
-        candidates: results.slice(0, 5).map(s => ({ id: s.id, title: s.title })),
-        matchedTitle: null,
-        episodeErrors: [],
-      });
-
-      const match = this.matchProviderShow(parsed.show, results);
-      this.lastProviderAttempts[this.lastProviderAttempts.length - 1]!.matchedTitle =
-        match?.title ?? null;
-      if (!match) continue;
-
-      debugLog('List-resolve: provider search matched', {
-        parsedTitle: parsed.show,
-        provider: provType,
-        title: match.title,
-      });
-
-      return {
-        show: match,
-        season: parsed.season,
-        episodes: parsed.episodes ?? [],
-        parsed,
-      };
-    }
-
-    return null;
+    return {
+      show: localCandidate.show,
+      season: parsed.season,
+      episodes: parsed.episodes ?? [],
+      parsed,
+    };
   }
 
   getDiagnostics(): {
