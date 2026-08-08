@@ -8,6 +8,7 @@
     "start": "NODE_ENV=production bun src/backend/server.ts",
     "build": "bun run build.ts",
     "build:supervisor": "bun build --compile --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor",
+    "release": "bun release.ts",
     "test": "bun test"
   },
   "dependencies": {
