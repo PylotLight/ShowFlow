@@ -102,6 +102,7 @@ interface ReleaseSearchDialogProps {
   season: number;
   episode?: number;
   onGrabbed?: (message: string) => void;
+  autoCloseOnSuccess?: boolean;
 }
 
 function ReleaseSearchDialog({
@@ -112,6 +113,7 @@ function ReleaseSearchDialog({
   season,
   episode,
   onGrabbed,
+  autoCloseOnSuccess,
 }: ReleaseSearchDialogProps) {
   const isSeasonScope = episode == null;
 
@@ -205,6 +207,10 @@ function ReleaseSearchDialog({
       const message: string = data.message ?? (data.success ? `Grabbed ${release.title}` : "Grab failed");
       if (data.success) {
         setGrabbedGuids((prev) => new Set(prev).add(release.guid));
+        if (autoCloseOnSuccess) {
+          // Give the grabbed state a beat to render before closing the dialog.
+          setTimeout(() => onOpenChange(false), 350);
+        }
       }
       onGrabbed?.(message);
     } catch (err: any) {
@@ -393,7 +399,7 @@ function ReleaseSearchDialog({
                       variant={isGrabbed ? "outline" : "default"}
                       onClick={() => handleGrab(release)}
                       disabled={isGrabbing}
-                      className="shrink-0"
+                      className="shrink-0 whitespace-nowrap"
                     >
                       {isGrabbing ? (
                         <Loader2Icon className="size-3.5 animate-spin" />

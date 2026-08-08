@@ -610,9 +610,26 @@ export class BlackholeClient implements DownloadClient {
         }
       }
 
-      await mkdir(path.dirname(finalPath), { recursive: true });
+      try {
+        await mkdir(path.dirname(finalPath), { recursive: true });
+      } catch (mkdirErr: any) {
+        const code = mkdirErr?.code ? ` (${mkdirErr.code})` : '';
+        throw new Error(
+          `Could not create destination directory ${path.dirname(finalPath)}${code}. ` +
+          `Check that the media folder is writable by the ShowFlow user (chmod/chown on the hostPath).`,
+        );
+      }
 
-      const movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
+      let movedTo: string | null;
+      try {
+        movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
+      } catch (moveErr: any) {
+        const code = moveErr?.code ? ` (${moveErr.code})` : '';
+        throw new Error(
+          `Failed to move ${fullPath} -> ${finalPath}${code}: ${moveErr instanceof Error ? moveErr.message : moveErr}. ` +
+          `If this is a k8s hostPath, make sure the destination mount allows writes by the container uid/gid (e.g. fsGroup).`,
+        );
+      }
       if (movedTo === null) return;
       BlackholeClient.mem('after move ' + filename.slice(0, 30));
       maybeForcedGc();
@@ -745,10 +762,12 @@ export class BlackholeClient implements DownloadClient {
     try {
       await rename(src, finalDest);
     } catch (err: any) {
-      if (err?.code === 'EXDEV') {
-        // Cross-device copy — done in bounded slices so peak memory never
-        // scales with file size, regardless of how the runtime streams
-        // Bun.file()/Bun.write (macOS may stream but the Linux build may not).
+      if (err?.code === 'EXDEV' || err?.code === 'EACCES' || err?.code === 'EPERM') {
+        // Cross-device copy or destination directory write-blocked (e.g. a
+        // hostPath volume owned by a different uid than the container). Fall
+        // back to read+write+delete so we degrade gracefully instead of
+        // erroring out. Copy is done in bounded slices so peak memory never
+        // scales with file size.
         const srcFile = Bun.file(src);
         const copyChunk = 16 * 1024 * 1024; // 16MiB
         const { createWriteStream } = await import('node:fs');

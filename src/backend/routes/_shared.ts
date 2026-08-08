@@ -82,6 +82,20 @@ export function loadConfig(): Config {
 
   cachedConfig = ConfigSchema.parse(configObj);
   cachedConfigTime = now;
+
+  // Blackhole is the built-in always-available download path. If the user
+  // only configured one of its two folders, default the other: releases
+  // grabbed without an external client are simply written into the folder
+  // the blackhole watcher already ingests from.
+  const bh = cachedConfig.downloadClient?.blackhole;
+  if (bh) {
+    if (!bh.outputFolder?.trim() && bh.watchFolder?.trim()) {
+      bh.outputFolder = bh.watchFolder;
+    } else if (!bh.watchFolder?.trim() && bh.outputFolder?.trim()) {
+      bh.watchFolder = bh.outputFolder;
+    }
+  }
+
   return cachedConfig;
 }
 

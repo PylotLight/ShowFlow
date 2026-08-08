@@ -56,6 +56,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: host-data
+              mountPath: /Data
           livenessProbe:
             tcpSocket:
               port: 3000
@@ -79,6 +81,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: showflow-data
+        - name: host-data
+          hostPath:
+            path: /Data
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1

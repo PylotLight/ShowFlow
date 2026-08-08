@@ -3,11 +3,13 @@ import { qualityEngine } from "./quality_engine";
 import { db } from "../db";
 
 test("QualityEngine Scoring", async () => {
-  // Clear tables to ensure consistent tests
+  // Clear tables to ensure consistent tests (FKs off so delete order doesn't matter)
+  db.db.run('PRAGMA foreign_keys = OFF');
   db.db.run('DELETE FROM quality_definitions');
   db.db.run('DELETE FROM quality_profiles');
   db.db.run('DELETE FROM custom_formats');
   db.db.run('DELETE FROM profile_formats');
+  db.db.run('PRAGMA foreign_keys = ON');
 
   // Setup test data
   db.saveQuality({ id: 'q_720p', name: '720p', rank: 20 });

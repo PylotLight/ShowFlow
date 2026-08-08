@@ -794,6 +794,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             flashStatus(message, /grabbed/i.test(message));
             loadEpisodes();
           }}
+          autoCloseOnSuccess
         />
       )}
 
