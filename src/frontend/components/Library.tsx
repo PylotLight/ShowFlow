@@ -1,8 +1,9 @@
-import { Check, Loader2, Trash2, ArrowUpDown, Eye, EyeOff, ListFilter } from "lucide-react";
+import { Check, Loader2, Trash2, ArrowUpDown, Eye, EyeOff, ListFilter, Settings2 } from "lucide-react";
 import * as React from "react";
 
 import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
 import { PosterCard, type ShowSummary } from "@frontend/components/showflow/PosterCard";
+import { BulkUpdateDialog } from "@frontend/components/showflow/BulkUpdateDialog";
 import { cn } from "@frontend/lib/utils";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
@@ -42,6 +43,7 @@ export function Library({
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [removing, setRemoving] = React.useState(false);
+  const [bulkOpen, setBulkOpen] = React.useState(false);
 
   const [sortBy, setSortBy] = React.useState<'title' | 'added' | 'updated' | 'tracked' | 'grabbed'>('title');
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('asc');
@@ -56,10 +58,16 @@ export function Library({
   const queueRef = React.useRef<ShowSummary[]>([]);
   const idxRef = React.useRef(0);
 
+  async function loadShows() {
+    try {
+      const res = await fetch("/api/shows");
+      if (!res.ok) return;
+      setShows(await res.json());
+    } catch {}
+  }
+
   React.useEffect(() => {
-    fetch("/api/shows")
-      .then((r) => r.json())
-      .then(setShows);
+    loadShows();
   }, []);
 
   React.useEffect(() => {
@@ -386,6 +394,13 @@ export function Library({
             </span>
             <div className="w-px h-5 bg-white/10" />
             <button
+              onClick={() => setBulkOpen(true)}
+              className="flex items-center gap-2 rounded-full bg-signal/15 text-signal hover:bg-signal/25 px-4 py-1.5 text-sm font-medium transition-colors"
+            >
+              <Settings2 className="size-3.5" />
+              Configure
+            </button>
+            <button
               onClick={handleBulkRemove}
               disabled={removing}
               className="flex items-center gap-2 rounded-full bg-red-500/15 text-red-400 hover:bg-red-500/25 disabled:opacity-50 px-4 py-1.5 text-sm font-medium transition-colors"
@@ -406,6 +421,16 @@ export function Library({
           </div>
         </div>
       )}
+
+      <BulkUpdateDialog
+        ids={Array.from(selectedIds)}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onDone={() => {
+          loadShows();
+          setSelectedIds(new Set());
+        }}
+      />
     </>
   );
 }

@@ -163,6 +163,58 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    "/api/shows/bulk-update": {
+      async POST(req: RouteReq) {
+        try {
+          const body = await req.json() as {
+            ids?: string[];
+            profile?: string;
+            seriesType?: string;
+            libraryTypeId?: string;
+            tracked?: boolean;
+          };
+          const ids = Array.isArray(body?.ids) ? body.ids : [];
+          if (ids.length === 0) {
+            return errorResponse("ids array is required.");
+          }
+          const hasChanges =
+            body.profile !== undefined ||
+            body.seriesType !== undefined ||
+            body.libraryTypeId !== undefined ||
+            body.tracked !== undefined;
+          if (!hasChanges) {
+            return errorResponse("Nothing to update - provide profile, seriesType, libraryTypeId, or tracked.");
+          }
+          if (body.seriesType !== undefined && !['standard', 'anime'].includes(body.seriesType)) {
+            return errorResponse("seriesType must be 'standard' or 'anime'.");
+          }
+
+          const updatedIds = db.bulkUpdateShows(ids, {
+            profile: body.profile,
+            seriesType: body.seriesType,
+            libraryTypeId: body.libraryTypeId,
+            tracked: body.tracked,
+          });
+
+          const parts: string[] = [];
+          if (body.libraryTypeId !== undefined) parts.push("library type");
+          if (body.profile !== undefined) parts.push("quality profile");
+          if (body.seriesType !== undefined) parts.push("series type");
+          if (body.tracked !== undefined) parts.push(`tracking (${body.tracked ? 'tracked' : 'untracked'})`);
+          db.logEvent({
+            type: 'bulk-update',
+            entityType: 'show',
+            entityId: ids.join(','),
+            message: `Bulk updated ${updatedIds.length} show${updatedIds.length !== 1 ? "s" : ""}: ${parts.join(", ")}`,
+          });
+
+          return json({ ok: true, updated: updatedIds.length });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id": {
       async GET(req: RouteReq) {
         try {

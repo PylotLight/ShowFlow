@@ -933,6 +933,7 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
   seriesType: string;
   config: Record<string, any>;
   rootFolderPath: string;
+  libraryTypeId: string;
 }>) {
   const setData: Record<string, any> = { last_updated: sql`(datetime('now'))` };
   if (updates.title !== undefined) setData.title = updates.title;
@@ -941,8 +942,47 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
   if (updates.config?.seriesType !== undefined) setData.series_type = updates.config.seriesType;
   if (updates.rootFolderPath !== undefined) setData.root_folder_path = updates.rootFolderPath;
 
+  // Apply a library type: bundles root folder + quality profile + indexers
+  // (design-brief-platform-ux-systems.md §1). Resolves the identifier the
+  // same way saveShow does so a bare id/name or the default type all land on
+  // the same show.
+  if (updates.libraryTypeId !== undefined) {
+    const resolvedId = self.resolveLibraryTypeId(updates.libraryTypeId);
+    const libraryType = resolvedId ? self.getLibraryType(resolvedId) : null;
+    setData.library_type_id = resolvedId ?? null;
+    if (libraryType) {
+      if (libraryType.quality_profile_id) setData.profile = libraryType.quality_profile_id;
+      if (libraryType.root_folder_path) setData.root_folder_path = libraryType.root_folder_path;
+    }
+  }
+
   self.drizz.update(schema.shows).set(setData)
     .where(eq(schema.shows.id, showId)).run();
+}
+
+export function setShowTracking(self: DatabaseManager, showId: string, tracked: boolean) {
+  self.drizz.update(schema.episodes).set({ is_tracked: tracked ? 1 : 0 })
+    .where(eq(schema.episodes.show_id, showId)).run();
+}
+
+export function bulkUpdateShows(self: DatabaseManager, ids: string[], updates: Partial<{
+  profile: string;
+  seriesType: string;
+  libraryTypeId: string;
+  tracked: boolean;
+}>) {
+  const affected: string[] = [];
+  for (const id of ids) {
+    if (!getShow(self, id)) continue;
+    updateShow(self, id, {
+      profile: updates.profile,
+      seriesType: updates.seriesType,
+      libraryTypeId: updates.libraryTypeId,
+    });
+    if (updates.tracked !== undefined) setShowTracking(self, id, updates.tracked);
+    affected.push(id);
+  }
+  return affected;
 }
 
 export function removeShow(self: DatabaseManager, showId: string) {

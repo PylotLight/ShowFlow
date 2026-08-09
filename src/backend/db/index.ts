@@ -136,6 +136,8 @@ export class DatabaseManager {
 
   getShowRootFolder(showId: string) { return shows.getShowRootFolder(this, showId); }
   updateShow(showId: string, updates: Parameters<typeof shows.updateShow>[2]) { return shows.updateShow(this, showId, updates); }
+  setShowTracking(showId: string, tracked: boolean) { return shows.setShowTracking(this, showId, tracked); }
+  bulkUpdateShows(ids: string[], updates: Parameters<typeof shows.bulkUpdateShows>[2]) { return shows.bulkUpdateShows(this, ids, updates); }
   removeShow(showId: string) { return shows.removeShow(this, showId); }
   removeShows(ids: string[]) { return shows.removeShows(this, ids); }
 
