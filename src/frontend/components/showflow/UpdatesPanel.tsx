@@ -12,6 +12,15 @@ interface ReleaseItem {
   isLikelyCurrent: boolean;
   hasRequiredAssets: boolean;
   buildInProgress: boolean;
+  buildDetails?: {
+    status: string;
+    conclusion: string | null;
+    htmlUrl: string | null;
+    name: string | null;
+    updatedAt: string | null;
+    createdAt: string | null;
+    durationSeconds?: number;
+  } | null;
   assets: { id: number; name: string; sizeBytes: number }[];
 }
 
@@ -34,8 +43,10 @@ export function UpdatesPanel() {
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = React.useState(0);
   const pageRef = React.useRef(1);
   const pollTimerRef = React.useRef<any>(null);
+  const reconnectTimerRef = React.useRef<any>(null);
 
   function headers(): Record<string, string> {
     return { Authorization: `Bearer ${token ?? tokenRef.current}` };
@@ -51,23 +62,47 @@ export function UpdatesPanel() {
     ])
       .then(([s, a]) => { 
         setStatus(s); 
-        setReleases(a.releases ?? []); 
+        const rels: ReleaseItem[] = a.releases ?? [];
+        setReleases(rels); 
         setHasMore(a.hasMore ?? false); 
 
-        // If watching a release build in progress, auto check if it completed
+        // Auto-select any release that is currently building if nothing is manually selected
+        const buildingRelease = rels.find(r => r.buildInProgress);
+        if (buildingRelease && !activeUpdateTag) {
+          setActiveUpdateTag(buildingRelease.tagName);
+          setCurrentStep(1);
+          setStepStatus("running");
+          setStepMessage(`CI build in progress for ${buildingRelease.tagName}. Tracking GitHub Actions workflow...`);
+          
+          if (!pollTimerRef.current) {
+            pollTimerRef.current = setInterval(() => {
+              fetchAll(true);
+            }, 3000);
+          }
+        }
+
+        // If watching a release build in progress, update step state
         if (activeUpdateTag && currentStep === 1) {
-          const target = (a.releases ?? []).find((r: ReleaseItem) => r.tagName === activeUpdateTag);
+          const target = rels.find((r: ReleaseItem) => r.tagName === activeUpdateTag);
           if (target) {
             if (target.hasRequiredAssets) {
               setStepStatus("success");
-              setStepMessage("Assets generated on GitHub Release! Ready to download.");
-              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setStepMessage(`Release ${target.tagName} assets ready! Click "Update to ${target.tagName}" below.`);
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
             } else if (!target.buildInProgress) {
               setStepStatus("error");
-              setStepMessage("CI build finished but missing required tarball asset.");
-              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setStepMessage("CI build completed but missing required showflow tarball asset.");
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
             } else {
-              setStepMessage("Watching CI build & asset generation on GitHub Actions...");
+              const runName = target.buildDetails?.name ?? "Build";
+              const dur = target.buildDetails?.durationSeconds ? `${target.buildDetails.durationSeconds}s` : "running";
+              setStepMessage(`CI Build (${runName}): ${target.buildDetails?.status || "in_progress"} — ${dur} elapsed.`);
             }
           }
         }
@@ -103,8 +138,60 @@ export function UpdatesPanel() {
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
   }, []);
+
+  // ---- Reconnect poller: polls /internal/ready from the SPA itself ----
+  // The SW offline.html only intercepts *navigation* requests (manual refreshes).
+  // After activation the SPA is still loaded in memory, so we must poll here
+  // and trigger window.location.reload() ourselves once the new release is live.
+  function startReconnectPoll(pendingReleaseId: string) {
+    setCurrentStep(4);
+    setStepStatus("running");
+    setReconnectAttempt(0);
+
+    let attempt = 0;
+
+    function backoffDelay(n: number): number {
+      const base = Math.min(800 * Math.pow(1.4, n), 4000);
+      return Math.round(base + base * 0.2 * Math.random());
+    }
+
+    function poll() {
+      attempt++;
+      setReconnectAttempt(attempt);
+      setStepMessage(`Waiting for new app process… (attempt ${attempt})`);
+
+      fetch("/internal/ready", { cache: "no-store" })
+        .then(res => {
+          if (!res.ok) throw new Error(`not ready: ${res.status}`);
+          return res.json();
+        })
+        .then(body => {
+          const releaseId = body?.releaseId;
+          if (!pendingReleaseId || releaseId === pendingReleaseId) {
+            // New release is live!
+            setStepStatus("success");
+            setStepMessage("Update applied! Reloading page…");
+            try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+            setTimeout(() => window.location.reload(), 400);
+            return;
+          }
+          // Server responded but it's still the old (or rolled-back) release
+          setStepMessage(`Server is up but still switching release… (attempt ${attempt})`);
+          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+        })
+        .catch(() => {
+          // Server not ready yet
+          setStepMessage(`Waiting for server startup… (attempt ${attempt})`);
+          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+        });
+    }
+
+    // First poll after a short delay to give the supervisor time to SIGTERM
+    reconnectTimerRef.current = setTimeout(poll, backoffDelay(0));
+  }
 
   function startWatchBuild(tagName: string) {
     setActiveUpdateTag(tagName);
@@ -115,7 +202,7 @@ export function UpdatesPanel() {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     pollTimerRef.current = setInterval(() => {
       fetchAll(true);
-    }, 5000);
+    }, 3000);
   }
 
   async function doInstall(githubReleaseId: number, tagName: string) {
@@ -167,7 +254,7 @@ export function UpdatesPanel() {
     if (tagName) setActiveUpdateTag(tagName);
     setCurrentStep(3);
     setStepStatus("running");
-    setStepMessage("Activating new app build... Handoff to supervisor in progress.");
+    setStepMessage("Activating new app build… Handoff to supervisor in progress.");
 
     setActionLoading(`activate-${releaseId}`);
     setErr(null);
@@ -181,8 +268,9 @@ export function UpdatesPanel() {
       });
       const data = await res.json();
       if (data.timedOut) {
-        setCurrentStep(4);
-        setStepMessage("Supervisor active — restarting app & reconnecting...");
+        // Activation passed pre-flight — supervisor is now restarting the app.
+        // Start polling /internal/ready from the SPA so we auto-reload.
+        startReconnectPoll(releaseId);
         return;
       }
       if (!data.ok) { 
@@ -193,9 +281,8 @@ export function UpdatesPanel() {
       }
     } catch {
       // Connection dropped = supervisor is quiescing (killing this process).
-      // Activation is proceeding normally — the SW offline page handles reconnection.
-      setCurrentStep(4);
-      setStepMessage("Supervisor active — restarting app & reconnecting...");
+      // Activation is proceeding — poll from the SPA to detect the new release.
+      startReconnectPoll(releaseId);
     }
     finally { setActionLoading(null); }
   }
@@ -272,15 +359,24 @@ export function UpdatesPanel() {
 
             {/* Step 4: Refresh */}
             <div className={`p-3 rounded-lg border text-xs space-y-1.5 transition-all ${
-              currentStep === 4 
-                ? "bg-white/[0.08] border-signal/50 text-white" 
-                : "bg-white/[0.01] border-white/5 text-white/40"
+              currentStep === 4 && stepStatus === "success"
+                ? "bg-white/[0.02] border-emerald-500/30 text-emerald-400"
+                : currentStep === 4 
+                  ? "bg-white/[0.08] border-signal/50 text-white" 
+                  : "bg-white/[0.01] border-white/5 text-white/40"
             }`}>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[10px] uppercase font-semibold">4. Refresh</span>
-                {currentStep === 4 && <Loader2Icon className="size-3 animate-spin text-signal" />}
+                {currentStep === 4 && stepStatus === "running" && <Loader2Icon className="size-3 animate-spin text-signal" />}
+                {currentStep === 4 && stepStatus === "success" && <CheckCircle2Icon className="size-3 text-emerald-400" />}
               </div>
-              <p className="font-medium truncate text-[11px]">Auto Reconnect</p>
+              <p className="font-medium truncate text-[11px]">
+                {currentStep === 4 && stepStatus === "success" 
+                  ? "Reloading…" 
+                  : currentStep === 4 && reconnectAttempt > 0
+                    ? `Polling… #${reconnectAttempt}`
+                    : "Auto Reconnect"}
+              </p>
             </div>
           </div>
 
@@ -392,53 +488,79 @@ export function UpdatesPanel() {
             {releases.map((r: ReleaseItem) => {
               const isCurrent = r.isLikelyCurrent;
               const isWatchTarget = activeUpdateTag === r.tagName;
+              const build = r.buildDetails;
 
               return (
-                <div key={r.githubReleaseId} className="flex items-start justify-between rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-white/90 truncate font-semibold">{r.tagName}</span>
-                      {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded border border-signal/20">current</span>}
-                      {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">pre</span>}
-                      {r.buildInProgress && <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20 flex items-center gap-1"><Loader2Icon className="size-2.5 animate-spin" /> building</span>}
-                      {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-400/20">missing assets</span>}
-                    </div>
-                    {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{r.publishedAt ? new Date(r.publishedAt).toLocaleDateString() : "—"}</p>
-                  </div>
-                  <div className="flex items-center gap-2 ml-3 shrink-0">
-                    {/* Action: Watch Build */}
-                    {r.buildInProgress && !isWatchTarget && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-xs text-sky-400 hover:text-sky-300"
-                        onClick={() => startWatchBuild(r.tagName)}
-                      >
-                        <HammerIcon className="size-3 mr-1" />
-                        Watch Build
-                      </Button>
-                    )}
-
-                    {/* Action: Download & Install */}
-                    {r.hasRequiredAssets && !isCurrent && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={actionLoading !== null}
-                        onClick={() => doInstall(r.githubReleaseId, r.tagName)}
-                      >
-                        {actionLoading === `install-${r.githubReleaseId}` ? (
-                          <Loader2Icon className="size-3 animate-spin" />
-                        ) : (
-                          <>
-                            <DownloadIcon className="size-3 mr-1.5" />
-                            Update
-                          </>
+                <div key={r.githubReleaseId} className="space-y-2 rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs text-white/90 truncate font-semibold">{r.tagName}</span>
+                        {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded border border-signal/20 font-mono">current</span>}
+                        {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 font-mono">pre</span>}
+                        {r.buildInProgress && (
+                          <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20 font-mono flex items-center gap-1">
+                            <Loader2Icon className="size-2.5 animate-spin" /> CI Building ({build?.durationSeconds ? `${build.durationSeconds}s` : "in progress"})
+                          </span>
                         )}
-                      </Button>
-                    )}
+                        {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-400/20 font-mono">missing assets</span>}
+                      </div>
+                      {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
+                      <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono">
+                        <span>{r.publishedAt ? new Date(r.publishedAt).toLocaleString() : "—"}</span>
+                        {r.assets.length > 0 && <span>Asset: {(r.assets[0]!.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>}
+                        {build?.htmlUrl && (
+                          <a href={build.htmlUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline flex items-center gap-0.5">
+                            GitHub Workflow <ArrowRightIcon className="size-2.5" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-3 shrink-0">
+                      {/* Action: Watch Build */}
+                      {r.buildInProgress && (
+                        <Button
+                          variant={isWatchTarget ? "default" : "ghost"}
+                          size="sm"
+                          className="text-xs text-sky-400 hover:text-sky-300 border border-sky-500/20"
+                          onClick={() => startWatchBuild(r.tagName)}
+                        >
+                          <HammerIcon className="size-3 mr-1" />
+                          {isWatchTarget ? "Watching..." : "Track Build"}
+                        </Button>
+                      )}
+
+                      {/* Action: Download & Install */}
+                      {r.hasRequiredAssets && !isCurrent && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={actionLoading !== null}
+                          onClick={() => doInstall(r.githubReleaseId, r.tagName)}
+                        >
+                          {actionLoading === `install-${r.githubReleaseId}` ? (
+                            <Loader2Icon className="size-3 animate-spin mr-1.5" />
+                          ) : (
+                            <DownloadIcon className="size-3 mr-1.5" />
+                          )}
+                          Update to {r.tagName}
+                        </Button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Inline Live Build Tracker Bar if this tag is actively selected */}
+                  {isWatchTarget && currentStep === 1 && (
+                    <div className="mt-2 p-2.5 rounded bg-sky-950/30 border border-sky-500/30 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Loader2Icon className="size-3.5 animate-spin text-sky-400" />
+                        <span className="font-mono text-[11px] text-sky-200">
+                          {build ? `Actions Run "${build.name}": status is ${build.status} (${build.durationSeconds ?? 0}s elapsed)` : "Monitoring GitHub Actions release workflow..."}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-sky-400/80">Polling live every 3s</span>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -34,26 +34,26 @@ const DOWNLOADS_DIR = `${DATA_DIR}/downloads`;
 const ADMIN_PORT = Number(process.env.SHOWFLOW_ADMIN_PORT ?? 9090);
 const ADMIN_BASE = `http://127.0.0.1:${ADMIN_PORT}`;
 
+export interface BuildDetails {
+  status: string; // "in_progress", "queued", "completed", etc.
+  conclusion: string | null;
+  htmlUrl: string | null;
+  name: string | null;
+  updatedAt: string | null;
+  createdAt: string | null;
+  durationSeconds?: number;
+}
+
 export interface ReleaseSummary {
   githubReleaseId: number;
   tagName: string;
   name: string | null;
   publishedAt: string | null;
   prerelease: boolean;
-  /**
-   * Best-effort only — compares the GitHub tag against the running app's
-   * own BUILD_VERSION. The authoritative check is whether /internal/ready's
-   * `releaseId` (the compiled-in commit) matches after activation, since a
-   * tag can be re-pushed to point at a different commit.
-   */
   isLikelyCurrent: boolean;
   hasRequiredAssets: boolean;
-  /**
-   * True when the release's GitHub Actions workflow that produces the tarball
-   * asset is still running — i.e. assets are "missing" only because the build
-   * hasn't finished, not because publishing failed.
-   */
   buildInProgress: boolean;
+  buildDetails?: BuildDetails | null;
   assets: { id: number; name: string; sizeBytes: number }[];
 }
 
@@ -107,6 +107,9 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
       .map(async (r): Promise<ReleaseSummary> => {
         const assets = (r.assets ?? []) as any[];
         const hasTarball = assets.some((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
+        const build = hasTarball ? null : await fetchBuildDetails(token, repo, r.tag_name);
+        const inProgress = build?.status === "in_progress" || build?.status === "queued" || build?.status === "requested";
+
         return {
           githubReleaseId: r.id,
           tagName: r.tag_name,
@@ -115,7 +118,8 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
           prerelease: !!r.prerelease,
           isLikelyCurrent: r.tag_name === currentVersion,
           hasRequiredAssets: hasTarball,
-          buildInProgress: hasTarball ? false : await isBuildInProgress(token, repo, r.tag_name),
+          buildInProgress: inProgress,
+          buildDetails: build,
           assets: assets.map((a) => ({ id: a.id, name: a.name, sizeBytes: a.size })),
         };
       }),
@@ -125,20 +129,37 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
 }
 
 /**
- * Best-effort check: does the GitHub Actions workflow that publishes the
- * release's tarball asset still have an in-progress run for this tag?
- * Used to distinguish "publish failed" (missing assets) from "still building"
- * (asset on its way) in the updates UI.
+ * Checks GitHub Actions workflow runs for a release tag to get detailed build status,
+ * timestamps, and run URL.
  */
-async function isBuildInProgress(token: string | undefined, repo: string, tagName: string): Promise<boolean> {
+async function fetchBuildDetails(token: string | undefined, repo: string, tagName: string): Promise<BuildDetails | null> {
   try {
-    const params = new URLSearchParams({ event: "release", branch: tagName, per_page: "1" });
+    // Check runs for head tag or branch
+    const params = new URLSearchParams({ per_page: "5" });
     const res = await fetch(`${GITHUB_API}/repos/${repo}/actions/runs?${params}`, { headers: githubHeaders(token) });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { workflow_runs?: { status: string }[] };
-    return (data.workflow_runs ?? []).some((run) => run.status === "in_progress");
+    if (!res.ok) return null;
+    const data = (await res.json()) as { workflow_runs?: any[] };
+    const runs = data.workflow_runs ?? [];
+    
+    // Find run associated with this tag / release event
+    const matchedRun = runs.find((run: any) => run.head_branch === tagName || run.display_title?.includes(tagName));
+    if (!matchedRun) return null;
+
+    const createdAt = matchedRun.created_at ? new Date(matchedRun.created_at).getTime() : Date.now();
+    const updatedAt = matchedRun.updated_at ? new Date(matchedRun.updated_at).getTime() : Date.now();
+    const durationSeconds = Math.round((updatedAt - createdAt) / 1000);
+
+    return {
+      status: matchedRun.status,
+      conclusion: matchedRun.conclusion ?? null,
+      htmlUrl: matchedRun.html_url ?? null,
+      name: matchedRun.name ?? "Build & Push Docker Image",
+      createdAt: matchedRun.created_at ?? null,
+      updatedAt: matchedRun.updated_at ?? null,
+      durationSeconds: Math.max(0, durationSeconds),
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
