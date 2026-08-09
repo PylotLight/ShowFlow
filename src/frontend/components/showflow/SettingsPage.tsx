@@ -273,6 +273,10 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
     saveConfig({ apiKeys: clean });
   }
 
+  function saveImdb(imdb: any) {
+    saveConfig({ imdb });
+  }
+
   function updateTaskConfig(name: string, updates: { enabled?: boolean; intervalMinutes?: number }) {
     setSaving(`task-${name}`);
     setSaveMsg(null);
@@ -448,6 +452,7 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
             setShowTvdbKey={setShowTvdbKey}
             showTvdbPin={showTvdbPin}
             setShowTvdbPin={setShowTvdbPin}
+            saveImdb={saveImdb}
           />
         )}
 

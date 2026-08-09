@@ -2,6 +2,27 @@ import { z } from 'zod';
 
 export const ConfigSchema = z.object({
   apiKeys: z.record(z.string(), z.string()).optional(),
+  imdb: z.object({
+    enabled: z.boolean().default(false),
+    apiKey: z.string().default(''),
+    awsAccessKeyId: z.string().default(''),
+    awsSecretAccessKey: z.string().default(''),
+    region: z.string().default('us-east-1'),
+    endpoint: z.string().default('https://api-fulfill.dataexchange.us-east-1.amazonaws.com/v1'),
+    dataSetId: z.string().default(''),
+    revisionId: z.string().default(''),
+    assetId: z.string().default(''),
+  }).default({
+    enabled: false,
+    apiKey: '',
+    awsAccessKeyId: '',
+    awsSecretAccessKey: '',
+    region: 'us-east-1',
+    endpoint: 'https://api-fulfill.dataexchange.us-east-1.amazonaws.com/v1',
+    dataSetId: '',
+    revisionId: '',
+    assetId: '',
+  }),
   defaultProvider: z.enum(['tmdb', 'tvdb', 'anilist']).default('tvdb'),
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
   dryRun: z.boolean().default(false),

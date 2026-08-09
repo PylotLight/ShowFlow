@@ -181,7 +181,21 @@ export function imageRoutes() {
           }
 
           if (!backdropUrl) {
-            return new Response('', { status: 404 });
+            // No backdrop artwork exists; fall back to the poster so the UI
+            // never receives a 404 for the banner slot.
+            const show = await provider.getShow(showId);
+            const posterUrl = extractPosterUrl(source, show.metadata);
+            if (!posterUrl) return new Response('', { status: 404 });
+            return fetch(posterUrl).then(imgRes => {
+              if (!imgRes.ok) return new Response('', { status: 404 });
+              const contentType = imgRes.headers.get("Content-Type") ?? "image/jpeg";
+              return new Response(imgRes.body, {
+                headers: {
+                  "Content-Type": contentType,
+                  "Cache-Control": "public, max-age=21600",
+                },
+              });
+            });
           }
 
           const imgRes = await fetch(backdropUrl);

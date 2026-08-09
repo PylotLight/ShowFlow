@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { ProviderFactory } from "../providers/factory";
 import type { ProviderType } from "../providers/factory";
+import { fetchImdbRatings } from "../providers/imdb";
 import { json, errorResponse, loadConfig, isProviderType } from "./_shared";
 
 export function providerRoutes() {
@@ -133,10 +134,10 @@ export function providerRoutes() {
           if (!provider.isConfigured()) {
             return errorResponse(`Source "${source}" is not configured.`, 400);
           }
-          const [show, seasons] = await Promise.all([
-            provider.getShow(req.params.id!),
-            provider.getSeasons(req.params.id!).catch(() => []),
-          ]);
+          const show = await provider.getShow(req.params.id!);
+          const imdbId = extractImdbId(source, show.metadata);
+          const imdbRatings = imdbId ? await fetchImdbRatings(imdbId) : null;
+          const imdbRating = imdbRatings?.rating ?? null;
           return json({
             id: show.id,
             title: show.title,
@@ -148,7 +149,9 @@ export function providerRoutes() {
             backdropUrl: `/api/images/backdrop/${source}/${show.id}`,
             overview: toOverview(source, show),
             genres: toGenres(source, show),
-            rating: normalizeRating(source, show.metadata),
+            rating: imdbRating ?? normalizeRating(source, show.metadata),
+            ratingSource: imdbRating != null ? "IMDb" : source === "tmdb" ? "TMDB" : source === "anilist" ? "AniList" : null,
+            ratingVotes: imdbRatings?.votes ?? null,
             status: normalizeStatus(source, show),
             type: normalizeSeriesType(source, show),
             episodeCount: toEpisodeCount(source, show),
@@ -156,11 +159,7 @@ export function providerRoutes() {
             creators: toCreators(source, show),
             networks: toNetworks(source, show),
             firstAirDate: toFirstAirDate(source, show),
-            seasons: seasons.map((s) => ({
-              id: s.id,
-              number: s.number,
-              name: s.name,
-            })),
+            seasons: toSeasons(source, show),
             links: toLinks(source, show),
           });
         } catch (err) {
@@ -252,7 +251,8 @@ export function normalizeRating(
   if (!meta) return null;
   if (source === "tmdb" && typeof meta.vote_average === "number") return meta.vote_average;
   if (source === "anilist" && typeof meta.averageScore === "number") return meta.averageScore / 10;
-  if (source === "tvdb" && typeof meta.score === "number") return meta.score / 10;
+  // TVDB's extended `score` is a popularity metric, not a rating. When a real
+  // IMDb rating is available it is fetched separately in the detail endpoint.
   return null;
 }
 
@@ -282,9 +282,13 @@ function toOverview(source: ProviderType, show: { metadata?: Record<string, any>
 function toGenres(source: ProviderType, show: { metadata?: Record<string, any> }): string[] | null {
   const meta = metaOf(show);
   if (!meta) return null;
-  if (source === "tmdb" && Array.isArray(meta.genres)) return meta.genres.map((g: any) => g.name ?? null).filter(Boolean);
+  if (source === "tmdb" && Array.isArray(meta.genres)) return meta.genres.map((g: any) => g?.name ?? null).filter(Boolean);
   if (source === "anilist" && Array.isArray(meta.genres)) return meta.genres;
-  if (source === "tvdb" && Array.isArray(meta.genres)) return meta.genres;
+  if (source === "tvdb" && Array.isArray(meta.genres)) {
+    return meta.genres
+      .map((g: any) => (typeof g === "string" ? g : g?.name ?? null))
+      .filter(Boolean);
+  }
   return null;
 }
 
@@ -295,8 +299,14 @@ function normalizeSeriesType(source: ProviderType, show: { metadata?: Record<str
   if (source === "tmdb") return typeof meta.type === "string" ? meta.type : "tv";
   if (source === "tvdb" && Array.isArray(meta.genres)) {
     const types = ["scripted", "mini-series", "reality"];
-    const hit = meta.genres.find((g: any) => typeof g === "string" && types.includes(g.toLowerCase()));
-    if (hit) return ["scripted", "mini-series", "reality"].find((t) => t === hit.toLowerCase()) ?? null;
+    const hit = meta.genres.find((g: any) => {
+      const name = typeof g === "string" ? g : g?.name;
+      return typeof name === "string" && types.includes(name.toLowerCase());
+    });
+    if (hit) {
+      const name = typeof hit === "string" ? hit : hit?.name;
+      return types.find((t) => t === name?.toLowerCase()) ?? null;
+    }
   }
   return null;
 }
@@ -315,6 +325,25 @@ function toSeasonCount(source: ProviderType, show: { metadata?: Record<string, a
   if (source === "tmdb" && typeof meta.number_of_seasons === "number") return meta.number_of_seasons;
   if (source === "tvdb" && Array.isArray(meta.seasons) && meta.seasons.length) return meta.seasons.length;
   return 1;
+}
+
+function toSeasons(source: string, show: { metadata?: Record<string, any> }): Array<{ id: string; number: number; name?: string }> {
+  const meta = metaOf(show);
+  if (!meta) return [];
+  if (Array.isArray(meta.seasons)) {
+    return meta.seasons
+      .filter((s: any) => s && typeof s === "object")
+      .map((s: any) => ({
+        id: String(s.id ?? s.season_id ?? `${s.number ?? s.season_number ?? ""}`),
+        number: Number(s.number ?? s.season_number ?? 0),
+        name: typeof s.name === "string" ? s.name : typeof s.season_number === "number" ? `Season ${s.season_number}` : undefined,
+      }))
+      .filter((s: { number: number }) => Number.isFinite(s.number) && s.number > 0);
+  }
+  if (source === "anilist") {
+    return [{ id: "1", number: 1, name: "Season 1" }];
+  }
+  return [];
 }
 
 function toCreators(source: ProviderType, show: { metadata?: Record<string, any> }): string[] | null {
@@ -346,8 +375,7 @@ function toLinks(source: ProviderType, show: { metadata?: Record<string, any>; i
   const meta = metaOf(show) as any;
   const links: Array<{ label: string; url: string }> = [];
 
-  const imdbId =
-    meta?.imdb_id ?? meta?.imdbId ?? meta?.external_ids?.imdb_id ?? null;
+  const imdbId = extractImdbId(source, meta);
   const tvdbId =
     meta?.tvdb_id ?? meta?.external_ids?.tvdb_id ?? null;
   const malId =
@@ -380,6 +408,23 @@ function toLinks(source: ProviderType, show: { metadata?: Record<string, any>; i
   }
 
   return links;
+}
+
+/** Resolve an IMDb (ttXXXXXXX) id from provider metadata if one is present.
+ *  - TMDB: external_ids.imdb_id or imdb_id
+ *  - TVDB: remoteIds entries with sourceName === "IMDB"
+ */
+function extractImdbId(source: string, meta: Record<string, any> | undefined): string | null {
+  if (!meta) return null;
+  if (source === "tmdb") {
+    const raw = meta?.external_ids?.imdb_id ?? meta?.imdb_id ?? meta?.imdbId;
+    return raw && typeof raw === "string" ? raw : null;
+  }
+  if (source === "tvdb" && Array.isArray(meta.remoteIds)) {
+    const hit = meta.remoteIds.find((r: any) => r && (r.sourceName === "IMDB" || r.source === "IMDB"));
+    return hit?.id?.startsWith("tt") ? hit.id : null;
+  }
+  return null;
 }
 
 function stripHtml(input: string): string {

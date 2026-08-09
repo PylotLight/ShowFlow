@@ -56,6 +56,7 @@ interface ShowDetail {
   overview?: string | null;
   genres?: string[] | null;
   rating?: number | null;
+  ratingSource?: string | null;
   status?: string | null;
   type?: string | null;
   episodeCount?: number | null;
@@ -91,11 +92,39 @@ const SOURCE_OPTIONS: { id: ProviderId; label: string }[] = [
   { id: "anilist", label: "AniList" },
 ];
 
+type SortMode = "relevance" | "newest" | "oldest" | "rated" | "alpha";
+
+const SORT_OPTIONS: { id: SortMode; label: string }[] = [
+  { id: "relevance", label: "Relevance" },
+  { id: "newest", label: "Newest" },
+  { id: "oldest", label: "Oldest" },
+  { id: "rated", label: "Top rated" },
+  { id: "alpha", label: "A-Z" },
+];
+
+function sortResults(results: SearchResult[], mode: SortMode): SearchResult[] {
+  if (mode === "relevance") return results;
+  const sorted = [...results];
+  switch (mode) {
+    case "newest":
+      return sorted.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+    case "oldest":
+      return sorted.sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
+    case "rated":
+      return sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    case "alpha":
+      return sorted.sort((a, b) => a.title.localeCompare(b.title));
+    default:
+      return results;
+  }
+}
+
 function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = React.useState(false);
   const [source, setSource] = React.useState<ProviderId>("tvdb");
   const [availableSources, setAvailableSources] = React.useState<ProviderId[]>([]);
   const [query, setQuery] = React.useState("");
+  const [sortMode, setSortMode] = React.useState<SortMode>("relevance");
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [searching, setSearching] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -394,7 +423,23 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden md:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
             {/* Results pane */}
-            <ScrollArea className="h-full w-full rounded-lg border border-white/10 overflow-hidden">
+            <div className="flex h-full min-h-0 flex-col rounded-lg border border-white/10 overflow-hidden">
+              <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
+                <span className="text-muted-foreground font-mono text-[10px] font-bold uppercase tracking-widest">
+                  {results.length} {results.length === 1 ? "result" : "results"}
+                </span>
+                <Select value={sortMode} onValueChange={(v) => setSortMode(v as SortMode)}>
+                  <SelectTrigger className="h-6 w-32 text-[11px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SORT_OPTIONS.map(o => (
+                      <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <ScrollArea className="min-h-0 flex-1">
               <div className="flex flex-col divide-y divide-white/5 overflow-hidden">
                 {searching && (
                   <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
@@ -404,7 +449,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                 {!searching && query.trim() && results.length === 0 && (
                   <p className="text-muted-foreground p-4 text-sm">No results for &ldquo;{query}&rdquo;.</p>
                 )}
-                {results.map((r) => {
+                {sortResults(results, sortMode).map((r) => {
                   const isSelected = selectedItems.has(r.id);
                   const disabled = !!r.existingShowId;
                   const isActive = activeItem?.id === r.id;
@@ -434,7 +479,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                       >
                         {isSelected && <CheckIcon className="size-3 text-white" />}
                       </div>
-                      <PosterImage source={source} id={r.id} alt={r.title} className="h-20 w-14 shrink-0 rounded-sm" />
+                      <PosterImage source={source} id={r.id} alt={r.title} className="h-28 w-20 shrink-0 rounded-sm" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{r.title}</p>
                         <p className="text-muted-foreground font-mono text-xs truncate">
@@ -462,7 +507,8 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                   );
                 })}
               </div>
-            </ScrollArea>
+              </ScrollArea>
+            </div>
 
             {/* Detail pane */}
             <div className="hidden min-h-0 flex-col rounded-lg border border-white/10 overflow-hidden md:flex">
@@ -520,22 +566,29 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
   const genres = detail.genres ?? [];
   const links = detail.links ?? [];
   const seasons = detail.seasons ?? [];
+  const [backdropFailed, setBackdropFailed] = React.useState(false);
 
   return (
     <ScrollArea className="h-full w-full">
       <div className="flex flex-col">
-        <div className="relative h-36 w-full shrink-0 overflow-hidden bg-muted">
-          <img
-            src={detail.backdropUrl}
-            alt=""
-            loading="lazy"
-            className="size-full object-cover"
-          />
+        <div className={cn(
+          "relative h-36 w-full shrink-0 overflow-hidden",
+          backdropFailed ? "bg-gradient-to-br from-signal/30 via-muted to-muted" : "bg-muted",
+        )}>
+          {!backdropFailed && (
+            <img
+              src={detail.backdropUrl}
+              alt=""
+              loading="lazy"
+              onError={() => setBackdropFailed(true)}
+              className="size-full object-cover"
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         </div>
 
         <div className="-mt-12 flex items-end gap-4 px-4">
-          <PosterImage source={source} id={detail.id} alt={detail.title} className="h-32 w-22 shrink-0 rounded-md border border-white/10 shadow-xl" />
+          <PosterImage source={source} id={detail.id} alt={detail.title} className="h-40 w-28 shrink-0 rounded-md border border-white/10 shadow-xl" />
           <div className="min-w-0 flex-1 pb-1">
             <h3 className="text-lg leading-tight font-semibold truncate">{detail.title}</h3>
             <p className="text-muted-foreground font-mono text-xs truncate">
@@ -549,6 +602,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
           {rating != null && (
             <Badge variant="amber" className="gap-1">
               <StarIcon className="size-3 fill-amber-400" /> {rating}
+              {detail.ratingSource && <span className="text-amber-400/70 font-mono text-[9px] uppercase">{detail.ratingSource}</span>}
             </Badge>
           )}
           {detail.status && <Badge variant="signal">{detail.status}</Badge>}
