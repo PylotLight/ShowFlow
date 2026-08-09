@@ -203,15 +203,6 @@ export function Library({
             <div className="text-muted-foreground flex items-center justify-center gap-2 py-24 text-sm">
               <Loader2 className="size-4 animate-spin" /> Loading library...
             </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-muted-foreground flex flex-col items-center gap-2 py-24 text-center">
-              <p className="text-lg">{shows && shows.length > 0 ? "No matches." : "Nothing tracked yet."}</p>
-              <p className="text-sm">
-                {shows && shows.length > 0
-                  ? "Try a different search or filter."
-                  : "Add a show to get it appearing here."}
-              </p>
-            </div>
           ) : (
             <>
               <div className="flex items-center flex-wrap gap-x-6 gap-y-3 mb-5 shrink-0">
@@ -349,6 +340,16 @@ export function Library({
                 </div>
               </div>
 
+              {filtered.length === 0 ? (
+                <div className="text-muted-foreground flex flex-col items-center gap-2 py-24 text-center">
+                  <p className="text-lg">{shows && shows.length > 0 ? "No matches." : "Nothing tracked yet."}</p>
+                  <p className="text-sm">
+                    {shows && shows.length > 0
+                      ? "Try a different search or filter."
+                      : "Add a show to get it appearing here."}
+                  </p>
+                </div>
+              ) : (
               <div
                 className="grid gap-5"
                 style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` }}
@@ -380,6 +381,7 @@ export function Library({
                   </div>
                 ))}
               </div>
+              )}
             </>
           )}
         </div>
