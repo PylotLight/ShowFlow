@@ -48,7 +48,23 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
             media (search: $search, type: ANIME) {
               id
               title { romaji english native }
+              coverImage { large medium }
+              bannerImage
+              description
+              averageScore
+              format
+              status
+              seasonYear
               startDate { year }
+              endDate { year }
+              episodes
+              genres
+              duration
+              source
+              studios { nodes { name } }
+              siteUrl
+              idMal
+              externalLinks { url site }
             }
           }
         }
@@ -66,7 +82,7 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
       title: media.title.english || media.title.romaji,
       originalTitle: media.title.native,
       romanizedTitle: media.title.romaji,
-      year: media.startDate?.year,
+      year: media.startDate?.year ?? media.seasonYear,
       provider: this.name,
       normalizedId: media.id.toString(),
       metadata: media
@@ -199,7 +215,28 @@ export class AniListProvider extends BaseProvider implements IMetadataProvider {
 
   override async getShow(id: string): Promise<Show> {
     const gqlQuery = {
-      query: `query ($id: Int) { Media(id: $id, type: ANIME) { id title { romaji english native } bannerImage coverImage { large medium } episodes } }`,
+      query: `query ($id: Int) { Media(id: $id, type: ANIME) {
+        id
+        title { romaji english native }
+        coverImage { extraLarge large medium }
+        bannerImage
+        description
+        averageScore
+        meanScore
+        format
+        status
+        seasonYear
+        startDate { year }
+        endDate { year }
+        episodes
+        genres
+        duration
+        source
+        studios { nodes { name } }
+        siteUrl
+        idMal
+        externalLinks { url site }
+      } }`,
       variables: { id: parseInt(id, 10) },
     };
 

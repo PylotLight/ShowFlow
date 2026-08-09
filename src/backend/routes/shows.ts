@@ -84,6 +84,9 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
 
           const config = loadConfig();
           const provider = ProviderFactory.getProvider(body.source, config);
+          if (!provider.isConfigured()) {
+            return errorResponse(`Source "${body.source}" is not configured.`, 400);
+          }
 
           const showData = await provider.getShow(body.providerId);
           const providerId = showData.id;

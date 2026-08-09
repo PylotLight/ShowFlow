@@ -26,7 +26,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getShow(id: string): Promise<Show> {
-    const data = await this.fetch<any>(`/tv/${id}?api_key=${this.apiKey}&language=en-US`);
+    const data = await this.fetch<any>(`/tv/${id}?api_key=${this.apiKey}&language=en-US&append_to_response=external_ids`);
     return {
       id: data.id.toString(),
       title: data.name,

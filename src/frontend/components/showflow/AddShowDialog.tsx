@@ -1,7 +1,18 @@
-import { CheckIcon, Loader2, PlusIcon, SearchIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ClapperboardIcon,
+  ExternalLinkIcon,
+  FilmIcon,
+  Loader2,
+  PlusIcon,
+  SearchIcon,
+  StarIcon,
+  XIcon,
+} from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
+import { Badge } from "@frontend/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -13,20 +24,77 @@ import {
 import { Input } from "@frontend/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { ScrollArea } from "@frontend/components/ui/scroll-area";
+import { Separator } from "@frontend/components/ui/separator";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import { cn } from "@frontend/lib/utils";
 
 interface SearchResult {
   id: string;
   title: string;
+  originalTitle?: string | null;
+  romanizedTitle?: string | null;
   year?: number;
   providerType: string;
+  posterUrl?: string;
+  backdropUrl?: string;
   existingShowId?: string | null;
+  overview?: string | null;
+  type?: string | null;
+  rating?: number | null;
+  status?: string | null;
 }
+
+interface ShowDetail {
+  id: string;
+  title: string;
+  originalTitle?: string | null;
+  romanizedTitle?: string | null;
+  year?: number;
+  providerType: string;
+  posterUrl?: string;
+  backdropUrl?: string;
+  overview?: string | null;
+  genres?: string[] | null;
+  rating?: number | null;
+  status?: string | null;
+  type?: string | null;
+  episodeCount?: number | null;
+  seasonCount?: number | null;
+  creators?: string[] | null;
+  networks?: string[] | null;
+  firstAirDate?: string | null;
+  seasons?: { id: string; number: number; name?: string }[];
+  links?: { label: string; url: string }[];
+}
+
+function stripHtml(input?: string | null): string {
+  if (!input) return "";
+  return input
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function formatRating(rating?: number | null): string | null {
+  if (typeof rating !== "number") return null;
+  return rating.toFixed(1);
+}
+
+type ProviderId = "tvdb" | "tmdb" | "anilist";
+
+const SOURCE_OPTIONS: { id: ProviderId; label: string }[] = [
+  { id: "tvdb", label: "TVDB" },
+  { id: "tmdb", label: "TMDB" },
+  { id: "anilist", label: "AniList" },
+];
 
 function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = React.useState(false);
-  const [source, setSource] = React.useState<"tvdb" | "tmdb" | "anilist">("tvdb");
+  const [source, setSource] = React.useState<ProviderId>("tvdb");
+  const [availableSources, setAvailableSources] = React.useState<ProviderId[]>([]);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [searching, setSearching] = React.useState(false);
@@ -42,6 +110,12 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [showProfiles, setShowProfiles] = React.useState<{ id: string; name: string; root_folder_path: string }[]>([]);
   const [selectedShowProfileId, setSelectedShowProfileId] = React.useState<string>("");
   const [selectedItems, setSelectedItems] = React.useState<Map<string, SearchResult>>(new Map());
+
+  const [activeItem, setActiveItem] = React.useState<SearchResult | null>(null);
+  const [detail, setDetail] = React.useState<ShowDetail | null>(null);
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailError, setDetailError] = React.useState<string | null>(null);
+
   const [processing, setProcessing] = React.useState<{
     status: "idle" | "processing" | "done";
     results: { id: string; title: string; ok: boolean; error?: string }[];
@@ -59,7 +133,20 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     setQuery("");
     setResults([]);
     setError(null);
-    setSeriesType(source === "anilist" ? "anime" : "standard");
+    setActiveItem(null);
+    setDetail(null);
+    fetch("/api/providers").then(r => r.json()).then(data => {
+      const configured = Array.isArray(data)
+        ? data.filter((p: any) => p?.configured).map((p: any) => p.id as ProviderId)
+        : [];
+      setAvailableSources(configured);
+      if (configured.length > 0) {
+        const first = configured[0]!;
+        const next: ProviderId = configured.includes(source) ? source! : first;
+        setSource(next);
+        setSeriesType(next === "anilist" ? "anime" : "standard");
+      }
+    }).catch(() => setAvailableSources([]));
     fetch("/api/library-types").then(r => r.json()).then(data => {
       const list = Array.isArray(data) ? data : [];
       setLibraryTypes(list);
@@ -99,6 +186,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         if (!res.ok) throw new Error((await res.json()).error ?? "Search failed");
         const data = await res.json();
         setResults(data);
+        setActiveItem(data[0] ?? null);
       } catch (err: any) {
         setError(err.message);
         setResults([]);
@@ -108,6 +196,33 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     }, 350);
     return () => clearTimeout(timeout);
   }, [query, source]);
+
+  React.useEffect(() => {
+    if (!activeItem || activeItem.existingShowId) {
+      setDetail(null);
+      setDetailError(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+    fetch(`/api/providers/${source}/show/${activeItem.id}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load details");
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled) setDetail(data as ShowDetail);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setDetailError(err.message ?? "Failed to load details");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeItem, source]);
 
   function toggleSelect(item: SearchResult) {
     setSelectedItems(prev => {
@@ -169,21 +284,21 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
           <PlusIcon /> Add Show
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6">
         <DialogHeader>
           <DialogTitle>Add shows</DialogTitle>
-          <DialogDescription>Search a provider, select shows, then add them all at once.</DialogDescription>
+          <DialogDescription>Search a provider, preview shows, select the ones you want, then add them all at once.</DialogDescription>
         </DialogHeader>
 
         <div className="flex gap-2">
-          <Select value={source} onValueChange={(v) => { setSource(v as typeof source); setSeriesType(v === "anilist" ? "anime" : "standard"); }}>
+          <Select value={source} onValueChange={(v) => { setSource(v as ProviderId); setSeriesType(v === "anilist" ? "anime" : "standard"); }}>
             <SelectTrigger className="w-28 shrink-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="tvdb">TVDB</SelectItem>
-              <SelectItem value="tmdb">TMDB</SelectItem>
-              <SelectItem value="anilist">AniList</SelectItem>
+              {SOURCE_OPTIONS.filter(o => availableSources.includes(o.id)).map(o => (
+                <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <div className="relative flex-1">
@@ -246,14 +361,14 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         {error && <p className="text-destructive text-sm">{error}</p>}
 
         {processing.status !== "idle" ? (
-          <div className="rounded-lg border border-white/10 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-white/10 overflow-hidden">
             <div className="h-1 bg-white/5">
               <div
                 className="h-full bg-signal transition-all duration-300"
                 style={{ width: `${(processing.results.length / Math.max(selectedItems.size, 1)) * 100}%` }}
               />
             </div>
-            <div className="flex flex-col divide-y divide-white/5 max-h-80 overflow-y-auto">
+            <div className="flex flex-col divide-y divide-white/5 min-h-0 flex-1 overflow-y-auto">
               {processing.results.map((r) => (
                 <div key={r.id} className="flex items-center gap-3 p-3">
                   {r.ok ? (
@@ -277,8 +392,9 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             )}
           </div>
         ) : (
-          <>
-            <ScrollArea className="h-80 w-full rounded-lg border border-white/10 overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden md:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+            {/* Results pane */}
+            <ScrollArea className="h-full w-full rounded-lg border border-white/10 overflow-hidden">
               <div className="flex flex-col divide-y divide-white/5 overflow-hidden">
                 {searching && (
                   <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
@@ -291,29 +407,53 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                 {results.map((r) => {
                   const isSelected = selectedItems.has(r.id);
                   const disabled = !!r.existingShowId;
+                  const isActive = activeItem?.id === r.id;
                   return (
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => { if (!disabled) toggleSelect(r); }}
+                      onClick={() => {
+                        if (disabled) { setActiveItem(r); return; }
+                        setActiveItem(r);
+                        toggleSelect(r);
+                      }}
                       disabled={disabled}
                       className={cn(
                         "min-w-0 flex items-center gap-3 p-3 text-left transition-colors disabled:opacity-50",
-                        isSelected ? "bg-signal/10" : "hover:bg-white/5",
+                        isActive ? "bg-signal/10" : "hover:bg-white/5",
                       )}
                     >
-                      <div className={cn(
-                        "size-5 shrink-0 rounded border-2 grid place-items-center transition-colors",
-                        isSelected ? "border-signal bg-signal" : "border-white/20",
-                      )}>
+                      <div
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        onClick={(e) => { if (!disabled) { e.stopPropagation(); toggleSelect(r); } }}
+                        className={cn(
+                          "size-5 shrink-0 rounded border-2 grid place-items-center transition-colors cursor-pointer",
+                          isSelected ? "border-signal bg-signal" : "border-white/20",
+                        )}
+                      >
                         {isSelected && <CheckIcon className="size-3 text-white" />}
                       </div>
-                      <PosterImage source={source} id={r.id} alt={r.title} className="h-16 w-11 shrink-0 rounded-sm" />
+                      <PosterImage source={source} id={r.id} alt={r.title} className="h-20 w-14 shrink-0 rounded-sm" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{r.title}</p>
-                        <p className="text-muted-foreground font-mono text-xs">
+                        <p className="text-muted-foreground font-mono text-xs truncate">
                           {r.year ?? "—"} · #{r.id}
+                          {r.type ? ` · ${r.type}` : ""}
                         </p>
+                        {(r.rating != null || r.status) && (
+                          <p className="mt-0.5 flex items-center gap-2 text-xs">
+                            {r.rating != null && (
+                              <span className="inline-flex items-center gap-1 text-amber-400">
+                                <StarIcon className="size-3 fill-amber-400" /> {formatRating(r.rating)}
+                              </span>
+                            )}
+                            {r.status && <span className="text-muted-foreground truncate">{r.status}</span>}
+                          </p>
+                        )}
+                        {r.overview && (
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{stripHtml(r.overview)}</p>
+                        )}
                       </div>
                       {r.existingShowId && (
                         <span className="text-emerald-400 font-mono text-[10px] shrink-0">Already added</span>
@@ -324,24 +464,192 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
               </div>
             </ScrollArea>
 
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-muted-foreground text-xs font-mono">
-                {selectedItems.size > 0 ? <>{selectedItems.size} selected</> : null}
-              </span>
-              <Button
-                size="sm"
-                onClick={handleBulkAdd}
-                disabled={selectedItems.size === 0}
-                className="relative"
-              >
-                <PlusIcon className="size-3.5 mr-1.5" />
-                Add Selected{selectedItems.size > 0 ? ` (${selectedItems.size})` : ''}
-              </Button>
+            {/* Detail pane */}
+            <div className="hidden min-h-0 flex-col rounded-lg border border-white/10 overflow-hidden md:flex">
+              {!activeItem ? (
+                <div className="text-muted-foreground flex flex-1 items-center justify-center p-6 text-center text-sm">
+                  Select a show to preview its details.
+                </div>
+              ) : activeItem.existingShowId ? (
+                <div className="flex flex-1 items-center justify-center p-6 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <CheckIcon className="size-8 text-emerald-500" />
+                    <p className="text-sm font-medium">{activeItem.title}</p>
+                    <p className="text-muted-foreground text-xs">This show is already in your library.</p>
+                  </div>
+                </div>
+              ) : detailLoading ? (
+                <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-sm">
+                  <Loader2 className="size-4 animate-spin" /> Loading details...
+                </div>
+              ) : detailError ? (
+                <div className="text-destructive flex flex-1 items-center justify-center p-6 text-center text-sm">
+                  {detailError}
+                </div>
+              ) : detail ? (
+                <DetailPane detail={detail} source={source} />
+              ) : null}
             </div>
-          </>
+          </div>
+        )}
+
+        {processing.status === "idle" && (
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-muted-foreground text-xs font-mono">
+              {selectedItems.size > 0 ? <>{selectedItems.size} selected</> : null}
+            </span>
+            <Button
+              size="sm"
+              onClick={handleBulkAdd}
+              disabled={selectedItems.size === 0}
+              className="relative"
+            >
+              <PlusIcon className="size-3.5 mr-1.5" />
+              Add Selected{selectedItems.size > 0 ? ` (${selectedItems.size})` : ''}
+            </Button>
+          </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) {
+  const overview = stripHtml(detail.overview);
+  const rating = formatRating(detail.rating);
+  const genres = detail.genres ?? [];
+  const links = detail.links ?? [];
+  const seasons = detail.seasons ?? [];
+
+  return (
+    <ScrollArea className="h-full w-full">
+      <div className="flex flex-col">
+        <div className="relative h-36 w-full shrink-0 overflow-hidden bg-muted">
+          <img
+            src={detail.backdropUrl}
+            alt=""
+            loading="lazy"
+            className="size-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        </div>
+
+        <div className="-mt-12 flex items-end gap-4 px-4">
+          <PosterImage source={source} id={detail.id} alt={detail.title} className="h-32 w-22 shrink-0 rounded-md border border-white/10 shadow-xl" />
+          <div className="min-w-0 flex-1 pb-1">
+            <h3 className="text-lg leading-tight font-semibold truncate">{detail.title}</h3>
+            <p className="text-muted-foreground font-mono text-xs truncate">
+              {detail.year ?? "—"}
+              {detail.originalTitle && detail.originalTitle !== detail.title ? ` · ${detail.originalTitle}` : ""}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3">
+          {rating != null && (
+            <Badge variant="amber" className="gap-1">
+              <StarIcon className="size-3 fill-amber-400" /> {rating}
+            </Badge>
+          )}
+          {detail.status && <Badge variant="signal">{detail.status}</Badge>}
+          {detail.type && <Badge variant="muted">{detail.type}</Badge>}
+          {detail.seasonCount != null && (
+            <Badge variant="muted" className="gap-1">
+              <ClapperboardIcon /> {detail.seasonCount} season{detail.seasonCount === 1 ? "" : "s"}
+            </Badge>
+          )}
+          {detail.episodeCount != null && (
+            <Badge variant="muted" className="gap-1">
+              <FilmIcon /> {detail.episodeCount} episode{detail.episodeCount === 1 ? "" : "s"}
+            </Badge>
+          )}
+        </div>
+
+        {genres.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+            {genres.map(g => (
+              <span key={g} className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground">
+                {g}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {overview && (
+          <div className="px-4 pt-3">
+            <p className="text-sm leading-relaxed text-muted-foreground">{overview}</p>
+          </div>
+        )}
+
+        <Separator className="my-3" />
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-4 pb-2 text-xs">
+          {(detail.creators?.length ?? 0) > 0 && (
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                {source === "anilist" ? "Studios" : "Created by"}
+              </p>
+              <p className="mt-0.5 truncate">{detail.creators!.join(", ")}</p>
+            </div>
+          )}
+          {(detail.networks?.length ?? 0) > 0 && source !== "anilist" && (
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Network</p>
+              <p className="mt-0.5 truncate">{detail.networks!.join(", ")}</p>
+            </div>
+          )}
+          {detail.firstAirDate && (
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">First aired</p>
+              <p className="mt-0.5 truncate">{detail.firstAirDate}</p>
+            </div>
+          )}
+        </div>
+
+        {seasons.length > 0 && (
+          <>
+            <Separator className="my-3" />
+            <div className="px-4 pb-2">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Seasons</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {seasons.map(s => (
+                  <span
+                    key={s.id}
+                    className="rounded border border-white/10 px-2 py-1 text-xs"
+                    title={s.name && s.name !== `Season ${s.number}` ? s.name : undefined}
+                  >
+                    {s.name && s.name !== `Season ${s.number}` ? s.name : `Season ${s.number}`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {links.length > 0 && (
+          <>
+            <Separator className="my-3" />
+            <div className="px-4 pb-4">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Links</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {links.map(link => (
+                  <a
+                    key={link.url}
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-xs transition-colors hover:bg-white/10 hover:text-white"
+                  >
+                    <ExternalLinkIcon className="size-3" />
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </ScrollArea>
   );
 }
 
