@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Added a 4-step update progress visualizer in `UpdatesPanel.tsx` and enhanced service-worker `offline.html` handoff screen to track CI builds, downloads, activation, and auto-refresh.
 - **Update auto-reconnect**: After activation, the SPA now polls `/internal/ready` itself (instead of relying solely on the SW offline page which only intercepts navigation requests) and automatically reloads the page once the new release is live.
 - Added **Manual Import Show Selection Modal**: interactive show picker panel allowing manual association of unresolved/errored watch-folder files to existing library shows.
+- Added **Library Bulk Update**: after selecting shows in the library (via filters + select-all/individual select), a "Configure" action in the floating bar mass-applies library type, quality profile, series type, or tracking across the selected shows.
 
 ### Improved
 - **Library Show Resolution Prioritization**: `Oracle` matching logic now prioritizes existing library shows and their aliases in candidate scoring before resolving to unfamiliar non-library titles, preventing false positives when downloading episodes.
