@@ -136,10 +136,10 @@ export class SystemManager {
     this.manualImportCache = null;
   }
 
-  async forceImportFile(filename: string): Promise<{ ok: boolean; message: string }> {
+  async forceImportFile(filename: string, showId?: string): Promise<{ ok: boolean; message: string }> {
     const client = this.getManualImportClient();
     if (!client) return { ok: false, message: 'No watch folder configured.' };
-    const res = await client.forceImport(filename);
+    const res = await client.forceImport(filename, showId);
     if (res.ok) this.invalidateManualImportCache();
     return res;
   }

@@ -92,13 +92,15 @@ export function miscRoutes(systemManager: SystemManager) {
     "/api/manual-import/import": {
       async POST(req: Request & { params: Record<string, string> }) {
         try {
-          const body = (await req.json()) as { files: string[] };
+          const body = (await req.json()) as { files: Array<string | { filename: string; showId?: string }> };
           if (!Array.isArray(body.files) || body.files.length === 0) {
             return errorResponse('files array is required');
           }
           const results = [];
-          for (const filename of body.files) {
-            const result = await systemManager.forceImportFile(filename);
+          for (const item of body.files) {
+            const filename = typeof item === 'string' ? item : item.filename;
+            const showId = typeof item === 'string' ? undefined : item.showId;
+            const result = await systemManager.forceImportFile(filename, showId);
             results.push({ filename, ...result });
           }
           return json({ results });

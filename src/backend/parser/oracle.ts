@@ -389,16 +389,16 @@ export class Oracle {
     const fuse = new Fuse(fuzzyCandidates, {
       keys: ['titles'],
       includeScore: true,
-      threshold: 0.18,
+      threshold: 0.32,
       ignoreLocation: true,
-      minMatchCharLength: 4,
+      minMatchCharLength: 3,
     });
 
     const matches = fuse.search(normalized);
     const best = matches[0];
     const second = matches[1];
 
-    if (!best || best.score == null || best.score > 0.18) {
+    if (!best || best.score == null || best.score > 0.32) {
       return null;
     }
 
@@ -551,6 +551,15 @@ export class Oracle {
   ): Show | null {
     const normalizedQuery = normalizeTitle(parsedTitle);
 
+    // Get list of all local/library show provider keys (e.g., tvdb:1234, tmdb:5678)
+    const localShows = db.listShows() as Array<{ id: string; provider_type: string }>;
+    const localProviderKeys = new Set(
+      localShows.flatMap(s => {
+        const providers = db.listShowProviders(s.id);
+        return providers.map((p: any) => `${p.provider_type}:${p.provider_id}`);
+      })
+    );
+
     const exact = results.find(show =>
       this.getProviderTitles(show).some(
         title => normalizeTitle(title) === normalizedQuery,
@@ -564,37 +573,56 @@ export class Oracle {
     const candidates = results.map(show => ({
       show,
       titles: this.getProviderTitles(show).map(normalizeTitle),
+      isLibrary: localProviderKeys.has(`${show.provider}:${show.id}`),
     }));
 
     const fuse = new Fuse(candidates, {
       keys: ['titles'],
       includeScore: true,
-      threshold: 0.24,
+      threshold: 0.35,
       ignoreLocation: true,
       minMatchCharLength: 3,
     });
 
     const matches = fuse.search(normalizedQuery);
-    const best = matches[0];
-    const second = matches[1];
+    if (matches.length === 0) return null;
 
-    if (!best || best.score == null || best.score > 0.24) {
+    // Apply a score boost (bonus) for library shows (lower score is better in Fuse)
+    const scoredMatches = matches.map(m => {
+      const isLib = m.item.isLibrary;
+      const rawScore = m.score ?? 1.0;
+      // Boost library shows by subtracting 0.15 from their Fuse score
+      const adjustedScore = isLib ? Math.max(0, rawScore - 0.15) : rawScore;
+      return {
+        ...m,
+        adjustedScore,
+      };
+    });
+
+    scoredMatches.sort((a, b) => a.adjustedScore - b.adjustedScore);
+
+    const best = scoredMatches[0];
+    const second = scoredMatches[1];
+
+    if (!best || best.adjustedScore > 0.28) {
       return null;
     }
 
     if (
-      second?.score != null &&
-      Math.abs(second.score - best.score) < 0.05
+      second != null &&
+      Math.abs(second.adjustedScore - best.adjustedScore) < 0.04
     ) {
       debugLog('Ambiguous provider result; refusing automatic selection', {
         parsedTitle,
         first: {
           title: best.item.show.title,
-          score: best.score,
+          score: best.adjustedScore,
+          isLibrary: best.item.isLibrary,
         },
         second: {
           title: second.item.show.title,
-          score: second.score,
+          score: second.adjustedScore,
+          isLibrary: second.item.isLibrary,
         },
       });
 
@@ -852,6 +880,7 @@ export class Oracle {
     filename: string,
     preferredProvider: ProviderType = 'tmdb',
     config: Record<string, unknown> = {},
+    overrideShowId?: string,
   ): Promise<{
     show: Show;
     episodes: Episode[];
@@ -859,6 +888,20 @@ export class Oracle {
     parsed?: unknown;
     usedHint: boolean;
   } | null> {
+    if (overrideShowId) {
+      const parsed = this.parser.parse(filename);
+      const seasonNum = parsed?.season ?? 1;
+      const singleEpisode = parsed?.episodes?.length === 1 ? parsed.episodes[0] : (parsed?.episodes?.[0] ?? 1);
+
+      const hinted = await this.resolveGrabbed(filename, {
+        showId: overrideShowId,
+        season: seasonNum,
+        episode: singleEpisode,
+      }, preferredProvider, config);
+
+      if (hinted) return { ...hinted, usedHint: true };
+    }
+
     const normal = await this.resolve(filename, preferredProvider, config);
     if (normal) return { ...normal, usedHint: false };
 

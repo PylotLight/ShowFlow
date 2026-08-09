@@ -1,8 +1,10 @@
-import { CheckIcon, FileIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
+import { CheckIcon, FileIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon, XIcon, SearchIcon, Edit3Icon, TvIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@frontend/components/ui/dialog";
+import { Input } from "@frontend/components/ui/input";
 import { cn } from "@frontend/lib/utils";
 
 interface WatchFile {
@@ -23,6 +25,12 @@ interface ActionResult {
   message: string;
 }
 
+interface LibraryShow {
+  id: string;
+  title: string;
+  year?: number;
+}
+
 export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [files, setFiles] = React.useState<WatchFile[] | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -30,6 +38,12 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [importResults, setImportResults] = React.useState<ActionResult[] | null>(null);
   const [deleteResults, setDeleteResults] = React.useState<ActionResult[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Manual show override state
+  const [assignedShows, setAssignedShows] = React.useState<Record<string, LibraryShow>>({});
+  const [selectingFile, setSelectingFile] = React.useState<WatchFile | null>(null);
+  const [libraryShows, setLibraryShows] = React.useState<LibraryShow[]>([]);
+  const [showSearchQuery, setShowSearchQuery] = React.useState("");
 
   const load = React.useCallback(() => {
     setError(null);
@@ -51,6 +65,16 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
         setError(e instanceof Error ? e.message : String(e));
         setFiles(null);
       });
+
+    // Fetch existing library shows for the quick picker
+    fetch("/api/shows")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setLibraryShows(data.map((s) => ({ id: s.id, title: s.title, year: s.year })));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   React.useEffect(() => { load(); }, [load]);
@@ -71,6 +95,27 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     setSelected(next);
   };
 
+  const handleAssignShow = (show: LibraryShow) => {
+    if (!selectingFile) return;
+    setAssignedShows((prev) => ({
+      ...prev,
+      [selectingFile.filename]: show,
+    }));
+    // Auto-select file for import when show is assigned
+    setSelected((prev) => new Set(prev).add(selectingFile.filename));
+    setSelectingFile(null);
+    setShowSearchQuery("");
+  };
+
+  const clearAssignedShow = (filename: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setAssignedShows((prev) => {
+      const next = { ...prev };
+      delete next[filename];
+      return next;
+    });
+  };
+
   const doAction = async (action: string) => {
     const selectedFiles = Array.from(selected);
     if (selectedFiles.length === 0) return;
@@ -81,10 +126,19 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     else setDeleteResults(null);
 
     try {
+      const payload = action === "import"
+        ? {
+            files: selectedFiles.map((filename) => ({
+              filename,
+              showId: assignedShows[filename]?.id,
+            })),
+          }
+        : { files: selectedFiles };
+
       const res = await fetch(`/api/manual-import/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: selectedFiles }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -94,6 +148,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       if (action === "import") setImportResults(data.results);
       else setDeleteResults(data.results);
       setSelected(new Set());
+      setAssignedShows({});
       setTimeout(() => { load(); onRefresh?.(); }, 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -102,6 +157,10 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     }
   };
 
+  const filteredLibraryShows = libraryShows.filter((s) =>
+    s.title.toLowerCase().includes(showSearchQuery.toLowerCase()),
+  );
+
   return (
     <div className="space-y-6">
       <GlassPanel className="p-6">
@@ -109,7 +168,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
           <div>
             <h2 className="font-display text-base font-semibold tracking-wide text-white/90">Manual Import</h2>
             <p className="text-muted-foreground text-xs mt-0.5">
-              All files currently in the watch folder. Force-import to bypass upgrade/duplicate rules, or delete unwanted files.
+              All files currently in the watch folder. Force-import to bypass upgrade/duplicate rules, select matches manually for unresolved files, or delete unwanted files.
             </p>
           </div>
           <Button
@@ -217,53 +276,86 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">Episodes</th>
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">Existing</th>
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">Status</th>
+                    <th className="px-2 py-2 text-right font-mono font-medium uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {files.map((f) => (
-                    <tr
-                      key={f.filename}
-                      className={cn(
-                        "border-b border-white/5 transition-colors",
-                        selected.has(f.filename) ? "bg-signal/5" : "hover:bg-white/[0.02]",
-                      )}
-                    >
-                      <td className="px-2 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(f.filename)}
-                          onChange={() => toggleFile(f.filename)}
-                          className="rounded border-white/20 bg-white/5"
-                        />
-                      </td>
-                      <td className="px-2 py-2.5 font-mono text-foreground/85 max-w-[200px] truncate" title={f.filename}>
-                        {f.filename}
-                      </td>
-                      <td className="px-2 py-2.5 text-foreground/70">
-                        {f.show || <span className="italic text-muted-foreground">unresolved</span>}
-                      </td>
-                      <td className="px-2 py-2.5 text-foreground/70">
-                        {f.season != null ? f.season : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-2 py-2.5 text-foreground/70">
-                        {f.episodes?.length
-                          ? f.episodes.map((e) => `E${String(e).padStart(2, "0")}`).join(", ")
-                          : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-2 py-2.5 text-foreground/70 max-w-[160px] truncate" title={f.existingFile}>
-                        {f.existingFile || <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-2 py-2.5">
-                        {f.resolved ? (
-                          <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400 font-mono">Resolved</span>
-                        ) : f.error ? (
-                          <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive font-mono" title={f.error}>Error</span>
-                        ) : (
-                          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400 font-mono">Unresolved</span>
+                  {files.map((f) => {
+                    const override = assignedShows[f.filename];
+                    const currentShowTitle = override ? override.title : f.show;
+
+                    return (
+                      <tr
+                        key={f.filename}
+                        className={cn(
+                          "border-b border-white/5 transition-colors",
+                          selected.has(f.filename) ? "bg-signal/5" : "hover:bg-white/[0.02]",
                         )}
-                      </td>
-                    </tr>
-                  ))}
+                      >
+                        <td className="px-2 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(f.filename)}
+                            onChange={() => toggleFile(f.filename)}
+                            className="rounded border-white/20 bg-white/5"
+                          />
+                        </td>
+                        <td className="px-2 py-2.5 font-mono text-foreground/85 max-w-[200px] truncate" title={f.filename}>
+                          {f.filename}
+                        </td>
+                        <td className="px-2 py-2.5 text-foreground/70">
+                          {override ? (
+                            <div className="flex items-center gap-1 text-signal font-medium">
+                              <span title={`Manually assigned to ${override.title}`}>{override.title}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => clearAssignedShow(f.filename, e)}
+                                className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+                                title="Reset show assignment"
+                              >
+                                <XIcon className="size-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            currentShowTitle || <span className="italic text-muted-foreground">unresolved</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2.5 text-foreground/70">
+                          {f.season != null ? f.season : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-2 py-2.5 text-foreground/70">
+                          {f.episodes?.length
+                            ? f.episodes.map((e) => `E${String(e).padStart(2, "0")}`).join(", ")
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-2 py-2.5 text-foreground/70 max-w-[160px] truncate" title={f.existingFile}>
+                          {f.existingFile || <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          {override ? (
+                            <span className="rounded bg-signal/10 px-1.5 py-0.5 text-[10px] text-signal font-mono" title="Manually assigned show">Assigned</span>
+                          ) : f.resolved ? (
+                            <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400 font-mono" title="Matched to library show">Resolved</span>
+                          ) : f.error ? (
+                            <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive font-mono" title={f.error}>{f.error}</span>
+                          ) : (
+                            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400 font-mono" title="Unresolved - click 'Match Show' to manually assign">Unresolved</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2.5 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectingFile(f)}
+                            className="h-7 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
+                          >
+                            <Edit3Icon className="size-3" />
+                            Match Show
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -301,6 +393,60 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
           </>
         )}
       </GlassPanel>
+
+      {/* Show Selection Modal */}
+      <Dialog open={!!selectingFile} onOpenChange={(open) => !open && setSelectingFile(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold flex items-center gap-2">
+              <TvIcon className="size-5 text-signal" />
+              Assign Show
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Select a show from your library to associate with <span className="font-mono text-foreground">{selectingFile?.filename}</span>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="relative">
+              <SearchIcon className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search library shows..."
+                value={showSearchQuery}
+                onChange={(e) => setShowSearchQuery(e.target.value)}
+                className="pl-9 text-xs"
+              />
+            </div>
+
+            <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+              {filteredLibraryShows.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6">
+                  {showSearchQuery ? "No matching shows found in your library." : "No shows in library."}
+                </p>
+              ) : (
+                filteredLibraryShows.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleAssignShow(s)}
+                    className="w-full text-left rounded-lg p-2.5 hover:bg-white/5 transition-colors border border-transparent hover:border-white/10 flex items-center justify-between group"
+                  >
+                    <div>
+                      <div className="text-xs font-medium text-foreground group-hover:text-signal transition-colors">
+                        {s.title}
+                      </div>
+                      {s.year && <div className="text-[10px] text-muted-foreground">{s.year}</div>}
+                    </div>
+                    <CheckIcon className="size-4 text-signal opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

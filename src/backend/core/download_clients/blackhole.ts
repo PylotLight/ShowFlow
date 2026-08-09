@@ -295,6 +295,13 @@ export class BlackholeClient implements DownloadClient {
                 entry.existingFile = path.basename(existingEp.file_path);
               }
             }
+          } else {
+            const diag = this.oracle.getDiagnostics();
+            if (!diag.parsed?.show) {
+              entry.error = "Could not parse show name or episode numbers from filename";
+            } else {
+              entry.error = `Could not match "${diag.parsed.show}" against existing library shows`;
+            }
           }
         } catch (e) {
           entry.error = e instanceof Error ? e.message : String(e);
@@ -338,7 +345,7 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
-  async forceImport(filename: string): Promise<{ ok: boolean; message: string }> {
+  async forceImport(filename: string, showId?: string): Promise<{ ok: boolean; message: string }> {
     const folder = this.watchFolder;
     if (!folder) {
       return { ok: false, message: 'Watch folder is not configured.' };
@@ -352,7 +359,7 @@ export class BlackholeClient implements DownloadClient {
     }
 
     try {
-      await this.handleFile(folder, filename, { force: true });
+      await this.handleFile(folder, filename, { force: true, showId });
       return { ok: true, message: `Imported "${filename}"` };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -360,7 +367,7 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
-  private async handleFile(folder: string, filename: string, opts?: { force?: boolean }) {
+  private async handleFile(folder: string, filename: string, opts?: { force?: boolean; showId?: string }) {
     const fullPath = path.join(folder, filename);
 
     if (this.isIgnoredFile(filename)) {
@@ -410,6 +417,7 @@ export class BlackholeClient implements DownloadClient {
         filename,
         this.config.defaultProvider as ProviderType,
         this.config,
+        opts?.showId,
       );
       BlackholeClient.mem('after oracle ' + filename.slice(0, 30));
       maybeForcedGc();

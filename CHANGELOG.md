@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
 - Implemented `comfortable` vs `dense` display density toggle controls.
 - Added dynamic item selection mode to the Context Rail: selecting an agenda timeline row details the file paths, quality configurations, and search grab triggers.
 - Added a 4-step update progress visualizer in `UpdatesPanel.tsx` and enhanced service-worker `offline.html` handoff screen to track CI builds, downloads, activation, and auto-refresh.
+- Added **Manual Import Show Selection Modal**: interactive show picker panel allowing manual association of unresolved/errored watch-folder files to existing library shows.
+
+### Improved
+- **Library Show Resolution Prioritization**: `Oracle` matching logic now prioritizes existing library shows and their aliases in candidate scoring before resolving to unfamiliar non-library titles, preventing false positives when downloading episodes.
 
 ### Fixed
 - **Settings page restored**: `SettingsPage` was not imported or routed in `App.tsx`, causing a `ReferenceError: Can't find variable: Settings` crash when navigating to the Settings nav item. Now wired correctly — clicking Settings in the sidebar renders the full `SettingsPage` component.
