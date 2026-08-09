@@ -210,7 +210,13 @@ export function findShowsByNormalizedTitle(self: DatabaseManager, normalizedTitl
 }
 
 export function getLocalShowCandidates(self: DatabaseManager) {
-  return self.drizz
+  // The previous single query joined shows x show_providers x show_titles.
+  // Every title row duplicated the full provider_metadata_json string
+  // (~33x per show here), materializing hundreds of MB of identical strings
+  // on the JS heap and OOM-killing the pod on the manual-import list page.
+  // Split into two cheap queries and merge: metadata is loaded once per
+  // show and only attached to the first row of each show+provider pair.
+  const providerRows = self.drizz
     .select({
       showId: schema.shows.id,
       showTitle: schema.shows.title,
@@ -224,21 +230,72 @@ export function getLocalShowCandidates(self: DatabaseManager) {
       providerOriginalTitle: schema.showProviders.original_title,
       providerMetadataJson: schema.showProviders.metadata_json,
       isPrimary: schema.showProviders.is_primary,
-
-      knownTitle: schema.showTitles.title,
-      knownTitleType: schema.showTitles.title_type,
-      knownTitleLanguage: schema.showTitles.language,
     })
     .from(schema.shows)
     .innerJoin(
       schema.showProviders,
       eq(schema.showProviders.show_id, schema.shows.id),
     )
-    .leftJoin(
-      schema.showTitles,
-      eq(schema.showTitles.show_id, schema.shows.id),
-    )
     .all();
+
+  const titleRows = self.drizz
+    .select({
+      showId: schema.showTitles.show_id,
+      knownTitle: schema.showTitles.title,
+      knownTitleType: schema.showTitles.title_type,
+      knownTitleLanguage: schema.showTitles.language,
+    })
+    .from(schema.showTitles)
+    .all();
+
+  const titlesByShow = new Map<string, {
+    knownTitle: string;
+    knownTitleType: string | null;
+    knownTitleLanguage: string | null;
+  }[]>();
+  for (const title of titleRows) {
+    const list = titlesByShow.get(title.showId) ?? [];
+    list.push(title);
+    titlesByShow.set(title.showId, list);
+  }
+
+  const rows: {
+    showId: string;
+    showTitle: string;
+    showOriginalTitle: string | null;
+    showYear: number | null;
+    showSeriesType: string | null;
+
+    providerType: string;
+    providerId: string;
+    providerTitle: string | null;
+    providerOriginalTitle: string | null;
+    providerMetadataJson: string | null;
+    isPrimary: number | null;
+
+    knownTitle: string | null;
+    knownTitleType: string | null;
+    knownTitleLanguage: string | null;
+  }[] = [];
+
+  for (const provider of providerRows) {
+    const titles = titlesByShow.get(provider.showId) ?? [];
+    if (titles.length === 0) {
+      rows.push({ ...provider, knownTitle: null, knownTitleType: null, knownTitleLanguage: null });
+      continue;
+    }
+    for (const [index, title] of titles.entries()) {
+      rows.push({
+        ...provider,
+        providerMetadataJson: index === 0 ? provider.providerMetadataJson : null,
+        knownTitle: title.knownTitle,
+        knownTitleType: title.knownTitleType,
+        knownTitleLanguage: title.knownTitleLanguage,
+      });
+    }
+  }
+
+  return rows;
 }
 
 // ---- Show CRUD ----
