@@ -25,8 +25,12 @@ function getCacheTtl(resp: Response): number {
   const cc = resp.headers.get('Cache-Control') ?? '';
   const maxAge = /max-age=(\d+)/.exec(cc)?.[1];
   // TheXem explicitly permits long client-side caching; default to 7 days
-  // (604800s) when the header is absent.
-  return maxAge ? parseInt(maxAge, 10) * 1000 : 7 * 24 * 60 * 60 * 1000;
+  // (604800s) when the header is absent. When Cloudflare gives a short
+  // max-age (e.g. 3600) we still keep a week-long floor so a host outage
+  // doesn't immediately invalidate the only copy of the mapping.
+  const fromHeader = maxAge ? parseInt(maxAge, 10) * 1000 : 0;
+  const floor = 7 * 24 * 60 * 60 * 1000;
+  return Math.max(fromHeader, floor);
 }
 
 /**

@@ -350,8 +350,8 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       if (!res.ok) throw new Error(data?.error ?? "Rename failed");
       flashStatus(data.message ?? `Renamed folder to "${data.to}". ${data.episodesUpdated} episode path${data.episodesUpdated !== 1 ? "s" : ""} updated.`);
       setRenamePreview(null);
-      // Refresh the root-folder display since the path changed
-      setRootFolderPath(data.to);
+      // The show's root folder (library root) did not change — only the show's
+      // own folder underneath it was renamed, so nothing to refresh here.
     } catch (err: any) {
       flashStatus(err.message ?? "Failed to rename folder.", false);
     } finally {
@@ -896,15 +896,29 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
             style={{ backdropFilter: "blur(16px)" }}>
             <h3 className="font-display text-lg font-semibold text-white/90">Rename show folder?</h3>
+            <p className="text-xs text-muted-foreground -mt-2">
+              The folder on disk will be renamed to match the show's current title. Episode file paths are updated automatically.
+            </p>
 
             <div className="space-y-2 text-xs">
-              <div className="grid grid-cols-[80px_1fr] gap-2">
-                <span className="text-muted-foreground uppercase tracking-wider font-mono">Current</span>
-                <code className="text-foreground/80 break-all">{renamePreview.currentFolderName}</code>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="uppercase tracking-wider font-mono text-muted-foreground text-[10px] w-11 shrink-0">From</span>
+                  <code className="text-foreground/85 break-all">{renamePreview.currentFolderName}</code>
+                </div>
+                <p className="text-[10px] font-mono text-muted-foreground/60 mt-0.5 break-all pl-[52px]">
+                  {renamePreview.currentFolderPath}
+                </p>
               </div>
-              <div className="grid grid-cols-[80px_1fr] gap-2">
-                <span className="text-muted-foreground uppercase tracking-wider font-mono">Proposed</span>
-                <code className="text-signal break-all">{renamePreview.sanitizedTitle}</code>
+              <div className="text-muted-foreground/40 pl-[52px] font-mono text-[10px]">↓ rename to</div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="uppercase tracking-wider font-mono text-signal text-[10px] w-11 shrink-0">To</span>
+                  <code className="text-signal break-all">{renamePreview.sanitizedTitle}</code>
+                </div>
+                <p className="text-[10px] font-mono text-muted-foreground/60 mt-0.5 break-all pl-[52px]">
+                  {renamePreview.targetFolderPath}
+                </p>
               </div>
             </div>
 
@@ -916,7 +930,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
               <>
                 <p className="text-xs text-muted-foreground">
                   {renamePreview.episodesAffected > 0
-                    ? `${renamePreview.episodesAffected} episode${renamePreview.episodesAffected !== 1 ? "s" : ""} will${renamePreview.episodesAffected !== 1 ? "" : " "}have${renamePreview.episodesAffected !== 1 ? "" : " "}their file path${renamePreview.episodesAffected !== 1 ? "s" : ""} updated automatically.`
+                    ? `${renamePreview.episodesAffected} episode${renamePreview.episodesAffected !== 1 ? "s" : ""} inside this folder will${renamePreview.episodesAffected !== 1 ? " " : ""}have its file path updated automatically.`
                     : "No episode paths need updating."}
                 </p>
                 <p className="text-[11px] text-amber-400/80 border border-amber-500/30 rounded px-2 py-1.5 bg-amber-500/5">

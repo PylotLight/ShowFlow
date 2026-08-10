@@ -12,6 +12,49 @@ import type { RouteReq } from "./_shared";
 import { json, errorResponse, loadConfig, isProviderType, serializeRelease, toIsoUtc } from "./_shared";
 import { describeReasonCode } from "../core/pipeline/reason_codes";
 
+/**
+ * Resolve the show's own folder on disk so a folder-rename targets the right
+ * directory. A show's `root_folder_path` is the *library* root (e.g.
+ * /volumes/Media/Anime) shared by every show in that profile — NOT the
+ * per-show folder. The show's files live one level below it as a direct child
+ * named after the title (the layout the blackhole client and library scanner
+ * produce: <root>/<Title>/Season XX/...). Renaming the library root itself
+ * would move every other show in the profile; that was the pre-fix behavior.
+ */
+function resolveShowFolder(show: any, rootFolder: string, episodes: any[]) {
+  const sanitizedTitle = (show.title || '')
+    .replace(/[<>"/\\|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // The current folder name is whatever direct child of the library root
+  // actually holds this show's files. Derive it from episode paths when
+  // available (all episode paths for one show share a single child dir);
+  // fall back to the sanitized title when nothing is on disk yet — in that
+  // case there is nothing to rename and wouldChange reads false.
+  const childNames = new Set<string>();
+  for (const ep of episodes) {
+    if (!ep.file_path) continue;
+    if (!ep.file_path.startsWith(rootFolder)) continue;
+    const rel = ep.file_path.slice(rootFolder.length).replace(/^[/\\]+/, '');
+    const first = rel.split(/[/\\]/)[0];
+    if (first) childNames.add(first);
+  }
+
+  let currentFolderName: string;
+  if (childNames.size === 1) {
+    currentFolderName = [...childNames][0]!;
+  } else {
+    currentFolderName = sanitizedTitle;
+  }
+
+  const currentFolderPath = path.join(rootFolder, currentFolderName);
+  const targetFolderPath = path.join(rootFolder, sanitizedTitle);
+  const wouldChange = currentFolderPath !== targetFolderPath;
+
+  return { currentFolderPath, currentFolderName, sanitizedTitle, targetFolderPath, wouldChange };
+}
+
 export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
   return {
 
@@ -313,6 +356,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    // Rename the show's folder on disk to match its sanitized title.
+    // NOTE: a show's `root_folder_path` is the *library* root (e.g.
+    // /volumes/Media/Anime) shared by every show in that profile — NOT the
+    // per-show folder. The show's own folder lives one level below it as a
+    // direct child named after the title (the same layout the blackhole
+    // client and library scanner produce: <root>/<Title>/Season XX/...).
+
     "/api/shows/:id/rename-preview": {
       async GET(req: RouteReq) {
         try {
@@ -322,27 +372,16 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const rootFolder = db.getShowRootFolder(showId);
           if (!rootFolder) return errorResponse("Show has no root folder set", 400);
 
-          // The destination folder name uses the current sanitized title. We
-          // can't easily reuse Oracle's private buildPath here without a show
-          // object fully populated, so reproduce its show-folder step inline.
-          const currentFolderName = path.basename(rootFolder);
-          const sanitizedTitle = show.title
-            .replace(/[<>"/\\|?*]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-          const parentDir = path.dirname(rootFolder);
-          const targetFolderPath = path.join(parentDir, sanitizedTitle);
-          const wouldChange = currentFolderName !== sanitizedTitle;
-
-          // Also surface any episodes whose current path does not contain the
-          // target folder name — those are the rows that would need updating if
-          // the rename proceeds.
           const episodes = db.listShowEpisodes(showId);
+          const { currentFolderPath, currentFolderName, sanitizedTitle, targetFolderPath, wouldChange } =
+            resolveShowFolder(show, rootFolder, episodes);
+
+          // Surface which episodes sit inside the current show folder — those
+          // rows get their file paths rewritten if the rename proceeds.
           const episodeImpact = episodes
             .filter((e) => e.file_path)
             .map((e) => {
-              const inTarget = e.file_path!.startsWith(rootFolder);
+              const inTarget = e.file_path!.startsWith(currentFolderPath);
               return {
                 season: e.season_number,
                 episode: e.episode_number,
@@ -353,7 +392,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
 
           return json({
             showId,
-            currentFolderPath: rootFolder,
+            libraryRoot: rootFolder,
+            currentFolderPath,
             currentFolderName,
             sanitizedTitle,
             targetFolderPath,
@@ -375,19 +415,16 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const rootFolder = db.getShowRootFolder(showId);
           if (!rootFolder) return errorResponse("Show has no root folder set", 400);
 
-          const sanitizedTitle = show.title
-            .replace(/[<>"/\\|?*]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-          const parentDir = path.dirname(rootFolder);
-          const targetFolderPath = path.join(parentDir, sanitizedTitle);
+          const episodes = db.listShowEpisodes(showId);
+          const { currentFolderPath, sanitizedTitle, targetFolderPath, wouldChange } =
+            resolveShowFolder(show, rootFolder, episodes);
 
-          if (rootFolder === targetFolderPath) {
+          if (!wouldChange) {
             return json({ ok: true, renamed: false, message: 'Folder already has the target name.' });
           }
 
-          if (!fs.existsSync(rootFolder)) {
-            return errorResponse(`Source folder does not exist: ${rootFolder}`, 400);
+          if (!fs.existsSync(currentFolderPath)) {
+            return errorResponse(`Source folder does not exist: ${currentFolderPath}`, 400);
           }
           if (fs.existsSync(targetFolderPath)) {
             return errorResponse(`Target folder already exists: ${targetFolderPath}. Refusing to overwrite.`, 409);
@@ -398,12 +435,11 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           // crash mid-batch leaves the DB pointing at paths that don't exist
           // yet (recoverable by re-running) rather than paths that no longer
           // exist (data loss).
-          const episodes = db.listShowEpisodes(showId);
           const pathUpdates: { season: number; episode: number; oldPath: string; newPath: string }[] = [];
           for (const ep of episodes) {
             if (!ep.file_path) continue;
-            if (!ep.file_path.startsWith(rootFolder)) continue;
-            const relative = ep.file_path.slice(rootFolder.length).replace(/^[/\\]/, '');
+            if (!ep.file_path.startsWith(currentFolderPath)) continue;
+            const relative = ep.file_path.slice(currentFolderPath.length).replace(/^[/\\]/, '');
             pathUpdates.push({
               season: ep.season_number,
               episode: ep.episode_number,
@@ -412,7 +448,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             });
           }
 
-          await fs.promises.rename(rootFolder, targetFolderPath);
+          await fs.promises.rename(currentFolderPath, targetFolderPath);
           for (const u of pathUpdates) {
             db.updateEpisodeFilePath(showId, u.season, u.episode, u.newPath);
           }
@@ -421,13 +457,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             type: 'organize',
             entityType: 'show',
             entityId: showId,
-            message: `Renamed show folder "${rootFolder}" → "${targetFolderPath}" (${pathUpdates.length} episode paths updated)`,
+            message: `Renamed show folder "${currentFolderPath}" → "${targetFolderPath}" (${pathUpdates.length} episode paths updated)`,
           });
 
           return json({
             ok: true,
             renamed: true,
-            from: rootFolder,
+            from: currentFolderPath,
             to: targetFolderPath,
             episodesUpdated: pathUpdates.length,
           });
