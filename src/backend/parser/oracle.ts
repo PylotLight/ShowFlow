@@ -10,6 +10,7 @@ import type {
   Show,
 } from '../core/types';
 import { debugLog } from '../core/debug';
+import { EpisodeMappingService } from '../core/episode_mappings';
 
 type ShowTitleType =
   | 'canonical'
@@ -97,6 +98,7 @@ function uniqueTitles(titles: Array<string | null | undefined>): string[] {
 
 export class Oracle {
   private readonly parser = new FilenameParser();
+  private readonly mappingService = new EpisodeMappingService();
 
     private lastParsed: ParsedFilename | null = null;
   private lastSearchResults: Show[] = [];
@@ -161,6 +163,7 @@ export class Oracle {
         localCandidate.providerId,
         parsed,
         localCandidate.show,
+        localCandidate.localShowId,
       );
 
       if (episodes.length === 0) {
@@ -748,6 +751,16 @@ export class Oracle {
       .trim();
   }
 
+  /**
+   * Resolve episodes for a parsed filename against a provider.
+   *
+   * When `localShowId` is supplied (show already in the library) and that
+   * show has anime episode mapping enabled, scene S/E numbering from the
+   * filename is translated to the provider-native S/E via the mapping table
+   * before the provider lookup (issues-tracking.md #4). This is what fixes
+   * the Honzuki class of failure: a release tagged `S04E17` resolves against
+   * TVDB's flat `S01E53` instead of erroring out.
+   */
   private async resolveEpisodes(
     provider: IMetadataProvider,
     showId: string,
@@ -757,16 +770,29 @@ export class Oracle {
       absoluteNumbers?: number[];
     },
     show: Show,
+    localShowId?: string,
   ): Promise<{ episodes: Episode[]; errors: string[] }> {
     const episodes: Episode[] = [];
     const errors: string[] = [];
 
+    const mappingEnabled = localShowId != null && this.mappingService.isEnabled(localShowId);
+
     if (parsed.episodes?.length) {
       for (const episodeNumber of parsed.episodes) {
-        const query: EpisodeQuery = {
-          season: parsed.season,
-          episode: episodeNumber,
-        };
+        let season = parsed.season;
+        let targetEpisode = episodeNumber;
+        let mappedSource: string | null = null;
+
+        if (mappingEnabled && season != null) {
+          const mapped = this.mappingService.resolveScene(localShowId, season, episodeNumber);
+          if (mapped) {
+            season = mapped.season;
+            targetEpisode = mapped.episode;
+            mappedSource = mapped.source;
+          }
+        }
+
+        const query: EpisodeQuery = { season, episode: targetEpisode };
 
         try {
           const episode = await provider.getEpisode(showId, query);
@@ -775,18 +801,19 @@ export class Oracle {
           debugLog('Episode resolved', {
             show: show.title,
             showId,
-            season: parsed.season,
-            episodeNumber,
+            season,
+            episodeNumber: targetEpisode,
             title: episode.title,
+            mappedFromScene: mappedSource ? `scene S${parsed.season}E${episodeNumber} -> provider S${season}E${targetEpisode} (${mappedSource})` : undefined,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          errors.push(`S${parsed.season}E${episodeNumber}: ${message}`);
+          errors.push(`S${season}E${targetEpisode}: ${message}`);
           debugLog('Failed to resolve episode', {
             show: show.title,
             showId,
-            season: parsed.season,
-            episodeNumber,
+            season,
+            episodeNumber: targetEpisode,
             error: message,
           });
         }
@@ -797,10 +824,25 @@ export class Oracle {
 
     if (parsed.absoluteNumbers?.length) {
       for (const absoluteNumber of parsed.absoluteNumbers) {
+        let query: EpisodeQuery = { absoluteNumber };
+
+        if (mappingEnabled) {
+          const mapped = this.mappingService.resolveAbsolute(localShowId, absoluteNumber);
+          if (mapped) {
+            // Prefer the provider-native S/E from the mapping: it is more
+            // robust than the provider's own absolute episode lookup on
+            // split/consolidated shows.
+            query = { season: mapped.season, episode: mapped.episode };
+            debugLog('Absolute episode mapped to provider S/E', {
+              show: show.title,
+              absoluteNumber,
+              mapped,
+            });
+          }
+        }
+
         try {
-          const episode = await provider.getEpisode(showId, {
-            absoluteNumber,
-          });
+          const episode = await provider.getEpisode(showId, query);
 
           episodes.push(episode);
 
@@ -1010,6 +1052,7 @@ export class Oracle {
       primary.provider_id,
       { season, episodes: episodeNumbers },
       show,
+      hint.showId,
     );
 
     if (episodes.length === 0) {

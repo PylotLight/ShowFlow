@@ -18,7 +18,8 @@ export type TaskName =
   | 'health-check'
   | 'update-check'
   | 'watcher-monitor'
-  | 'jellyfin-sync';
+  | 'jellyfin-sync'
+  | 'episode-mapping-refresh';
 
 export interface TaskDefinition {
   name: TaskName;
@@ -175,6 +176,19 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       } catch (err) {
         debugLog(`Task jellyfin-sync error: ${err}`);
       }
+    },
+  },
+  'episode-mapping-refresh': {
+    name: 'episode-mapping-refresh',
+    displayName: 'Episode Mapping Refresh',
+    description: 'Refresh TheXem episode mappings (anime season-splits) for shows with the mapping enabled - clears stale scene-to-provider translations while preserving user-locked rows',
+    category: 'sync',
+    intervalMinutes: 10080, // Weekly, aligned with TheXem's 7-day cache TTL (issues-tracking.md #4 Q1)
+    defaultEnabled: true,
+    action: async () => {
+      const { syncMappingsForAnimeShows } = await import('./episode_mappings');
+      const result = await syncMappingsForAnimeShows();
+      debugLog(`Task episode-mapping-refresh complete: ${result.synced} synced, ${result.failed} failed`);
     },
   },
 };

@@ -507,6 +507,83 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    // ---- Episode mapping (anime season-splits, issues-tracking.md #4) ----
+
+    "/api/shows/:id/episode-mapping": {
+      async GET(req: RouteReq) {
+        try {
+          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
+          const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+          return json(summarizeSyncDynamic(db, req.params.id!));
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+      async POST(req: RouteReq) {
+        try {
+          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
+          const body = (await req.json()) as { enabled?: boolean | number; source?: string };
+          if (body.enabled !== undefined) {
+            db.setEpisodeMappingConfig(req.params.id!, { enabled: !!body.enabled });
+          }
+          if (body.source !== undefined && ['thexem', 'anidb', 'manual'].includes(body.source)) {
+            db.setEpisodeMappingConfig(req.params.id!, { source: body.source });
+          }
+          const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+          return json(summarizeSyncDynamic(db, req.params.id!));
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/episode-mapping/refresh": {
+      async POST(req: RouteReq) {
+        try {
+          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
+          const { EpisodeMappingService } = await import("../core/episode_mappings");
+          const summary = await new EpisodeMappingService().syncShow(req.params.id!, { refreshTTL: true });
+          return json({ ok: true, ...summary });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/episode-mapping/rows/:rowId": {
+      async PATCH(req: RouteReq) {
+        try {
+          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
+          const body = (await req.json()) as { targetSeason?: number; targetEpisode?: number; targetAbsolute?: number | null; locked?: boolean };
+          const rowId = parseInt(req.params.rowId!, 10);
+          if (!Number.isFinite(rowId)) return errorResponse("Invalid row id.", 400);
+          const row = db.listEpisodeMappings(req.params.id!).find(r => r.id === rowId);
+          if (!row) return errorResponse("Mapping row not found.", 404);
+          const targetSeason = body.targetSeason ?? row.target_season ?? null;
+          const targetEpisode = body.targetEpisode ?? row.target_episode ?? null;
+          if (targetSeason === null || targetEpisode === null) {
+            return errorResponse("Target season and episode are required to fix a mapping row.", 400);
+          }
+          const ok = db.lockMappingRow(req.params.id!, rowId, {
+            target_season: targetSeason,
+            target_episode: targetEpisode,
+            target_absolute: body.targetAbsolute !== undefined ? body.targetAbsolute ?? undefined : (row.target_absolute ?? undefined),
+          });
+          if (!ok) return errorResponse("Mapping row update failed.", 500);
+          db.logEvent({
+            type: 'mapping',
+            entityType: 'episode',
+            entityId: String(rowId),
+            message: `Manual mapping fix: scene S${row.scene_season}E${row.scene_episode} -> provider S${targetSeason}E${targetEpisode} (locked)`,
+          });
+          const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+          return json({ ok: true, ...summarizeSyncDynamic(db, req.params.id!) });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id/scan": {
       async POST(req: RouteReq) {
         try {

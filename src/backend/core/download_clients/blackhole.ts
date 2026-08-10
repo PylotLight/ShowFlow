@@ -529,12 +529,12 @@ export class BlackholeClient implements DownloadClient {
         const existing = episodes.find(e => e.episode === num);
         return {
           ...existing,
-          season,
+          season: season ?? 1,
           episode: num,
           title: existing?.title ?? `Episode ${num}`,
           // clear file_path so it doesn't collide with any existing ep record
           file_path: undefined,
-        };
+        } as Episode;
       });
 
       // Rebuild proposed path with the overridden season/episode numbers so

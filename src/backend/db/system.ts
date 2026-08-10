@@ -63,6 +63,10 @@ export function setCache(self: DatabaseManager, key: string, data: any, ttlMs: n
     .run();
 }
 
+export function removeCacheKey(self: DatabaseManager, key: string) {
+  self.drizz.delete(schema.metadataCache).where(eq(schema.metadataCache.cache_key, key)).run();
+}
+
 // ---- Tasks ----
 
 export function saveTask(self: DatabaseManager, task: {

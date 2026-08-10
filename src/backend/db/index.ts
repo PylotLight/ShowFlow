@@ -16,6 +16,7 @@ import * as pipeline from './pipeline';
 import * as analytics from './analytics';
 import * as health from './health';
 import * as grabs from './grabs';
+import * as mappings from './mappings';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -159,10 +160,24 @@ export class DatabaseManager {
   findGrabbedReleaseForEpisode(season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForEpisode(this, season, episode, withinDays); }
   findMostRecentGrabForShow(showId: string, withinDays?: number) { return grabs.findMostRecentGrabForShow(this, showId, withinDays); }
 
+  // ---- Episode mapping (anime season-splits, issues-tracking.md #4) --------
+
+  getEpisodeMappingConfig(showId: string) { return mappings.getMappingConfig(this, showId); }
+  setEpisodeMappingConfig(showId: string, cfg: Parameters<typeof mappings.setMappingConfig>[2]) { return mappings.setMappingConfig(this, showId, cfg); }
+  isEpisodeMappingEnabled(showId: string) { return mappings.isMappingEnabled(this, showId); }
+  listEpisodeMappings(showId: string) { return mappings.listEpisodeMappings(this, showId); }
+  findSceneMapping(showId: string, season: number, episode: number) { return mappings.findSceneMapping(this, showId, season, episode); }
+  findAbsoluteMapping(showId: string, absolute: number) { return mappings.findAbsoluteMapping(this, showId, absolute); }
+  replaceThexemMappings(showId: string, tvdbId: string, rows: Parameters<typeof mappings.replaceThexemMappings>[3]) { return mappings.replaceThexemMappings(this, showId, tvdbId, rows); }
+  lockMappingRow(showId: string, rowId: number, target: Parameters<typeof mappings.lockMappingRow>[3]) { return mappings.lockMappingRow(this, showId, rowId, target); }
+  deleteEpisodeMappingsForShow(showId: string) { return mappings.deleteMappingsForShow(this, showId); }
+  deleteEpisodeMappingConfigForShow(showId: string) { return mappings.deleteMappingConfigForShow(this, showId); }
+
   // ---- Metadata cache ----------------------------------------------------
 
   getCache<T = any>(key: string) { return system.getCache<T>(this, key); }
   setCache(key: string, data: any, ttlMs?: number) { return system.setCache(this, key, data, ttlMs); }
+  removeCacheKey(key: string) { return system.removeCacheKey(this, key); }
 
   // ---- Tasks -------------------------------------------------------------
 

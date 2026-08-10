@@ -1,10 +1,11 @@
-import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { EpisodeRow, type EpisodeData, type ColumnDef } from "@frontend/components/showflow/EpisodeRow";
 import { ManageSourcesDialog } from "@frontend/components/showflow/ManageSourcesDialog";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
+import { EpisodeMappingDialog } from "@frontend/components/showflow/EpisodeMappingDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 
@@ -90,6 +91,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   } | null>(null);
   const [moveDialog, setMoveDialog] = React.useState<{ oldRoot: string; newRoot: string; profileName: string; profileId: string } | null>(null);
 
+  const [mappingOpen, setMappingOpen] = React.useState(false);
+  const [mappingHealth, setMappingHealth] = React.useState<string>("none");
+
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const statusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -120,6 +124,8 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       if (data.rootFolderPath) {
         setRootFolderPath(data.rootFolderPath);
       }
+      const epMap = data.config?.episodeMapping;
+      setMappingHealth(epMap?.health ?? 'none');
     }).catch(() => {});
   }, [show.id, show.providerType]);
 
@@ -474,6 +480,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           <button onClick={() => setManageSourcesOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors">
             Sources
           </button>
+          <button onClick={() => setMappingOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1.5">
+            <GitCompareArrows className="size-3.5" />
+            Mapping
+            <span className={`size-1.5 rounded-full ${mappingHealth === 'ok' ? 'bg-emerald-400' : mappingHealth === 'conflicts' ? 'bg-amber-400' : mappingHealth === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
+          </button>
           {profiles.length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Profile</span>
@@ -549,6 +560,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
               style={{ backdropFilter: "blur(16px)" }}>
               <button onClick={() => { setManageSourcesOpen(true); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] text-sm text-foreground/80">
                 Sources
+              </button>
+              <button onClick={() => { setMappingOpen(true); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] text-sm text-foreground/80 flex items-center gap-2">
+                <GitCompareArrows className="size-4 text-signal" />
+                Episode Mapping
+                <span className={`ml-auto size-1.5 rounded-full ${mappingHealth === 'ok' ? 'bg-emerald-400' : mappingHealth === 'conflicts' ? 'bg-amber-400' : mappingHealth === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
               </button>
               {profiles.length > 0 && (
                 <div className="px-2 py-1.5">
@@ -935,6 +951,18 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           </div>
         </div>
       )}
+
+      <EpisodeMappingDialog
+        showId={show.id}
+        showTitle={show.title}
+        open={mappingOpen}
+        onOpenChange={setMappingOpen}
+        onChanged={() => {
+          fetch(`/api/shows/${show.id}`).then(r => r.json()).then(data => {
+            setMappingHealth(data.config?.episodeMapping?.health ?? 'none');
+          }).catch(() => {});
+        }}
+      />
 
       {moveDialog && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>

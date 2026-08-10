@@ -211,6 +211,79 @@ export const showTitlesRelations = relations(showTitles, ({ one }) => ({
   }),
 }));
 
+// ---- Episode mapping (anime season-splits) -------------------------------
+//
+// Two-tier anime episode mapping (see docs/issues-tracking.md #4):
+//  - Tier 1 (primary): TheXem rows keyed by scene season/episode, each with
+//    the anidb + provider-native (target) equivalents. Fixes the Honzuki
+//    class of problem where a release is tagged `S04E17` but TVDB lists the
+//    show as one 60-episode S01 (the row resolves scene S04E17 -> tvdb
+//    S01E53).
+//  - Tier 2 (fallback): self-managed rows seeded from AniDB/anilist for
+//    shows TheXem doesn't have. Same table; `scene_*` columns stay NULL.
+//
+// `locked` marks a row the user has confirmed/fixed by hand — the sync job
+// must not overwrite it. `conflict_json` records cross-source disagreements
+// (structure splits, episode counts) that surface the mapping badge.
+
+export const episodeMappings = sqliteTable('episode_mappings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  show_id: text('show_id')
+    .notNull()
+    .references(() => shows.id, { onDelete: 'cascade' }),
+  tvdb_id: text('tvdb_id'),
+  scene_season: integer('scene_season'),
+  scene_episode: integer('scene_episode'),
+  scene_absolute: integer('scene_absolute'),
+  anidb_season: integer('anidb_season'),
+  anidb_episode: integer('anidb_episode'),
+  anidb_absolute: integer('anidb_absolute'),
+  target_season: integer('target_season'),
+  target_episode: integer('target_episode'),
+  target_absolute: integer('target_absolute'),
+  source: text('source').notNull().default('thexem'),
+  locked: integer('locked').default(0),
+  conflict_json: text('conflict_json'),
+  scraped_at: text('scraped_at').default(sql`(datetime('now'))`),
+}, (table) => ({
+  showIdIndex: index('idx_episode_mappings_show').on(table.show_id),
+  tvdbIndex: index('idx_episode_mappings_tvdb').on(table.tvdb_id),
+}));
+
+export const episodeMappingsRelations = relations(episodeMappings, ({ one }) => ({
+  show: one(shows, {
+    fields: [episodeMappings.show_id],
+    references: [shows.id],
+  }),
+}));
+
+/**
+ * Per-show episode-mapping configuration + derived health.
+ *
+ * A missing row falls back to the default: `enabled = (series_type == 'anime')`
+ * so anime shows get the mapping ON by default with zero backfill, while
+ * standard shows are untouched. A row is only written when the user overrides
+ * the toggle or a sync updates health/source.
+ */
+export const episodeMappingConfig = sqliteTable('episode_mapping_config', {
+  show_id: text('show_id')
+    .primaryKey()
+    .references(() => shows.id, { onDelete: 'cascade' }),
+  enabled: integer('enabled').default(0),
+  source: text('source').default('thexem'),
+  health: text('health').default('none'), // 'none' | 'ok' | 'conflicts' | 'missing' | 'error'
+  health_detail: text('health_detail'),
+  last_synced: text('last_synced'),
+  last_error: text('last_error'),
+});
+
+export const episodeMappingConfigRelations = relations(episodeMappingConfig, ({ one }) => ({
+  show: one(shows, {
+    fields: [episodeMappingConfig.show_id],
+    references: [shows.id],
+  }),
+}));
+
 export const seasonsRelations = relations(seasons, ({ one }) => ({
   show: one(shows, {
     fields: [seasons.show_id],

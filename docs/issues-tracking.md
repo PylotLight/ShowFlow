@@ -69,7 +69,7 @@
 ---
 
 ### 4. Anime season-split across providers (multi-listing series)
-**Status:** [BLOCKED — pending design sign-off]
+**Status:** [OPEN] — design signed off 2026-08-10; implementation scoped
 **Reported:** 2026-08-10
 
 #### Real-world failure mode (verified against production APIs)
@@ -81,138 +81,108 @@
 - **Scene releases**: tag episodes as S0XEYY (e.g. `S04E17`).
 - **User's import error**: `Could not find show "Honzuki no Gekokujou" on any configured provider` even though the show exists — because the resolver looked for S04E17 and TVDB only knows S01E60.
 
-#### The data sources we considered
+#### Decision — two-tier mapping (signed off 2026-08-10)
 
-**Option A — AniDB episode-mapping file only** *(the previous plan)*
-- Source: `https://github.com/Anime-Lists/anime-lists` master XML (~56k entries, community-maintained).
-- Maps AniDB → TVDB + TMDB with offsets.
-- **Critical gap**: doesn't know about **scene numbering**. For Honzuki S04 we have:
-  - AniDB S04E17 → TVDB "no such season"
-  - Scene S04E17 → AniDB S04E17 (they agree)
-  - But the **show exists on TVDB at all** is the failure — AniDB data can't tell us "this TVDB show is really 4 cours."
-- **Verdict:** inadequate as the *only* source. Useful as fallback for shows where AniDB has the split but TVDB consolidated (e.g. Mushoku Tensei).
-
-**Option B — TheXem (thexem.info) mapping API**
-- Source: `https://thexem.info/doc` — REST API, community-maintained.
-- Maps across **tvdb / anidb / scene / trakt / mal / imdb / tmdb** in one call.
-- For tvdb 366263 returns 60 rows like:
-  ```json
-  {"scene":{"season":4,"episode":17,"absolute":53},
-   "anidb":{"season":4,"episode":17,...},
-   "tvdb":{"season":1,"episode":53,...}}
-  ```
-- Free, no auth. Caching headers permit week-long storage. Servarr wiki documents it as the backing service for Sonarr's anime handling.
-- **Verdict:** the canonical source for this problem. **Recommended primary.**
-
-**Option C — Composite (thexem primary + AniDB fallback)**
-- Use TheXem when it has the show (covers scene↔tvdb↔anidb in one shot).
-- Fall back to AniDB master XML when TheXem is missing or rate-limited.
-- Most robust, but adds operational complexity: two ingestion paths, two schemas to maintain.
-
-**Option D — Manual offsets only (current as of #3)**
-- Per-file override already shipped. Works but requires manual work per show/cour.
-
-#### Recommendation
-
-**Option B (TheXem API) as primary, with option to layer in Option A (AniDB XML) later if TheXem coverage proves thin.**
-
-Reasons:
-1. TheXem covers **scene numbering**, which is what anime release groups actually use. AniDB-only data can't tell us S04E17 exists on a TVDB show; TheXem already knows.
-2. Sonarr's anime mode has been battle-tested against TheXem for years — its semantics are stable.
-3. Single ingestion path, single schema. If a show isn't on TheXem yet, the user can submit it (community-driven) instead of us maintaining a private mapping.
-4. The AniDB XML file is still useful as a fallback for *very new* shows not yet on TheXem, but we shouldn't add it until we see if TheXem alone leaves gaps.
-
-#### Open questions to resolve before implementing
-
-| # | Question | Recommendation |
+| # | Question | Decision |
 |---|---|---|
-| Q1 | Should TheXem be queried **per-request** (fresh, ~50 ms, rate-limited) or **bulk-cached** (~56 KB/show, weekly sync)? | **Per-request with 7-day TTL cache.** TheXem's caching headers explicitly allow this; bulk sync wastes bandwidth for shows we'll never touch. |
-| Q2 | When TheXem is missing a show, how do we surface that to the user? | Show a "Not on TheXem" badge on the show detail page with a "Request mapping" link to thexem.info (community submission flow is documented at `/xem/add`). |
-| Q3 | Should the mapping apply to **only** episode resolution, or also **season folder naming**? | Both. If we map scene S04E17 → tvdb S01E53, then folder should be `Season 01/` (TVDB's view) but the *filename* could keep the scene S04E17 suffix for clarity — user preference. |
-| Q4 | Per-show opt-in, or library-wide toggle? | Per-show toggle (on show edit page). Anime-only by default. Standard shows are unaffected. |
-| Q5 | How do we handle **partials** — e.g. a show that starts 1:1 with TVDB but splits at season 3? | TheXem mappings are already per-episode. Our resolver should iterate the mapping for the requested filename and use whichever row matches the scene numbering. |
-| Q6 | Should we also index the **aliases** TheXem returns? (Honzuki has EN, JP, and per-season JP titles.) | Yes — feed these into `show_titles` so the Oracle can find them on a future import without re-querying TheXem. |
+| Q1 | TheXem query cadence | **Per-request with 7-day TTL cache** (TheXem `Cache-Control` allows it; bulk sync wastes bandwidth). |
+| Q2 | Show not present in TheXem | **Fall back to the shared tvdb/anidb/anilist custom mapping** (auto-seeded; we maintain it ourselves). Surfaced via a badge + fix control + mismatch drill-down so the user always sees *what* mapping occurred, *from which source*, and *where sources disagree*. **Never require hand-mapping when an automated source exists** — manual work only for what genuinely can't be derived. |
+| Q3 | Scope of the mapping | Both **episode resolution AND folder naming**: folder uses the provider's view (e.g. TVDB `Season 01`), filename may keep the scene suffix (e.g. `S04E17`) — user preference, configurable. |
+| Q4 | Opt-in scope | Per-show toggle, **default ON when `series_type === 'anime'`**, OFF otherwise; user can override per show. |
+| Q5 | Partials (1:1 until S3, then split) | Iterate mapping **per episode** — a single show can use different tiers across different episodes. |
+| Q6 | Aliases | Capture **all unique confirmed aliases** per series, deduped (normalized equality — lowercase, strip punctuation, drop leading articles); feed into `show_titles` for fast local lookup. |
+
+Follow-up clarifications (2026-08-10):
+
+| # | Question | Decision |
+|---|---|---|
+| F1 | Who builds the mapping? | **Auto-seed + manual fix.** Sync the community sources into our own table; manual fixes/confirmations layer on top (confirmed rows are locked from refresh). Manual mapping is a last resort only. |
+| F2 | Source precedence on conflict | **Provider-native for the resolved target** (usually TVDB) is authoritative for the final S/E; AniDB informs the scene-season structure; **disagreements are flagged as a badge, never a silent guess**. |
+| F3 | Where does the UI live? | **Per-show panel only** — no global mappings page. Badge + fix control + mismatch drill-down in show detail settings. |
+| F4 | What triggers the warning badge? | **ANY disagreement across sources** — season-structure split, episode counts, or alias conflicts. |
+
+#### Why TheXem stays primary (Tier 1)
+
+- TheXem is the only source here that actually knows **scene numbering** (verified: `map/all?id=366263` → `scene S04E17 abs 53` ↔ `tvdb S01E53` ↔ `anidb S04E17`). The AniDB offset model cannot express "this TVDB show is really 4 cours" on its own.
+- It is the source Sonarr's anime mode has run on for years — stable, well-understood semantics.
+
+#### Fallback tier (Q2) — shared custom mapping for anything not in TheXem
+
+Self-managed table, auto-seeded from:
+
+1. **AniDB** (`anime-list-master.xml`, ~56k entries) — tvdb↔anidb offsets (`episodeoffset`, `defaulttvdbseason`), cross-refs, structure for partitioned cours.
+2. **AniList** (existing `providers/anilist.ts`) — AniList IDs + title aliases.
+
+The per-show badge exists precisely so that while this tier is doing work, the user can see what resolved where and fix the genuinely-broken cases — without being forced to hand-map anything the sources already tell us.
 
 #### Backend implementation plan (phases)
 
-**Phase A — Schema + ingestion (≈ 300 LOC + migration)**
-- New table `thexem_mappings`:
-  ```sql
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  show_id TEXT NOT NULL REFERENCES shows(id),
-  tvdb_id TEXT NOT NULL,
-  scene_season INTEGER, scene_episode INTEGER, scene_absolute INTEGER,
-  anidb_season INTEGER, anidb_episode INTEGER, anidb_absolute INTEGER,
-  tvdb_season INTEGER,  tvdb_episode INTEGER,  tvdb_absolute INTEGER,
-  source TEXT DEFAULT 'thexem',   -- 'thexem' | 'anidb' | 'manual'
-  fetched_at TEXT DEFAULT (datetime('now')),
-  UNIQUE(show_id, scene_season, scene_episode)
-  ```
-- New module `src/backend/providers/thexem/client.ts` (~80 LOC):
-  - `getMappingAll(tvdbId)`, `getMappingSingle(...)` — wraps `/map/all`, `/map/single`
-  - Honors their `Cache-Control` headers, mirrors to SQLite for offline reuse
-- Extend the show edit/sync flow to accept `enableThexemMapping: true` in `shows.config`.
+**Phase A — Schema + migration (≈ 300 LOC)**
+- New table `episode_mappings` (holds both tiers):
 
-**Phase B — Resolver integration (≈ 120 LOC)**
-- In `Oracle.resolveWithGrabHint()`, after parsing succeeds but before provider episode lookup:
-  1. If show has TheXem enabled and `parsed.season` + `parsed.episodes` exist:
-     - Look up the candidate mapped rows in `thexem_mappings` where `(scene_season = parsed.season AND scene_episode IN parsed.episodes)`.
-     - For each matched row, fetch the **TVDB** episode via the primary provider.
-     - Cache those episodes, build `proposedPath` from the TVDB S/E values.
-  2. If no match (or mapping disabled), fall through to existing resolution.
-
-**Phase C — Background jobs**
-- New TaskName `thexem-refresh` (weekly, opt-in during onboarding) that walks shows with `enableThexemMapping = true` and re-fetches their mapping rows.
-- Refresh rate: align with TheXem's own cache TTL (7 days).
-
-**Phase D — UI (≈ 250 LOC)**
-- ShowDetail settings panel: "Provider Mapping" section with:
-  - Toggle: "Use TheXem community anime mapping"
-  - When enabled: read-only table of `scene S/E ↔ anidb S/E ↔ tvdb S/E` derived from the local cache
-  - "Refresh mapping" button to force re-fetch
-  - "Source: thexem (fetched 3 days ago)" attribution
-- On `release-search`/`grab` flows, log a `pipeline_event` noting which mapping row was applied — helps debug "wrong episode imported" reports later.
-
-**Phase E — Optional fallback**
-- Only if TheXem coverage gaps emerge after deployment: layer in the AniDB master-XML scraper (Option A) behind the same `source` column. Will reuse the `thexem_mappings` table — AniDB rows just have `source = 'anidb'` and a null `scene_*` triplet.
-
-#### Frontend implementation plan (≈ 350 LOC)
-
-**Settings → new "Anime Mapping" card** (under show detail's existing settings tab):
-
-```
-[ ] Use TheXem community anime episode mapping
-    When enabled, releases tagged with the scene season (e.g. S04E17)
-    are resolved against TVDB's actual numbering (e.g. S01E53) using
-    thexem.info's community anime list.
-    Source: thexem.info · last fetched 2 days ago · 60 episodes mapped
-    [Refresh mapping]  [View mapping table]  [Report missing season]
+```sql
+id            INTEGER PRIMARY KEY AUTOINCREMENT,
+show_id       TEXT NOT NULL REFERENCES shows(id),
+tvdb_id       TEXT NOT NULL,
+scene_season  INTEGER, scene_episode INTEGER, scene_absolute INTEGER,   -- thexem tier (nullable)
+anidb_season  INTEGER, anidb_episode INTEGER, anidb_absolute INTEGER,   -- tier-2 structure (nullable)
+target_season INTEGER, target_episode INTEGER, target_absolute INTEGER, -- provider-native target
+source        TEXT NOT NULL DEFAULT 'thexem',  -- 'thexem' | 'anidb' | 'anilist' | 'manual'
+locked        INTEGER DEFAULT 0,               -- user-confirmed; excluded from refresh overwrite
+conflict_json TEXT,                            -- structured disagreement notes across sources
+scraped_at    TEXT DEFAULT (datetime('now')),
+UNIQUE(show_id, scene_season, scene_episode)
 ```
 
-- Toggle is stored per-show in `shows.config` (`thexem: { enabled: true, lastSyncedAt }`).
-- "View mapping table" opens a read-only modal showing scene/anidb/tvdb S/E side-by-side.
-- "Report missing season" opens a link to `https://thexem.info/xem/add?origin=tvdb&id=<tvdbId>`.
+- Per-show derived health (`mapping_health` in `shows.config` or computed cache): `ok` / `conflicts` / `missing` — the source of the frontend badge.
 
-**ManualImport.tsx changes:**
-- When a force-import triggers the TheXem path, log `[Mapping] scene S04E17 → tvdb S01E53` to the activity event so the user sees what was applied.
-- The "Assigned"/"Modified" badges already stretch to cover this — no UI changes needed for the inline editing work in #3.
+**Phase B — Sync / ingestion (≈ 200 LOC)**
+- `providers/thexem/client.ts` — `getMappingAll(tvdbId)`, `getMappingSingle(...)`; honors `Cache-Control`, mirrors rows into `episode_mappings` (`source='thexem'`).
+- AniDB master-XML scraper — same table, `source='anidb'`, nullable `scene_*` triplet.
+- AniList alias pass — normalize + dedupe aliases into `show_titles`.
+- Scheduled task `episode-mapping-refresh` — weekly; refreshes only `locked = 0` rows; on any cross-source disagreement writes `conflict_json` (F2/F4).
 
-**ShowDetail.tsx changes:**
-- New **Mapping** column tag on episode row when the displayed S/E came from a TheXem mapping (vs the provider's native S/E).
+**Phase C — Resolver integration (≈ 120 LOC)**
+- In `Oracle.resolveWithGrabHint()`, after a successful parse, when mapping is enabled:
+  1. Match `scene_season`/`scene_episode` → read `target_*` → resolve provider episode → build `proposedPath` from target S/E.
+  2. No TheXem row but an AniDB row exists → anidb→target offset (provider-native authoritative, F2).
+  3. If agreement checks fail, still resolve but attach `conflict_json` so the badge surfaces (F4).
+- If mapping disabled or no row, existing resolution path is unchanged.
+
+**Phase D — Conflict / mismatch detection (≈ 100 LOC)**
+- Compare tvdb / anidb / anilist per show on each refresh: season structure, episode counts, alias sets. Any disagreement → `mapping_health = 'conflicts'` with details in `conflict_json`. No mapping at all → `'missing'`.
+
+#### Frontend implementation plan (per-show panel only, ≈ 300 LOC)
+
+**ShowDetail → settings "Provider Mapping" card**
+
+```
+[x] Use anime episode mapping                 (default ON when series_type = anime)
+    Tier 1: thexem · last fetched 2 days ago · 60 episodes mapped
+    Tier 2: anidb/anilist fallback · 3 cours offset-mapped
+    ! 2 conflicts with AniDB — view           (amber/red badge = F4)
+
+    [?] Which sources disagree, on which seasons, and what resolved
+    [Refresh mapping]  [View mapping table]
+```
+
+- Toggle: default ON for `series_type === 'anime'`, OFF otherwise; per-show override (Q4).
+- **Badge** on the show: green `ok` / amber–red `conflicts` / gray `missing`. Any cross-source disagreement → red state (F4).
+- **Fix control**: edit individual rows or season offsets; mark a row "confirmed" to lock it (`locked = 1`), excluding it from refresh — the auto-seed + manual-fix model (F1).
+- Mapping table modal: scene / anidb / provider-target side-by-side; offset view for tier-2 shows.
+- `ManualImport.tsx` — when a mapped row applies, log `[Mapping] scene S04E17 → tvdb S01E53` to the activity event so the user sees exactly what was applied.
 
 #### Migration plan
 
-- Existing shows default to `thexem.enabled = false`. No surprises for current libraries.
-- A Settings → System toggle ("Enable TheXem auto-suggest for new anime shows") flips the default for new library additions only.
+- Existing shows: mapping `enabled = true` where `series_type = 'anime'`, `false` otherwise — mirrors Q4's default. Standard/daily libraries are untouched; anime libraries benefit immediately. Per-show override available.
 
 #### Dependencies
-- No new npm packages — TheXem is plain JSON over HTTPS.
-- Existing `db.getCache`/`setCache` handles the HTTP cache; we add a per-show fetch for live view.
+- No new npm packages. TheXem = plain JSON over HTTPS; AniDB = the already-scoped XML scraper; AniList = existing `providers/anilist.ts`.
 
 #### Non-goals
-- Editing TheXem mappings from inside ShowFlow (community edits belong upstream).
-- Trakt/MAL/IMDb mappings TheXem also exposes — we don't need them today.
-- Movies (Honzuki movies, OVAs). TheXem has them, but the schema above intentionally keeps `season`/`episode` fields nullable so movies live in a separate table later without a data migration.
+- Pushing corrections to TheXem from inside ShowFlow (submit fixes upstream, on thexem.info). Local overrides/locks only.
+- Trakt/MAL/IMDb mappings.
+- Movies/OVAs — separate table later; `season`/`episode` fields stay nullable so that migration is trivial.
 
 ---
 

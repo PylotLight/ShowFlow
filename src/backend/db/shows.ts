@@ -487,7 +487,26 @@ export function getShowConfig(self: DatabaseManager, showId: string): Record<str
     if (p.is_metadata) config.metadataProvider = p.provider_type;
     if (p.is_airtime) config.airtimeProvider = p.provider_type;
   }
+  const mapping = self.getEpisodeMappingConfig(showId);
+  config.episodeMapping = {
+    enabled: mapping.enabled === 1,
+    source: mapping.source,
+    health: mapping.health,
+    lastSynced: mapping.last_synced,
+    lastError: mapping.last_error,
+    healthDetail: mapping.health_detail ? safeJsonDetail(mapping.health_detail) : [],
+  };
   return config;
+}
+
+function safeJsonDetail(json: string): string[] {
+  try {
+    const parsed = JSON.parse(json);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    return [json];
+  }
+  return [];
 }
 
 export function getProviderForRole(self: DatabaseManager, showId: string, role: 'metadata' | 'airtime'): {
@@ -941,6 +960,20 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
   if (updates.seriesType !== undefined) setData.series_type = updates.seriesType;
   if (updates.config?.seriesType !== undefined) setData.series_type = updates.config.seriesType;
   if (updates.rootFolderPath !== undefined) setData.root_folder_path = updates.rootFolderPath;
+
+  // Episode-mapping config (anime season-splits, issues-tracking.md #4).
+  // `config.episodeMapping.enabled` flips the per-show toggle; when a show
+  // is switched to 'anime' series type and no override row exists yet, the
+  // default-on fallback (enabled = seriesType === 'anime') kicks in.
+  const mappingCfg = updates.config?.episodeMapping as
+    | { enabled?: boolean | number; source?: string }
+    | undefined;
+  if (mappingCfg && (mappingCfg.enabled !== undefined || mappingCfg.source !== undefined)) {
+    self.setEpisodeMappingConfig(showId, {
+      enabled: mappingCfg.enabled !== undefined ? mappingCfg.enabled : undefined,
+      source: mappingCfg.source,
+    });
+  }
 
   // Apply a library type: bundles root folder + quality profile + indexers
   // (design-brief-platform-ux-systems.md §1). Resolves the identifier the
