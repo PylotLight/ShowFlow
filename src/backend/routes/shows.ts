@@ -620,6 +620,82 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    // Lock every unlocked mapping row in one call. Scene numbering is kept;
+    // each row's provider S/E is derived by adding a per-season offset to the
+    // scene S/E. The user's complaint driving this: after fixing S01E01, they
+    // still had to click Fix on every other episode even though the whole
+    // season shares the same scene->provider shift.
+    "/api/shows/:id/episode-mapping/rows-bulk": {
+      async POST(req: RouteReq) {
+        try {
+          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
+          const body = (await req.json()) as {
+            // Lock these rows only. Default: every unlocked row.
+            rowIds?: number[];
+            // Coarsest option: provider = scene + this constant (default 0 season, 0 episode).
+            seasonOffset?: number;
+            episodeOffset?: number;
+            // Per-row explicit targets override the offset for that row.
+            targets?: { rowId: number; targetSeason: number; targetEpisode: number }[];
+          } | null;
+
+          const rows = db.listEpisodeMappings(req.params.id!);
+          if (rows.length === 0) return errorResponse("No mapping rows to fix.", 400);
+
+          const targetMap = new Map<number, { targetSeason: number; targetEpisode: number }>();
+          for (const t of body?.targets ?? []) {
+            if (!Number.isFinite(t.rowId)) continue;
+            if (!Number.isFinite(t.targetSeason) || !Number.isFinite(t.targetEpisode)) continue;
+            targetMap.set(t.rowId, { targetSeason: t.targetSeason, targetEpisode: t.targetEpisode });
+          }
+
+          const wanted: Set<number> | null = Array.isArray(body?.rowIds) && body.rowIds.length > 0
+            ? new Set(body.rowIds.filter(n => Number.isFinite(n)))
+            : null;
+
+          const seasonOffset = Number.isFinite(body?.seasonOffset) ? body!.seasonOffset! : 0;
+          const episodeOffset = Number.isFinite(body?.episodeOffset) ? body!.episodeOffset! : 0;
+
+          const updated: number[] = [];
+          for (const row of rows) {
+            if (row.locked === 1) continue;
+            if (wanted && !wanted.has(row.id)) continue;
+            if (row.scene_season == null || row.scene_episode == null) continue;
+
+            let targetSeason: number;
+            let targetEpisode: number;
+            const explicit = targetMap.get(row.id);
+            if (explicit) {
+              targetSeason = explicit.targetSeason;
+              targetEpisode = explicit.targetEpisode;
+            } else {
+              targetSeason = row.scene_season + seasonOffset;
+              targetEpisode = row.scene_episode + episodeOffset;
+            }
+
+            const ok = db.lockMappingRow(req.params.id!, row.id, {
+              target_season: targetSeason,
+              target_episode: targetEpisode,
+              target_absolute: undefined,
+            });
+            if (ok) updated.push(row.id);
+          }
+
+          db.logEvent({
+            type: 'mapping',
+            entityType: 'show',
+            entityId: req.params.id!,
+            message: `Bulk mapping fix: locked ${updated.length} row${updated.length === 1 ? '' : 's'} (scene->provider ${seasonOffset >= 0 ? '+' : ''}${seasonOffset}S, ${episodeOffset >= 0 ? '+' : ''}${episodeOffset}E)`,
+          });
+
+          const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+          return json({ ok: true, updated: updated.length, ...summarizeSyncDynamic(db, req.params.id!) });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id/scan": {
       async POST(req: RouteReq) {
         try {

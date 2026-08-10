@@ -3,7 +3,7 @@ import * as schema from './schema';
 import type { DatabaseManager } from './index';
 import { describeReasonCode, type ReasonCode } from '../core/pipeline/reason_codes';
 
-export type HealthComponentType = 'indexer' | 'download_client' | 'import_path';
+export type HealthComponentType = 'indexer' | 'download_client' | 'import_path' | 'metadata_provider';
 export type HealthStatus = 'healthy' | 'degraded' | 'down';
 
 export interface UpsertHealthInput {
@@ -70,7 +70,7 @@ export interface HealthSnapshot {
 export function getHealthSnapshot(self: DatabaseManager): HealthSnapshot {
   const rows = self.drizz.select().from(schema.systemHealth).all();
 
-  const byType: HealthSnapshot['byType'] = { indexer: [], download_client: [], import_path: [] };
+  const byType: HealthSnapshot['byType'] = { indexer: [], download_client: [], import_path: [], metadata_provider: [] };
   for (const row of rows) {
     const key = row.component_type as HealthComponentType;
     if (key in byType) byType[key]!.push(row);

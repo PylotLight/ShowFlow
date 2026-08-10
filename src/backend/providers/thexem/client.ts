@@ -54,13 +54,21 @@ export class TheXemClient {
     const cached = db.getCache<XemMappingAllResponse>(cacheKey);
     if (cached !== null) return cached;
 
-    const resp = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(15_000),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      // Bun's native connect/timeout error is opaque; surface the target URL
+      // so a DNS sinkhole or network block is obvious to the caller.
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`TheXem request to ${url} failed: ${message}`);
+    }
 
     if (!resp.ok) {
-      throw new Error(`TheXem request failed: ${resp.status} ${resp.statusText}`);
+      throw new Error(`TheXem request failed: ${resp.status} ${resp.statusText} (${url})`);
     }
 
     const json = (await resp.json()) as XemMappingAllResponse;

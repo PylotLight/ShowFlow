@@ -23,6 +23,7 @@ export type ReasonCategory =
   | 'naming_mismatch'
   | 'network'
   | 'config'
+  | 'metadata_provider'
   | 'success';
 
 export interface ReasonCodeDef {
@@ -66,6 +67,9 @@ export const REASON_CODES = {
   QUALITY_NOT_ALLOWED: { category: 'release_quality', label: "Quality not in this profile's allow-list", confidence: 'certain', suggestedAction: 'The release quality is outside your profile preferences. Adjust your quality profile in Settings > Quality, or wait for a different release.' },
   QUALITY_UNKNOWN: { category: 'release_quality', label: 'Could not identify a quality for this release', confidence: 'likely', suggestedAction: 'The release format could not be identified. This may be an unusual encode; try a different release group.' },
   NOT_AN_UPGRADE: { category: 'release_quality', label: 'Not an upgrade over the existing file', confidence: 'certain', suggestedAction: 'The release quality is lower than or equal to what you already have. No action needed unless you want to replace it manually.' },
+
+  // ---- Metadata providers ----
+  METADATA_PROVIDER_UNREACHABLE: { category: 'metadata_provider', label: 'Metadata provider unreachable', confidence: 'certain', suggestedAction: 'Check your network/DNS for a block on the metadata provider domain (e.g. thexem.info). If a proxy is required, ensure it is configured and the app honors it.' },
 
   // ---- Grab ----
   GRAB_FAILED_NO_CLIENT: { category: 'download_client', label: 'Grab failed - check download client configuration', confidence: 'certain', suggestedAction: 'Check your download client settings in Settings > Downloads. Ensure the client is enabled and credentials are correct.' },

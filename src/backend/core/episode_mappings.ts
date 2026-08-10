@@ -204,14 +204,18 @@ export class EpisodeMappingService {
       return summarizeSync(this.manager, showId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // Surface the actual target URL so a DNS / firewall block is obvious
+      // in the UI (the native fetch error is just 'Unable to connect').
+      const targetUrl = `https://thexem.info/map/all?id=${tvdb.provider_id}&origin=tvdb`;
+      const detailed = `TheXem fetch failed for ${targetUrl}: ${message}`;
       this.manager.setEpisodeMappingConfig(showId, {
         source: 'thexem',
         health: 'error',
-        health_detail: JSON.stringify([`Mapping sync failed: ${message}`]),
-        last_error: message,
+        health_detail: JSON.stringify([`Mapping sync failed: ${detailed}`]),
+        last_error: detailed,
         last_synced: new Date().toISOString(),
       });
-      this.manager.logEvent({ type: 'error', entityType: 'show', entityId: showId, message: `Episode mapping sync failed for ${showId}: ${message}` });
+      this.manager.logEvent({ type: 'error', entityType: 'show', entityId: showId, message: `Episode mapping sync failed for ${showId}: ${detailed}` });
       throw err;
     }
   }

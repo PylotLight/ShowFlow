@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, Loader2Icon, LockIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { Check, CheckCheck, Loader2Icon, LockIcon, RefreshCwIcon, XIcon } from "lucide-react";
 
 interface MappingRow {
   id: number;
@@ -68,6 +68,9 @@ export function EpisodeMappingDialog({
   const [fixRow, setFixRow] = React.useState<number | null>(null);
   const [fixSeason, setFixSeason] = React.useState("");
   const [fixEpisode, setFixEpisode] = React.useState("");
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkSeasonOffset, setBulkSeasonOffset] = React.useState("0");
+  const [bulkEpisodeOffset, setBulkEpisodeOffset] = React.useState("0");
 
   async function load() {
     setLoading(true);
@@ -156,6 +159,34 @@ export function EpisodeMappingDialog({
     setFixSeason(String(row.target_season ?? ""));
     setFixEpisode(String(row.target_episode ?? ""));
   }
+
+  async function applyBulkFix() {
+    const seasonOffset = parseInt(bulkSeasonOffset, 10);
+    const episodeOffset = parseInt(bulkEpisodeOffset, 10);
+    if (!Number.isFinite(seasonOffset) || !Number.isFinite(episodeOffset)) return;
+    setBusy("bulk");
+    setError(null);
+    try {
+      const res = await fetch(`/api/shows/${showId}/episode-mapping/rows-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seasonOffset, episodeOffset }),
+      });
+      const data = (await res.json()) as MappingSummary & { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data?.error ?? "Bulk fix failed");
+      setSummary(data);
+      setBulkOpen(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  React.useEffect(() => {
+    if (!open) setBulkOpen(false);
+  }, [open]);
 
   if (!open) return null;
 
@@ -250,9 +281,60 @@ export function EpisodeMappingDialog({
             {/* Mapping table */}
             {showFixTable && (
               <div className="min-h-0">
-                <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/70 mb-1.5">
-                  Scene → Provider (scroll)
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/70">
+                    Scene → Provider (scroll)
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBulkOpen(v => !v)}
+                    disabled={busy === 'bulk'}
+                    className="flex items-center gap-1 rounded-md border border-signal/40 hover:bg-signal/10 text-signal px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                  >
+                    {busy === 'bulk' ? <Loader2Icon className="size-3 animate-spin" /> : <CheckCheck className="size-3" />}
+                    Fix all
+                  </button>
                 </div>
+
+                {bulkOpen && (
+                  <div className="rounded-lg border border-signal/20 bg-signal/[0.04] p-3 mb-2 space-y-2">
+                    <p className="text-xs text-foreground/80 leading-relaxed">
+                      Lock every unlocked row at once. Each row's provider S/E is set to its scene S/E plus this offset
+                      (useful when the scene split a season but the provider keeps one continuous run).
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="text-muted-foreground">Provider = scene</span>
+                      <span className="text-muted-foreground">season</span>
+                      <input
+                        type="number"
+                        value={bulkSeasonOffset}
+                        onChange={e => setBulkSeasonOffset(e.target.value)}
+                        className="w-16 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:border-signal/60"
+                      />
+                      <span className="text-muted-foreground">episode</span>
+                      <input
+                        type="number"
+                        value={bulkEpisodeOffset}
+                        onChange={e => setBulkEpisodeOffset(e.target.value)}
+                        className="w-16 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:border-signal/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={applyBulkFix}
+                        disabled={busy === 'bulk'}
+                        className="flex items-center gap-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                      >
+                        {busy === 'bulk' ? <Loader2Icon className="size-3 animate-spin" /> : <Check className="size-3" />}
+                        Apply to all
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Example: scene S01E01 should map to provider S01E53 → season 0, episode +52. Rows already locked
+                      are left untouched.
+                    </p>
+                  </div>
+                )}
+
                 <div className="max-h-56 overflow-y-auto rounded-lg border border-white/10">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-[#1a1e27]">

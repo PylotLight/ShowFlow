@@ -2,6 +2,7 @@ import {
   ActivityIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  DatabaseIcon,
   FolderOpenIcon,
   HardDriveIcon,
   Loader2Icon,
@@ -34,6 +35,7 @@ interface HealthData {
     indexer: HealthRow[];
     download_client: HealthRow[];
     import_path: HealthRow[];
+    metadata_provider: HealthRow[];
   };
 }
 
@@ -43,12 +45,14 @@ const REASON_CODE_LABELS: Record<string, string> = {
   WATCH_FOLDER_UNAVAILABLE: "Watch folder missing or not writable",
   IMPORT_PATH_UNAVAILABLE: "Import path missing or not writable",
   NO_INDEXERS_CONFIGURED: "No indexers configured",
+  METADATA_PROVIDER_UNREACHABLE: "Metadata provider unreachable (DNS/network block?)",
 };
 
 const SECTION_META: Record<string, { label: string; icon: React.ElementType; settingsTab: string }> = {
   indexer: { label: "Indexers", icon: NetworkIcon, settingsTab: "indexers" },
   download_client: { label: "Download Clients", icon: HardDriveIcon, settingsTab: "downloads" },
   import_path: { label: "Import Paths", icon: FolderOpenIcon, settingsTab: "downloads" },
+  metadata_provider: { label: "Metadata Services", icon: DatabaseIcon, settingsTab: "providers" },
 };
 
 function timeAgo(iso: string): string {
@@ -92,8 +96,10 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
     });
   }
 
+  const SECTIONS = ["indexer", "download_client", "import_path", "metadata_provider"] as const;
+
   const totalRows = data
-    ? data.byType.indexer.length + data.byType.download_client.length + data.byType.import_path.length
+    ? SECTIONS.reduce((sum, t) => sum + data.byType[t].length, 0)
     : 0;
 
   return (
@@ -125,7 +131,7 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
                 ? ""
                 : data.overallStatus === "healthy"
                   ? `${totalRows} component${totalRows !== 1 ? "s" : ""} checked, all healthy`
-                  : `${countBy(data.byType.indexer, "down") + countBy(data.byType.download_client, "down") + countBy(data.byType.import_path, "down")} down, ${countBy(data.byType.indexer, "degraded") + countBy(data.byType.download_client, "degraded") + countBy(data.byType.import_path, "degraded")} degraded \u2014 resolve issues below`}
+                  : `${SECTIONS.reduce((s, t) => s + countBy(data.byType[t], "down"), 0)} down, ${SECTIONS.reduce((s, t) => s + countBy(data.byType[t], "degraded"), 0)} degraded — resolve issues below`}
             </p>
           </div>
         </div>
@@ -155,7 +161,7 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
           </p>
         </GlassPanel>
       ) : (
-        (["indexer", "download_client", "import_path"] as const).map((type) => {
+        SECTIONS.map((type) => {
           const rows = data.byType[type];
           const meta = SECTION_META[type]!;
           const downCount = countBy(rows, "down");

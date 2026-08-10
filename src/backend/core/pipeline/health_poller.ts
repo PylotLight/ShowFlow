@@ -22,7 +22,40 @@ export async function pollSystemHealth(config: Config): Promise<void> {
     pollIndexers(),
     pollDownloadClients(config),
     pollImportPaths(),
+    pollMetadataProviders(),
   ]);
+}
+
+// TheXem is the only external metadata service ShowFlow currently depends on:
+// anime releases use scene numbering that can only be translated via its
+// cross-provider map. Surfacing its reachability here makes a DNS sinkhole
+// or network block immediately visible (the native fetch error is 'Unable to
+// connect' - not enough to diagnose in the UI).
+async function pollMetadataProviders() {
+  try {
+    const resp = await fetch('https://thexem.info/map/all?id=367063&origin=tvdb', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (resp.ok) {
+      db.upsertHealthStatus({
+        componentType: 'metadata_provider', componentId: 'thexem', componentName: 'TheXem',
+        status: 'healthy', message: 'Connected',
+      });
+    } else {
+      db.upsertHealthStatus({
+        componentType: 'metadata_provider', componentId: 'thexem', componentName: 'TheXem',
+        status: 'degraded', reasonCode: 'METADATA_PROVIDER_UNREACHABLE',
+        message: `HTTP ${resp.status} ${resp.statusText}`,
+      });
+    }
+  } catch (e) {
+    db.upsertHealthStatus({
+      componentType: 'metadata_provider', componentId: 'thexem', componentName: 'TheXem',
+      status: 'down', reasonCode: 'METADATA_PROVIDER_UNREACHABLE',
+      message: `Unable to reach thexem.info: ${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
 }
 
 async function pollIndexers() {
