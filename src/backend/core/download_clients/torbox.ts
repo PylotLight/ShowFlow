@@ -230,63 +230,160 @@ export class TorboxDownloadClient implements DownloadClient {
   private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
     console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
 
-    const maxAttempts = 600;
+    const maxAttempts = 600; // ~100 minutes with the adaptive schedule below
     let attempts = 0;
+    let lastLoggedState = '';
+    let transientFailures = 0;
 
     while (attempts < maxAttempts) {
-      const status = await this.service.getStatus(torrentId);
-      if (status.success && status.result) {
+      let status: Awaited<ReturnType<TorboxService['getStatus']>> | null = null;
+      try {
+        status = await this.service.getStatus(torrentId);
+        transientFailures = 0; // reset on successful API call
+      } catch (err) {
+        transientFailures++;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[${this.name}] Status check ${attempts + 1} for ${torrentId} failed (attempt ${transientFailures}): ${msg}`);
+
+        if (transientFailures >= 12) {
+          db.logEvent({
+            type: 'error',
+            entityType: 'release',
+            message: `TorBox status polling failed repeatedly for "${label}" (torrent ${torrentId}): ${msg}. Download state unknown.`,
+          });
+          return false;
+        }
+      }
+
+      if (status?.success && status.result) {
         let torrent = status.result.data || status.result;
         if (Array.isArray(torrent)) {
-          torrent = torrent.find((t: any) => String(t.id) === torrentId);
+          torrent = torrent.find((t: any) => String(t.id) === torrentId || String(t.torrent_id) === torrentId);
         }
+
         if (!torrent) {
-          attempts++;
-          await new Promise(r => setTimeout(r, 10_000));
-          continue;
+          // Torrent no longer in list — could be removed/expired externally
+          console.warn(`[${this.name}] Torrent ${torrentId} no longer appears in TorBox list — assuming removed/expired`);
+          db.logEvent({
+            type: 'error',
+            entityType: 'release',
+            message: `TorBox torrent ${torrentId} ("${label}") disappeared from the account — download likely removed or expired.`,
+          });
+          return false;
         }
-        if (torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true) {
+
+        const rawState = String(torrent.download_state || '').toLowerCase();
+        const progress = typeof torrent.progress === 'number' ? Math.round(torrent.progress * 100) : null;
+
+        // Log state transitions so operators can see the download progressing
+        const stateSummary = `${rawState || 'unknown'}${progress != null ? ` ${progress}%` : ''}`;
+        if (stateSummary !== lastLoggedState) {
+          console.log(`[${this.name}] ${torrentId} state: ${stateSummary}`);
+          lastLoggedState = stateSummary;
+        }
+
+        // Terminal failure states — bail out early instead of polling forever
+        if (rawState.includes('error') || rawState.includes('fail') || rawState.includes('stalled')) {
+          console.error(`[${this.name}] Torrent ${torrentId} entered terminal failure state: ${rawState}`);
+          db.logEvent({
+            type: 'error',
+            entityType: 'release',
+            message: `TorBox download failed for "${label}" (state: ${rawState}).`,
+          });
+          return false;
+        }
+
+        const isComplete = torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true;
+        if (isComplete) {
           const files = (torrent.files || []).filter((f: any) => {
             const name = (f.name || '').toLowerCase();
             return ['.mkv', '.mp4', '.avi', '.mov'].some(ext => name.endsWith(ext));
           });
 
           if (files.length === 0) {
-            console.warn(`[${this.name}] No video files in torrent ${torrentId}`);
+            const allNames = (torrent.files || []).map((f: any) => f.name).join(', ');
+            console.warn(`[${this.name}] No video files in torrent ${torrentId}. Available: ${allNames}`);
+            db.logEvent({
+              type: 'error',
+              entityType: 'release',
+              message: `TorBox download for "${label}" completed but contained no video files (found: ${allNames}).`,
+            });
             return false;
           }
 
+          let anyDownloaded = false;
           for (const file of files) {
             const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
             if (!dl.success) {
-              console.warn(`[${this.name}] Failed to get link for ${file.short_name || file.id}: ${JSON.stringify(dl.error)}`);
+              const errText = JSON.stringify(dl.error);
+              console.warn(`[${this.name}] Failed to get link for ${file.short_name || file.id}: ${errText}`);
+              db.logEvent({
+                type: 'error', entityType: 'release',
+                message: `TorBox download-link request failed for "${label}" file ${file.short_name || file.id}: ${errText}`,
+              });
               continue;
             }
             const url = dl.result?.data || dl.result?.download_link || (typeof dl.result === 'string' ? dl.result : null);
             if (!url) {
               console.warn(`[${this.name}] No download URL for ${file.short_name || file.id}`);
+              db.logEvent({
+                type: 'error', entityType: 'release',
+                message: `TorBox returned no download URL for "${label}" file ${file.short_name || file.id}.`,
+              });
               continue;
             }
 
             const outputPath = path.join(this.config.outputFolder!, file.short_name || `file_${file.id}.mkv`);
-            const res = await fetch(url);
-            if (!res.ok) {
-              console.warn(`[${this.name}] Download failed for ${file.short_name || file.id}: ${res.statusText}`);
-              continue;
+            try {
+              const res = await fetch(url);
+              if (!res.ok) {
+                const body = await res.text().catch(() => '');
+                console.warn(`[${this.name}] Download failed for ${file.short_name || file.id}: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ''}`);
+                db.logEvent({
+                  type: 'error', entityType: 'release',
+                  message: `TorBox HTTP download failed for "${label}": ${res.status} ${res.statusText}`,
+                });
+                continue;
+              }
+              await Bun.write(outputPath, res);
+              console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
+              anyDownloaded = true;
+            } catch (fetchErr) {
+              const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+              console.warn(`[${this.name}] Fetch/write failed for ${file.short_name || file.id}: ${msg}`);
+              db.logEvent({
+                type: 'error', entityType: 'release',
+                message: `TorBox download write failed for "${label}": ${msg}`,
+              });
             }
-            await Bun.write(outputPath, res);
-            console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
           }
 
-          return true;
+          if (anyDownloaded) {
+            return true;
+          } else {
+            db.logEvent({
+              type: 'error',
+              entityType: 'release',
+              message: `TorBox download for "${label}" marked complete but every file download failed.`,
+            });
+            return false;
+          }
         }
       }
 
       attempts++;
-      await new Promise(r => setTimeout(r, 10_000));
+      // Slightly back off while we're waiting — keeps log noise down and is
+      // kinder to TorBox's rate limits during long cache waits.
+      const delayMs = attempts < 30 ? 10_000 : attempts < 120 ? 15_000 : 20_000;
+      await new Promise(r => setTimeout(r, delayMs));
     }
 
-    console.error(`[${this.name}] Torrent ${torrentId} did not complete within time limit`);
+    console.error(`[${this.name}] Torrent ${torrentId} did not complete within time limit (${maxAttempts} polls)`);
+    db.logEvent({
+      type: 'error',
+      entityType: 'release',
+      message: `TorBox download timed out for "${label}" after ${maxAttempts} status checks (~${Math.round(maxAttempts * 15 / 60)} minutes).`,
+    });
     return false;
   }
 

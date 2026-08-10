@@ -826,6 +826,20 @@ export class Oracle {
     return { episodes, errors };
   }
 
+  /**
+   * Build the show-relative path (`Show Title/Season 01/Show Title - S01E01.ext`)
+   * that gets joined onto the show root folder. Public so the import pipeline
+   * can rebuild the path after applying manual season/episode overrides.
+   */
+  buildProposedPath(
+    show: Show,
+    episodes: Episode[],
+    originalFilename: string,
+    config?: Record<string, unknown>,
+  ): string {
+    return this.buildPath(show, episodes, originalFilename, config);
+  }
+
   private buildPath(
     show: Show,
     episodes: Episode[],
@@ -866,7 +880,11 @@ export class Oracle {
   }
 
   private sanitize(value: string): string {
-    return value.replace(/[<>:"/\\|?*]/g, '').trim();
+    // Only strip characters that are illegal on the filesystems ShowFlow
+    // targets (NTFS/SMB and POSIX). Colons in particular are kept verbatim so
+    // folders like "Mushoku Tensei: Jobless Reincarnation" match Sonarr's
+    // preferred format and what anime fans expect. See issues-tracking.md #5.
+    return value.replace(/[<>"/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
   }
 
   /**

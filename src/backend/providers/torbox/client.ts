@@ -75,8 +75,12 @@ export class TorboxClient {
   }
 
   async getTorrentStatus(torrentId: string, bypassCache = true) {
+    // The /mylist endpoint supports filtering by id via query params - different
+    // TorBox API versions accept either `id` or `torrent_id`, so include both
+    // to maximize compatibility.
     const query = new URLSearchParams({
       id: torrentId,
+      torrent_id: torrentId,
       bypass_cache: bypassCache ? 'true' : 'false',
     });
     return this.request<any>(`/v1/api/torrents/mylist?${query.toString()}`, {

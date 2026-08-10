@@ -3,8 +3,10 @@ import { rename, mkdir, unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Oracle } from '../../parser/oracle';
+import type { ParsedFilename } from '../../parser/index';
 import { db } from '../../db';
 import type { ProviderType } from '../../providers/factory';
+import type { Episode } from '../types';
 import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
@@ -345,7 +347,11 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
-  async forceImport(filename: string, showId?: string): Promise<{ ok: boolean; message: string }> {
+  async forceImport(
+    filename: string,
+    showId?: string,
+    overrides?: { season?: number; episodes?: number[] },
+  ): Promise<{ ok: boolean; message: string }> {
     const folder = this.watchFolder;
     if (!folder) {
       return { ok: false, message: 'Watch folder is not configured.' };
@@ -359,7 +365,7 @@ export class BlackholeClient implements DownloadClient {
     }
 
     try {
-      await this.handleFile(folder, filename, { force: true, showId });
+      await this.handleFile(folder, filename, { force: true, showId, overrides });
       return { ok: true, message: `Imported "${filename}"` };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -367,7 +373,15 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
-  private async handleFile(folder: string, filename: string, opts?: { force?: boolean; showId?: string }) {
+  private async handleFile(
+    folder: string,
+    filename: string,
+    opts?: {
+      force?: boolean;
+      showId?: string;
+      overrides?: { season?: number; episodes?: number[] };
+    },
+  ) {
     const fullPath = path.join(folder, filename);
 
     if (this.isIgnoredFile(filename)) {
@@ -465,27 +479,84 @@ export class BlackholeClient implements DownloadClient {
           timestamp: new Date().toISOString()
         });
 
-        if (!matchedAttempt && parsed?.show) {
-          const bestAttempt = diagnostics.providerAttempts.find(a => a.candidateCount > 0);
-          if (bestAttempt) {
-            const similarShows = bestAttempt.candidates.slice(0, 3).map(s => s.title).join(', ');
-            errorMessage += ` Closest matches on ${bestAttempt.provider}: ${similarShows}.`;
-          } else {
-            errorMessage += ` No matching shows found on tmdb, tvdb, or anilist.`;
-          }
-        }
+    if (!matchedAttempt && parsed?.show) {
+      const bestAttempt = diagnostics.providerAttempts.find(a => a.candidateCount > 0);
+      if (bestAttempt) {
+        const similarShows = bestAttempt.candidates.slice(0, 3).map(s => s.title).join(', ');
+        errorMessage += ` Closest matches on ${bestAttempt.provider}: ${similarShows}.`;
+      } else {
+        errorMessage += ` No matching shows found on tmdb, tvdb, or anilist.`;
+      }
+    }
 
-        db.logEvent({
-          type: 'error',
-          entityType: 'file',
-          message: `Metadata resolution failed for ${filename}: ${errorMessage}`
-        });
-        return;
+    const fullMessage = `Metadata resolution failed for ${filename}: ${errorMessage}`;
+
+    db.logEvent({
+      type: 'error',
+      entityType: 'file',
+      message: fullMessage,
+    });
+
+    // When handleFile is invoked via the manual force-import route, swallow
+    // this error and the UI reports success despite the file remaining in
+    // the watch folder. Throw so forceImportFile can return a failed result.
+    if (opts?.force) {
+      throw new Error(errorMessage);
+    }
+    return;
       }
 
-      const { show, episodes, proposedPath } = result;
+    const { show, episodes, proposedPath } = result;
 
-      debugLog('Show resolved successfully', {
+    // ---- Manual season/episode override --------------------------------
+    // let users override the parsed season/episode numbers when automatic
+    // resolution picked the wrong ones or when the metadata provider lookup
+    // failed but the user knows the correct mapping.
+    if (opts?.overrides) {
+      const parsedData = result.parsed as ParsedFilename | undefined;
+
+      const season = opts.overrides.season ??
+        parsedData?.season ??
+        episodes[0]?.season;
+
+      const episodeNumbers = opts.overrides.episodes && opts.overrides.episodes.length > 0
+        ? opts.overrides.episodes
+        : episodes.map(e => e.episode);
+
+      // Rebuild the episode list with user overrides
+      const overriddenEpisodes: Episode[] = episodeNumbers.map(num => {
+        // preserve the original episode data when possible
+        const existing = episodes.find(e => e.episode === num);
+        return {
+          ...existing,
+          season,
+          episode: num,
+          title: existing?.title ?? `Episode ${num}`,
+          // clear file_path so it doesn't collide with any existing ep record
+          file_path: undefined,
+        };
+      });
+
+      // Rebuild proposed path with the overridden season/episode numbers so
+      // the file lands in the right folder/name.
+      const overriddenProposedPath = this.oracle.buildProposedPath(
+        show,
+        overriddenEpisodes,
+        filename,
+        this.config as unknown as Record<string, unknown>,
+      );
+
+      debugLog('Manual import season/episode overrides applied', {
+        filename,
+        originalEpisodes: episodes.map(e => `S${e.season}E${e.episode}`),
+        overriddenEpisodes: overriddenEpisodes.map(e => `S${e.season}E${e.episode}`),
+      });
+
+      episodes.splice(0, episodes.length, ...overriddenEpisodes);
+      result.proposedPath = overriddenProposedPath;
+    }
+
+    debugLog('Show resolved successfully', {
         filename,
         showTitle: show.title,
         provider: show.provider,

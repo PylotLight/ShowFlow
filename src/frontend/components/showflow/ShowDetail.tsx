@@ -79,6 +79,15 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [grabTarget, setGrabTarget] = React.useState<GrabTarget>(null);
   const [relocating, setRelocating] = React.useState(false);
   const [organizing, setOrganizing] = React.useState(false);
+  const [renamingFolder, setRenamingFolder] = React.useState(false);
+  const [renamePreview, setRenamePreview] = React.useState<{
+    currentFolderPath: string;
+    currentFolderName: string;
+    sanitizedTitle: string;
+    targetFolderPath: string;
+    wouldChange: boolean;
+    episodesAffected: number;
+  } | null>(null);
   const [moveDialog, setMoveDialog] = React.useState<{ oldRoot: string; newRoot: string; profileName: string; profileId: string } | null>(null);
 
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -302,6 +311,45 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       flashStatus(err.message ?? "Failed to organize files.", false);
     } finally {
       setOrganizing(false);
+    }
+  }
+
+  async function handleRenameFolderPreview() {
+    setRenamingFolder(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}/rename-preview`);
+      if (!res.ok) throw new Error("Failed to load rename preview");
+      const data = await res.json();
+      setRenamePreview({
+        currentFolderPath: data.currentFolderPath,
+        currentFolderName: data.currentFolderName,
+        sanitizedTitle: data.sanitizedTitle,
+        targetFolderPath: data.targetFolderPath,
+        wouldChange: data.wouldChange,
+        episodesAffected: (data.episodeImpact ?? []).filter((e: any) => e.wouldUpdate).length,
+      });
+    } catch (err: any) {
+      flashStatus(err.message ?? "Failed to load rename preview.", false);
+    } finally {
+      setRenamingFolder(false);
+    }
+  }
+
+  async function handleRenameFolderApply() {
+    if (!renamePreview) return;
+    setRenamingFolder(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}/rename-apply`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Rename failed");
+      flashStatus(data.message ?? `Renamed folder to "${data.to}". ${data.episodesUpdated} episode path${data.episodesUpdated !== 1 ? "s" : ""} updated.`);
+      setRenamePreview(null);
+      // Refresh the root-folder display since the path changed
+      setRootFolderPath(data.to);
+    } catch (err: any) {
+      flashStatus(err.message ?? "Failed to rename folder.", false);
+    } finally {
+      setRenamingFolder(false);
     }
   }
 
@@ -696,6 +744,20 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
                     )}
                     Organize
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleRenameFolderPreview}
+                    disabled={renamingFolder}
+                    title="Preview and apply a folder rename to match the sanitized show title"
+                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
+                  >
+                    {renamingFolder ? (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    ) : (
+                      <FolderSearch className="size-3" />
+                    )}
+                    Rename Folder
+                  </button>
                 </div>
               )}
 
@@ -812,6 +874,67 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             });
         }}
       />
+
+      {renamePreview && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+          <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
+            style={{ backdropFilter: "blur(16px)" }}>
+            <h3 className="font-display text-lg font-semibold text-white/90">Rename show folder?</h3>
+
+            <div className="space-y-2 text-xs">
+              <div className="grid grid-cols-[80px_1fr] gap-2">
+                <span className="text-muted-foreground uppercase tracking-wider font-mono">Current</span>
+                <code className="text-foreground/80 break-all">{renamePreview.currentFolderName}</code>
+              </div>
+              <div className="grid grid-cols-[80px_1fr] gap-2">
+                <span className="text-muted-foreground uppercase tracking-wider font-mono">Proposed</span>
+                <code className="text-signal break-all">{renamePreview.sanitizedTitle}</code>
+              </div>
+            </div>
+
+            {!renamePreview.wouldChange ? (
+              <p className="text-xs text-muted-foreground">
+                Folder already has the correct name — nothing to do.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  {renamePreview.episodesAffected > 0
+                    ? `${renamePreview.episodesAffected} episode${renamePreview.episodesAffected !== 1 ? "s" : ""} will${renamePreview.episodesAffected !== 1 ? "" : " "}have${renamePreview.episodesAffected !== 1 ? "" : " "}their file path${renamePreview.episodesAffected !== 1 ? "s" : ""} updated automatically.`
+                    : "No episode paths need updating."}
+                </p>
+                <p className="text-[11px] text-amber-400/80 border border-amber-500/30 rounded px-2 py-1.5 bg-amber-500/5">
+                  Plex/Jellyfin libraries that point at the old folder path will need a library refresh after the rename.
+                </p>
+              </>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenamePreview(null)}
+                className="flex-1 rounded-md border border-white/10 text-muted-foreground text-sm font-medium py-2 hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={renamingFolder || !renamePreview.wouldChange}
+                onClick={handleRenameFolderApply}
+                className="flex-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 text-sm font-medium py-2 transition-colors disabled:opacity-50"
+              >
+                {renamingFolder ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2Icon className="size-3.5 animate-spin" /> Renaming...
+                  </span>
+                ) : (
+                  "Rename Folder"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {moveDialog && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>

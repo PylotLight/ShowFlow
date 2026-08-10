@@ -92,7 +92,7 @@ export function miscRoutes(systemManager: SystemManager) {
     "/api/manual-import/import": {
       async POST(req: Request & { params: Record<string, string> }) {
         try {
-          const body = (await req.json()) as { files: Array<string | { filename: string; showId?: string }> };
+          const body = (await req.json()) as { files: Array<string | { filename: string; showId?: string; season?: number; episodes?: number[] }> };
           if (!Array.isArray(body.files) || body.files.length === 0) {
             return errorResponse('files array is required');
           }
@@ -100,7 +100,12 @@ export function miscRoutes(systemManager: SystemManager) {
           for (const item of body.files) {
             const filename = typeof item === 'string' ? item : item.filename;
             const showId = typeof item === 'string' ? undefined : item.showId;
-            const result = await systemManager.forceImportFile(filename, showId);
+            const season = typeof item === 'string' ? undefined : item.season;
+            const episodes = typeof item === 'string' ? undefined : item.episodes;
+            const overrides = (season != null || (episodes && episodes.length > 0))
+              ? { season, episodes }
+              : undefined;
+            const result = await systemManager.forceImportFile(filename, showId, overrides);
             results.push({ filename, ...result });
           }
           return json({ results });

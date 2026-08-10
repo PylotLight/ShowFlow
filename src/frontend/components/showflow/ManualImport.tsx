@@ -31,6 +31,11 @@ interface LibraryShow {
   year?: number;
 }
 
+interface EpisodeOverride {
+  season?: number;
+  episodes?: number[];
+}
+
 export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [files, setFiles] = React.useState<WatchFile[] | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -41,9 +46,14 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
 
   // Manual show override state
   const [assignedShows, setAssignedShows] = React.useState<Record<string, LibraryShow>>({});
+  const [episodeOverrides, setEpisodeOverrides] = React.useState<Record<string, EpisodeOverride>>({});
   const [selectingFile, setSelectingFile] = React.useState<WatchFile | null>(null);
   const [libraryShows, setLibraryShows] = React.useState<LibraryShow[]>([]);
   const [showSearchQuery, setShowSearchQuery] = React.useState("");
+
+  // Edit state for season/episode cells
+  const [editingCell, setEditingCell] = React.useState<{ filename: string; field: "season" | "episodes" } | null>(null);
+  const [editValue, setEditValue] = React.useState("");
 
   const load = React.useCallback(() => {
     setError(null);
@@ -114,6 +124,53 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       delete next[filename];
       return next;
     });
+    // Don't clear the episode override — user may still want manual S/E control
+    // even after the show assignment is removed.
+  };
+
+  const startEditCell = (filename: string, field: "season" | "episodes", current: string) => {
+    setEditingCell({ filename, field });
+    setEditValue(current);
+  };
+
+  const commitEditCell = () => {
+    if (!editingCell) return;
+    const { filename, field } = editingCell;
+    const raw = editValue.trim();
+
+    setEpisodeOverrides((prev) => {
+      const next = { ...prev };
+      const current: EpisodeOverride = { ...(next[filename] ?? {}) };
+
+      if (field === "season") {
+        if (raw === "") delete current.season;
+        else {
+          const num = parseInt(raw, 10);
+          if (Number.isFinite(num) && num >= 0) current.season = num;
+        }
+      } else {
+        if (raw === "") delete current.episodes;
+        else {
+          const list = raw.split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n));
+          if (list.length > 0) current.episodes = list;
+        }
+      }
+
+      if (current.season == null && (!current.episodes || current.episodes.length === 0)) {
+        delete next[filename];
+      } else {
+        next[filename] = current;
+      }
+      return next;
+    });
+
+    setEditingCell(null);
+    setEditValue("");
+  };
+
+  const cancelEditCell = () => {
+    setEditingCell(null);
+    setEditValue("");
   };
 
   const doAction = async (action: string) => {
@@ -128,10 +185,15 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     try {
       const payload = action === "import"
         ? {
-            files: selectedFiles.map((filename) => ({
-              filename,
-              showId: assignedShows[filename]?.id,
-            })),
+            files: selectedFiles.map((filename) => {
+              const override = episodeOverrides[filename];
+              return {
+                filename,
+                showId: assignedShows[filename]?.id,
+                ...(override?.season != null ? { season: override.season } : {}),
+                ...(override?.episodes?.length ? { episodes: override.episodes } : {}),
+              };
+            }),
           }
         : { files: selectedFiles };
 
@@ -149,6 +211,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       else setDeleteResults(data.results);
       setSelected(new Set());
       setAssignedShows({});
+      setEpisodeOverrides({});
       setTimeout(() => { load(); onRefresh?.(); }, 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -282,7 +345,76 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                 <tbody>
                   {files.map((f) => {
                     const override = assignedShows[f.filename];
+                    const epOverride = episodeOverrides[f.filename];
                     const currentShowTitle = override ? override.title : f.show;
+                    const displaySeason = epOverride?.season ?? f.season;
+                    const displayEpisodes = epOverride?.episodes ?? f.episodes;
+                    const editingThisSeason = editingCell?.filename === f.filename && editingCell.field === "season";
+                    const editingThisEpisodes = editingCell?.filename === f.filename && editingCell.field === "episodes";
+
+                    const seasonCellContent = editingThisSeason ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={commitEditCell}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEditCell();
+                          if (e.key === "Escape") cancelEditCell();
+                        }}
+                        className="w-14 rounded border border-signal/50 bg-white/5 px-1 py-0.5 text-xs text-foreground focus:outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startEditCell(f.filename, "season", displaySeason != null ? String(displaySeason) : "")}
+                        className={cn(
+                          "rounded px-1 py-0.5 hover:bg-white/5 transition-colors",
+                          epOverride?.season != null && "text-signal font-medium",
+                        )}
+                        title="Click to override season"
+                      >
+                        {displaySeason != null ? displaySeason : <span className="text-muted-foreground">—</span>}
+                      </button>
+                    );
+
+                    const episodesCellContent = editingThisEpisodes ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="1, 2, 3"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={commitEditCell}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEditCell();
+                          if (e.key === "Escape") cancelEditCell();
+                        }}
+                        className="w-24 rounded border border-signal/50 bg-white/5 px-1 py-0.5 text-xs text-foreground focus:outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          startEditCell(
+                            f.filename,
+                            "episodes",
+                            displayEpisodes?.length ? displayEpisodes.join(", ") : "",
+                          )
+                        }
+                        className={cn(
+                          "rounded px-1 py-0.5 hover:bg-white/5 transition-colors text-left",
+                          epOverride?.episodes?.length && "text-signal font-medium",
+                        )}
+                        title="Click to override episode numbers (comma separated)"
+                      >
+                        {displayEpisodes?.length
+                          ? displayEpisodes.map((n) => `E${String(n).padStart(2, "0")}`).join(", ")
+                          : <span className="text-muted-foreground">—</span>}
+                      </button>
+                    );
 
                     return (
                       <tr
@@ -321,19 +453,22 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                           )}
                         </td>
                         <td className="px-2 py-2.5 text-foreground/70">
-                          {f.season != null ? f.season : <span className="text-muted-foreground">—</span>}
+                          {seasonCellContent}
                         </td>
                         <td className="px-2 py-2.5 text-foreground/70">
-                          {f.episodes?.length
-                            ? f.episodes.map((e) => `E${String(e).padStart(2, "0")}`).join(", ")
-                            : <span className="text-muted-foreground">—</span>}
+                          {episodesCellContent}
                         </td>
                         <td className="px-2 py-2.5 text-foreground/70 max-w-[160px] truncate" title={f.existingFile}>
                           {f.existingFile || <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-2 py-2.5">
-                          {override ? (
-                            <span className="rounded bg-signal/10 px-1.5 py-0.5 text-[10px] text-signal font-mono" title="Manually assigned show">Assigned</span>
+                          {override || epOverride ? (
+                            <span
+                              className="rounded bg-signal/10 px-1.5 py-0.5 text-[10px] text-signal font-mono"
+                              title={override ? "Manually assigned show" : "Season/episode overridden"}
+                            >
+                              {override ? "Assigned" : "Modified"}
+                            </span>
                           ) : f.resolved ? (
                             <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400 font-mono" title="Matched to library show">Resolved</span>
                           ) : f.error ? (

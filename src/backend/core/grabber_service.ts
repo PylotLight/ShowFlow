@@ -7,6 +7,7 @@ import { NATIVE_INDEXER_META } from '../providers/indexers/native/types';
 import { qualityEngine, type ReleaseScore } from './quality_engine';
 import { debugLog, logDebug } from './debug';
 import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
+import type { DownloadManager } from './download_manager';
 
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'is', 'it', 'its']);
 
@@ -60,7 +61,17 @@ function isRelevantMatch(title: string, showTitle: string, season: number, episo
 }
 
 export class GrabberService {
-  constructor(private config: Config) {}
+  /**
+   * Optional download-manager reference. When present, TorBox grabs are
+   * routed through the manager's long-lived TorBox client so download
+   * tracking state (getActiveDownloads, background waitForDownload tasks)
+   * stays consistent across the app. When absent (legacy construction
+   * paths), we fall back to an ephemeral client.
+   */
+  constructor(
+    private config: Config,
+    private downloadManager?: DownloadManager,
+  ) {}
 
   /**
    * Searches all configured indexers for a show's episode - or, if
@@ -364,7 +375,13 @@ export class GrabberService {
     // stays fast regardless of how long the torrent takes to finish.
     const torboxCfg = this.config.downloadClient?.torbox;
     if (torboxCfg?.apiKey) {
-      const torbox = new TorboxDownloadClient(resolveTorboxConfig(this.config));
+      // Prefer the Download Manager's long-lived TorBox client when one is
+      // running — it owns the background waitForDownload tasks and the
+      // "active downloads" list surfaced on the Queue page. Creating a new
+      // ephemeral client per grab is a legacy fallback and means the Queue
+      // page won't see the download.
+      const torbox = this.downloadManager?.getTorboxClient()
+        ?? new TorboxDownloadClient(resolveTorboxConfig(this.config));
 
       const result = await torbox.submitReleaseBackground(release);
 

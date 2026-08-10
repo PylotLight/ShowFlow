@@ -313,6 +313,130 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    "/api/shows/:id/rename-preview": {
+      async GET(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const show = db.getShow(showId);
+          if (!show) return errorResponse("Show not found", 404);
+          const rootFolder = db.getShowRootFolder(showId);
+          if (!rootFolder) return errorResponse("Show has no root folder set", 400);
+
+          // The destination folder name uses the current sanitized title. We
+          // can't easily reuse Oracle's private buildPath here without a show
+          // object fully populated, so reproduce its show-folder step inline.
+          const currentFolderName = path.basename(rootFolder);
+          const sanitizedTitle = show.title
+            .replace(/[<>"/\\|?*]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          const parentDir = path.dirname(rootFolder);
+          const targetFolderPath = path.join(parentDir, sanitizedTitle);
+          const wouldChange = currentFolderName !== sanitizedTitle;
+
+          // Also surface any episodes whose current path does not contain the
+          // target folder name — those are the rows that would need updating if
+          // the rename proceeds.
+          const episodes = db.listShowEpisodes(showId);
+          const episodeImpact = episodes
+            .filter((e) => e.file_path)
+            .map((e) => {
+              const inTarget = e.file_path!.startsWith(rootFolder);
+              return {
+                season: e.season_number,
+                episode: e.episode_number,
+                currentPath: e.file_path,
+                wouldUpdate: inTarget && wouldChange,
+              };
+            });
+
+          return json({
+            showId,
+            currentFolderPath: rootFolder,
+            currentFolderName,
+            sanitizedTitle,
+            targetFolderPath,
+            wouldChange,
+            episodeImpact,
+          });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/rename-apply": {
+      async POST(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const show = db.getShow(showId);
+          if (!show) return errorResponse("Show not found", 404);
+          const rootFolder = db.getShowRootFolder(showId);
+          if (!rootFolder) return errorResponse("Show has no root folder set", 400);
+
+          const sanitizedTitle = show.title
+            .replace(/[<>"/\\|?*]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const parentDir = path.dirname(rootFolder);
+          const targetFolderPath = path.join(parentDir, sanitizedTitle);
+
+          if (rootFolder === targetFolderPath) {
+            return json({ ok: true, renamed: false, message: 'Folder already has the target name.' });
+          }
+
+          if (!fs.existsSync(rootFolder)) {
+            return errorResponse(`Source folder does not exist: ${rootFolder}`, 400);
+          }
+          if (fs.existsSync(targetFolderPath)) {
+            return errorResponse(`Target folder already exists: ${targetFolderPath}. Refusing to overwrite.`, 409);
+          }
+
+          // Rename the directory, then rewrite every episode row that pointed
+          // inside the old folder. We update the DB BEFORE the FS rename so a
+          // crash mid-batch leaves the DB pointing at paths that don't exist
+          // yet (recoverable by re-running) rather than paths that no longer
+          // exist (data loss).
+          const episodes = db.listShowEpisodes(showId);
+          const pathUpdates: { season: number; episode: number; oldPath: string; newPath: string }[] = [];
+          for (const ep of episodes) {
+            if (!ep.file_path) continue;
+            if (!ep.file_path.startsWith(rootFolder)) continue;
+            const relative = ep.file_path.slice(rootFolder.length).replace(/^[/\\]/, '');
+            pathUpdates.push({
+              season: ep.season_number,
+              episode: ep.episode_number,
+              oldPath: ep.file_path,
+              newPath: path.join(targetFolderPath, relative),
+            });
+          }
+
+          await fs.promises.rename(rootFolder, targetFolderPath);
+          for (const u of pathUpdates) {
+            db.updateEpisodeFilePath(showId, u.season, u.episode, u.newPath);
+          }
+
+          db.logEvent({
+            type: 'organize',
+            entityType: 'show',
+            entityId: showId,
+            message: `Renamed show folder "${rootFolder}" → "${targetFolderPath}" (${pathUpdates.length} episode paths updated)`,
+          });
+
+          return json({
+            ok: true,
+            renamed: true,
+            from: rootFolder,
+            to: targetFolderPath,
+            episodesUpdated: pathUpdates.length,
+          });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id/organize": {
       async POST(req: RouteReq) {
         try {
@@ -454,7 +578,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       async POST(req: RouteReq) {
         try {
           const config = loadConfig();
-          const grabber = new GrabberService(config);
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const episode = parseInt(req.params.episode!, 10);
           const result = await grabber.grabBestRelease(req.params.id!, season, episode);
@@ -469,7 +593,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       async POST(req: RouteReq) {
         try {
           const config = loadConfig();
-          const grabber = new GrabberService(config);
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const result = await grabber.grabBestSeasonRelease(req.params.id!, season);
           return json({ ...result, bestRelease: result.bestRelease ? serializeRelease(result.bestRelease) : undefined, release: result.release ? serializeRelease(result.release) : undefined });
@@ -483,7 +607,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       async GET(req: RouteReq) {
         try {
           const config = loadConfig();
-          const grabber = new GrabberService(config);
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const result = await grabber.searchReleases(req.params.id!, season);
           if ("error" in result) return errorResponse(result.error, 400);
@@ -525,7 +649,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       async GET(req: RouteReq) {
         try {
           const config = loadConfig();
-          const grabber = new GrabberService(config);
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const episode = parseInt(req.params.episode!, 10);
           const result = await grabber.searchReleases(req.params.id!, season, episode);

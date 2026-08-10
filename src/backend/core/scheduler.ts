@@ -76,6 +76,8 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     intervalMinutes: 30, // Every 30 minutes
     defaultEnabled: false,
     action: async (config) => {
+      // No long-lived DownloadManager in this context — the grabber will
+      // spin up an ephemeral TorBox client if a grab is needed.
       const grabber = new GrabberService(config);
       // RSS scanning logic would go here
       debugLog('Task rss-scan complete: RSS feeds scanned');
