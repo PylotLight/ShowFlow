@@ -51,7 +51,7 @@ function EpisodeRow({
 
   return (
     <div
-      className="group grid gap-3 items-center px-5 py-3 transition-colors hover:bg-white/[0.02]"
+      className="group grid gap-2 items-center px-4 py-2 transition-colors hover:bg-white/[0.02]"
       style={{
         gridTemplateColumns: [
           '24px',

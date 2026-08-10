@@ -25,10 +25,18 @@ interface DebugLogEntry {
 
 function buildCurlCommand(entry: DebugLogEntry): string {
   const method = entry.method || 'GET';
-  let url = entry.url || (entry.path?.startsWith('/') ? `http://localhost:3000${entry.path}` : entry.path || '/');
+
+  // Provider/system entries carry the real outbound target in `url` (e.g.
+  // https://thexem.info/map/all?id=... ) — reproduce that call exactly.
+  // API entries record the app's own path; build a URL for the host the
+  // browser is actually talking to so the command is rerunnable when the
+  // page is served from a proxied origin (not just localhost:3000).
+  const origin = typeof location !== 'undefined' ? location.origin : 'http://localhost:3000';
+  let url = entry.url || (entry.path?.startsWith('/') ? `${origin}${entry.path}` : entry.path || '/');
+  const isApiEntry = !entry.url && entry.type === 'api' && entry.path;
 
   const hasBody = entry.requestBody != null;
-  const isJsonBody = hasBody && typeof entry.requestBody === 'object';
+  const hasHeaders = !!entry.headers && Object.keys(entry.headers).length > 0;
 
   const parts: string[] = ['curl', '-s'];
 
@@ -36,15 +44,24 @@ function buildCurlCommand(entry: DebugLogEntry): string {
     parts.push('-X', method);
   }
 
+  for (const [name, value] of Object.entries(entry.headers ?? {})) {
+    parts.push('-H', `'${name}: ${value}'`);
+  }
+  if (hasHeaders) parts.push('-H', `'Accept: application/json'`);
+
   parts.push(`'${url}'`);
 
-  if (isJsonBody) {
+  if (isJsonBody(entry.requestBody)) {
     parts.push('-H', "'Content-Type: application/json'");
     const body = JSON.stringify(entry.requestBody);
     parts.push('-d', `'${body}'`);
   }
 
   return parts.join(' ');
+}
+
+function isJsonBody(body: unknown): boolean {
+  return body != null && typeof body === 'object';
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -77,11 +94,16 @@ const LEVEL_DOT: Record<string, string> = {
 export function DebugPage({ onDone }: { onDone: () => void }) {
   const [logs, setLogs] = React.useState<DebugLogEntry[]>([]);
   const [paused, setPaused] = React.useState(false);
-  const [connected, setConnected] = React.useState(false);
+  // 'ws' = live WebSocket stream, 'poll' = live but falling back to polling
+  // the REST endpoint (tunnels/proxies commonly block WS upgrades), 'none' =
+  // no live source attached yet.
+  const [mode, setMode] = React.useState<'ws' | 'poll' | 'none'>('none');
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [autoScroll, setAutoScroll] = React.useState(true);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
+  const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastPollRef = React.useRef<DebugLogEntry[]>([]);
 
   const [filterType, setFilterType] = React.useState("");
   const [filterLevel, setFilterLevel] = React.useState("");
@@ -92,11 +114,40 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
 
   const [loading, setLoading] = React.useState(true);
 
+  const stopPolling = React.useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const startPolling = React.useCallback(() => {
+    if (pollTimerRef.current) return;
+    setMode('poll');
+    // Pull the newest entries on the poll loop. The ring buffer is capped at
+    // 2000 so a 500-entry fetch per tick is cheap; dedupe by id on merge.
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const res = await fetch("/api/debug/logs?limit=500");
+        if (!res.ok) return;
+        const batch = (await res.json()) as DebugLogEntry[];
+        lastPollRef.current = batch;
+        setLogs(prev => {
+          const seen = new Set(prev.map(l => l.id));
+          const fresh = batch.filter(l => !seen.has(l.id));
+          if (fresh.length === 0) return prev;
+          return [...fresh, ...prev].slice(0, 2000);
+        });
+      } catch {}
+    }, 2_000);
+  }, []);
+
   React.useEffect(() => {
     fetch("/api/debug/logs?limit=500")
       .then(r => r.json())
       .then((data: DebugLogEntry[]) => {
         setLogs(data);
+        lastPollRef.current = data;
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -105,9 +156,30 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
     const ws = new WebSocket(`${protocol}//${location.host}/api/debug/ws`);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+    let wsOpened = false;
+    const failed = () => {
+      // WS upgrade refused/blocked (common through a HTTPS tunnel proxy):
+      // fall back to polling the REST log endpoint so the console still
+      // streams. Don't rebuild the socket on a loop — just keep polling.
+      if (!wsOpened) startPolling();
+    };
+
+    ws.onopen = () => {
+      wsOpened = true;
+      stopPolling();
+      setMode('ws');
+    };
+    ws.onclose = () => {
+      if (wsOpened) {
+        // Connection dropped mid-session: go to poll mode for resilience.
+        startPolling();
+      } else {
+        failed();
+      }
+    };
+    ws.onerror = () => {
+      if (!wsOpened) failed();
+    };
 
     ws.onmessage = (event) => {
       try {
@@ -121,9 +193,10 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
     };
 
     return () => {
+      stopPolling();
       ws.close();
     };
-  }, []);
+  }, [startPolling, stopPolling]);
 
   React.useEffect(() => {
     if (autoScroll && containerRef.current && !paused) {
@@ -187,14 +260,14 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 shrink-0">
         <div className="flex items-center gap-3">
-          <BugIcon className={cn("size-4", connected ? "text-signal" : "text-muted-foreground")} />
+          <BugIcon className={cn("size-4", mode !== 'none' ? "text-signal" : "text-muted-foreground")} />
           <h2 className="font-display text-xl font-bold text-white">Debug Console</h2>
           <span className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest",
-            connected ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400",
+            mode === 'ws' ? "bg-emerald-500/10 text-emerald-400" : mode === 'poll' ? "bg-accent-amber/10 text-accent-amber" : "bg-red-500/10 text-red-400",
           )}>
-            <span className={cn("size-1.5 rounded-full", connected ? "bg-emerald-400" : "bg-red-400")} />
-            {connected ? "Live" : "Disconnected"}
+            <span className={cn("size-1.5 rounded-full", mode === 'ws' ? "bg-emerald-400" : mode === 'poll' ? "bg-accent-amber" : "bg-red-400")} />
+            {mode === 'ws' ? "Live" : mode === 'poll' ? "Live (poll)" : "Disconnected"}
           </span>
           <span className="font-mono text-[10px] text-muted-foreground">
             {logs.length} entries
@@ -379,7 +452,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
                     <div className="flex items-start gap-2 rounded bg-white/[0.03] px-3 py-2">
                       <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground shrink-0 mt-0.5">URL</span>
                       <span className="font-mono text-[11px] text-foreground/60 break-all min-w-0 flex-1">
-                        {entry.url || `http://localhost:3000${entry.path}`}
+                        {entry.url || (entry.path?.startsWith('/') ? `${typeof location !== 'undefined' ? location.origin : 'http://localhost:3000'}${entry.path}` : entry.path)}
                       </span>
                       <CopyCurlButton entry={entry} />
                     </div>
@@ -410,7 +483,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
           "font-mono text-[10px]",
           paused ? "text-accent-amber" : "text-muted-foreground",
         )}>
-          {paused ? "PAUSED" : "STREAMING"}
+          {paused ? "PAUSED" : mode === 'poll' ? "POLLING" : "STREAMING"}
         </span>
         <span className="font-mono text-[10px] text-muted-foreground">
           {filteredLogs.length} / {logs.length} shown

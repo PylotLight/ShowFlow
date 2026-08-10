@@ -12,7 +12,7 @@ function ShowDetailDialog({
   show: ShowSummary;
   onClose: () => void;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(true);
 
   React.useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {

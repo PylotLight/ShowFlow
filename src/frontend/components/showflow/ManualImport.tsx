@@ -5,6 +5,7 @@ import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@frontend/components/ui/dialog";
 import { Input } from "@frontend/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { cn } from "@frontend/lib/utils";
 
 interface WatchFile {
@@ -36,6 +37,39 @@ interface EpisodeOverride {
   episodes?: number[];
 }
 
+/** Best-effort SxxEyy-style parse of a filename for season/episode numbers. */
+function sniffEpisodeNumbers(filename: string): { season?: number; episodes: number[] } | null {
+  const base = filename.replace(/\.[^.]+$/, "");
+
+  // S01E02, S01E02E03E04, s1e2, S01.E02 ...
+  const sxey = [...base.matchAll(/[sS](\d{1,3})[.\-_ ]?[eE](\d{1,4})/g)];
+  if (sxey.length > 0) {
+    const first = sxey[0]!;
+    const season = parseInt(first[1]!, 10);
+    // Collect every E-number after an S-number block, including chained E02E03.
+    const episodes: number[] = [];
+    const afterFirst = base.slice(first.index);
+    const epMatches = [...afterFirst.matchAll(/[eE](\d{1,4})/g)];
+    for (const m of epMatches) episodes.push(parseInt(m[1]!, 10));
+    if (episodes.length === 0) episodes.push(parseInt(first[2]!, 10));
+    return { season: Number.isFinite(season) ? season : undefined, episodes: Array.from(new Set(episodes)) };
+  }
+
+  // 1x02 style
+  const axb = base.match(/(\d{1,3})x(\d{1,4})/);
+  if (axb) {
+    return { season: parseInt(axb[1]!, 10), episodes: [parseInt(axb[2]!, 10)] };
+  }
+
+  // " - 02 ", "[02]", "E02", "#02" standalone episode (no season)
+  const epOnly = base.match(/(?:^|[\s\-_.\[\]#])[eE]?(\d{1,3})(?:[\s\-_.\]\[]|$)(?!.*\d{1,3}x)/);
+  if (epOnly) {
+    return { episodes: [parseInt(epOnly[1]!, 10)] };
+  }
+
+  return null;
+}
+
 export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [files, setFiles] = React.useState<WatchFile[] | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -51,9 +85,11 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [libraryShows, setLibraryShows] = React.useState<LibraryShow[]>([]);
   const [showSearchQuery, setShowSearchQuery] = React.useState("");
 
-  // Edit state for season/episode cells
-  const [editingCell, setEditingCell] = React.useState<{ filename: string; field: "season" | "episodes" } | null>(null);
-  const [editValue, setEditValue] = React.useState("");
+  // Season/episode selector data, keyed by library show id
+  const [seasonsByShow, setSeasonsByShow] = React.useState<Record<string, number[]>>({});
+  const [episodesBySeason, setEpisodesBySeason] = React.useState<Record<string, { season: number; episode: number; title?: string }[]>>({});
+  const [episodePickFile, setEpisodePickFile] = React.useState<WatchFile | null>(null);
+  const [pickSelection, setPickSelection] = React.useState<number[]>([]);
 
   const load = React.useCallback(() => {
     setError(null);
@@ -89,6 +125,22 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
 
   React.useEffect(() => { load(); }, [load]);
 
+  // Preload season/episode data for shows already matched in the watch folder,
+  // so the season/episode selectors are populated without an extra assign step.
+  React.useEffect(() => {
+    if (!Array.isArray(files)) return;
+    const showIds = new Set<string>();
+    for (const f of files) {
+      const id = assignedShows[f.filename]?.id ?? f.showId;
+      if (id) {
+        showIds.add(id);
+        const season = episodeOverrides[f.filename]?.season ?? f.season;
+        if (season != null) fetchSeasonEpisodes(id, season);
+      }
+    }
+    for (const id of showIds) fetchShowSeasons(id);
+  }, [files, assignedShows, episodeOverrides]);
+
   const toggleAll = () => {
     if (!files) return;
     if (selected.size === files.length) {
@@ -105,14 +157,64 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     setSelected(next);
   };
 
+  const fetchShowSeasons = (showId: string) => {
+    if (!showId || seasonsByShow[showId]) return;
+    fetch(`/api/shows/${showId}/seasons`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setSeasonsByShow((prev) => ({ ...prev, [showId]: (data as { seasonNumber: number }[]).map((s) => s.seasonNumber) }));
+        }
+      })
+      .catch(() => {});
+  };
+
+  const fetchSeasonEpisodes = (showId: string, season: number) => {
+    if (!showId) return;
+    const key = `${showId}:${season}`;
+    if (episodesBySeason[key]) return;
+    fetch(`/api/shows/${showId}/seasons/${season}/episodes`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setEpisodesBySeason((prev) => ({ ...prev, [key]: data as { season: number; episode: number; title?: string }[] }));
+        }
+      })
+      .catch(() => {});
+  };
+
   const handleAssignShow = (show: LibraryShow) => {
     if (!selectingFile) return;
+    const file = selectingFile;
     setAssignedShows((prev) => ({
       ...prev,
-      [selectingFile.filename]: show,
+      [file.filename]: show,
     }));
+    fetchShowSeasons(show.id);
+
+    // Try to re-resolve season/episodes automatically now that the series is known.
+    // Reuse the parsed values if the file already resolved (f.season/f.episodes), otherwise
+    // sniff SxxEyy patterns from the filename. Only set an override when there's no
+    // existing override already (don't stomp manual edits).
+    if (file.season != null || file.episodes?.length) {
+      fetchSeasonEpisodes(show.id, file.season ?? 0);
+    } else {
+      const sniffed = sniffEpisodeNumbers(file.filename);
+      if (sniffed && (sniffed.season != null || sniffed.episodes.length > 0)) {
+        setEpisodeOverrides((prev) =>
+          prev[file.filename]
+            ? prev
+            : { ...prev, [file.filename]: { ...(sniffed.season != null ? { season: sniffed.season } : {}), ...(sniffed.episodes.length ? { episodes: sniffed.episodes } : {}) } }
+        );
+        if (sniffed.season != null) fetchSeasonEpisodes(show.id, sniffed.season);
+      } else {
+        // Still fetch the default season so the selector has options
+        fetchSeasonEpisodes(show.id, 1);
+      }
+    }
+
     // Auto-select file for import when show is assigned
-    setSelected((prev) => new Set(prev).add(selectingFile.filename));
+    setSelected((prev) => new Set(prev).add(file.filename));
     setSelectingFile(null);
     setShowSearchQuery("");
   };
@@ -128,33 +230,13 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     // even after the show assignment is removed.
   };
 
-  const startEditCell = (filename: string, field: "season" | "episodes", current: string) => {
-    setEditingCell({ filename, field });
-    setEditValue(current);
-  };
-
-  const commitEditCell = () => {
-    if (!editingCell) return;
-    const { filename, field } = editingCell;
-    const raw = editValue.trim();
-
+  const setSeasonOverride = (filename: string, season: number | null) => {
     setEpisodeOverrides((prev) => {
       const next = { ...prev };
       const current: EpisodeOverride = { ...(next[filename] ?? {}) };
 
-      if (field === "season") {
-        if (raw === "") delete current.season;
-        else {
-          const num = parseInt(raw, 10);
-          if (Number.isFinite(num) && num >= 0) current.season = num;
-        }
-      } else {
-        if (raw === "") delete current.episodes;
-        else {
-          const list = raw.split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n));
-          if (list.length > 0) current.episodes = list;
-        }
-      }
+      if (season == null) delete current.season;
+      else current.season = season;
 
       if (current.season == null && (!current.episodes || current.episodes.length === 0)) {
         delete next[filename];
@@ -164,13 +246,48 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       return next;
     });
 
-    setEditingCell(null);
-    setEditValue("");
+    if (season != null) {
+      const showId = assignedShows[filename]?.id ?? files?.find((fi) => fi.filename === filename)?.showId;
+      if (showId) fetchSeasonEpisodes(showId, season);
+    }
   };
 
-  const cancelEditCell = () => {
-    setEditingCell(null);
-    setEditValue("");
+  const setEpisodesOverride = (filename: string, episodes: number[] | null) => {
+    setEpisodeOverrides((prev) => {
+      const next = { ...prev };
+      const current: EpisodeOverride = { ...(next[filename] ?? {}) };
+
+      if (episodes == null || episodes.length === 0) delete current.episodes;
+      else current.episodes = episodes;
+
+      if (current.season == null && (!current.episodes || current.episodes.length === 0)) {
+        delete next[filename];
+      } else {
+        next[filename] = current;
+      }
+      return next;
+    });
+  };
+
+  const openEpisodePicker = (file: WatchFile) => {
+    const showId = assignedShows[file.filename]?.id ?? file.showId;
+    const season = episodeOverrides[file.filename]?.season ?? file.season;
+    if (showId && season != null) fetchSeasonEpisodes(showId, season);
+    setPickSelection(episodeOverrides[file.filename]?.episodes ?? file.episodes ?? []);
+    setEpisodePickFile(file);
+  };
+
+  const togglePickEpisode = (episode: number) => {
+    if (!episodePickFile) return;
+    setPickSelection((prev) =>
+      prev.includes(episode) ? prev.filter((e) => e !== episode) : [...prev, episode].sort((a, b) => a - b),
+    );
+  };
+
+  const commitEpisodePick = () => {
+    if (!episodePickFile) return;
+    setEpisodesOverride(episodePickFile.filename, pickSelection.length ? pickSelection : null);
+    setEpisodePickFile(null);
   };
 
   const doAction = async (action: string) => {
@@ -349,66 +466,54 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                     const currentShowTitle = override ? override.title : f.show;
                     const displaySeason = epOverride?.season ?? f.season;
                     const displayEpisodes = epOverride?.episodes ?? f.episodes;
-                    const editingThisSeason = editingCell?.filename === f.filename && editingCell.field === "season";
-                    const editingThisEpisodes = editingCell?.filename === f.filename && editingCell.field === "episodes";
 
-                    const seasonCellContent = editingThisSeason ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        min={0}
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onBlur={commitEditCell}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitEditCell();
-                          if (e.key === "Escape") cancelEditCell();
-                        }}
-                        className="w-14 rounded border border-signal/50 bg-white/5 px-1 py-0.5 text-xs text-foreground focus:outline-none"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => startEditCell(f.filename, "season", displaySeason != null ? String(displaySeason) : "")}
-                        className={cn(
-                          "rounded px-1 py-0.5 hover:bg-white/5 transition-colors",
-                          epOverride?.season != null && "text-signal font-medium",
-                        )}
-                        title="Click to override season"
+                    const assignedShow = assignedShows[f.filename];
+                    const assignedShowId = assignedShow?.id ?? f.showId;
+                    const seasonOptions = assignedShowId && seasonsByShow[assignedShowId]?.length
+                      ? seasonsByShow[assignedShowId]
+                      : (() => {
+                          const maxSeason = Math.max(40, displaySeason ?? 0);
+                          return Array.from({ length: maxSeason + 1 }, (_, i) => i); // Specials (0) .. max
+                        })();
+
+                    const seasonCellContent = (
+                      <Select
+                        value={displaySeason != null ? String(displaySeason) : undefined}
+                        onValueChange={(v) => setSeasonOverride(f.filename, v === "__auto__" ? null : parseInt(v, 10))}
                       >
-                        {displaySeason != null ? displaySeason : <span className="text-muted-foreground">—</span>}
-                      </button>
+                        <SelectTrigger
+                          size="sm"
+                          className={cn(
+                            "h-7 text-[11px] px-2 min-w-16",
+                            epOverride?.season != null && "border-signal/50 text-signal font-medium",
+                          )}
+                        >
+                          <SelectValue placeholder="—" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {epOverride?.season != null && (
+                            <SelectItem value="__auto__">
+                              Auto{f.season != null ? ` (S${f.season})` : ""}
+                            </SelectItem>
+                          )}
+                          {seasonOptions.map((s) => (
+                            <SelectItem key={s} value={String(s)}>
+                              {s === 0 ? "Specials" : `Season ${s}`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     );
 
-                    const episodesCellContent = editingThisEpisodes ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        placeholder="1, 2, 3"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onBlur={commitEditCell}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitEditCell();
-                          if (e.key === "Escape") cancelEditCell();
-                        }}
-                        className="w-24 rounded border border-signal/50 bg-white/5 px-1 py-0.5 text-xs text-foreground focus:outline-none"
-                      />
-                    ) : (
+                    const episodesCellContent = (
                       <button
                         type="button"
-                        onClick={() =>
-                          startEditCell(
-                            f.filename,
-                            "episodes",
-                            displayEpisodes?.length ? displayEpisodes.join(", ") : "",
-                          )
-                        }
+                        onClick={() => openEpisodePicker(f)}
                         className={cn(
-                          "rounded px-1 py-0.5 hover:bg-white/5 transition-colors text-left",
+                          "rounded px-1.5 py-1 hover:bg-white/5 transition-colors text-left max-w-[120px] truncate",
                           epOverride?.episodes?.length && "text-signal font-medium",
                         )}
-                        title="Click to override episode numbers (comma separated)"
+                        title="Select episodes"
                       >
                         {displayEpisodes?.length
                           ? displayEpisodes.map((n) => `E${String(n).padStart(2, "0")}`).join(", ")
@@ -547,7 +652,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
               <SearchIcon className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Search library shows..."
+                placeholder="Filter library shows..."
                 value={showSearchQuery}
                 onChange={(e) => setShowSearchQuery(e.target.value)}
                 className="pl-9 text-xs"
@@ -557,7 +662,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
             <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
               {filteredLibraryShows.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">
-                  {showSearchQuery ? "No matching shows found in your library." : "No shows in library."}
+                  {libraryShows.length === 0 ? "No shows in library." : "No shows match your filter."}
                 </p>
               ) : (
                 filteredLibraryShows.map((s) => (
@@ -578,6 +683,89 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                 ))
               )}
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Episode Selector Dialog */}
+      <Dialog open={!!episodePickFile} onOpenChange={(open) => !open && setEpisodePickFile(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold flex items-center gap-2">
+              <TvIcon className="size-5 text-signal" />
+              Select Episodes
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Choose which episode numbers this file should import as.{" "}
+              <span className="font-mono text-foreground">{episodePickFile?.filename}</span>
+              {episodePickFile && (
+                <> — Season {episodeOverrides[episodePickFile.filename]?.season ?? episodePickFile.season ?? "?"}</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {(() => {
+              if (!episodePickFile) return null;
+              const showId = assignedShows[episodePickFile.filename]?.id ?? episodePickFile.showId;
+              const season = episodeOverrides[episodePickFile.filename]?.season ?? episodePickFile.season;
+              const episodes = showId && season != null
+                ? episodesBySeason[`${showId}:${season}`]
+                : undefined;
+              const fallbackEpisodes = episodes?.length
+                ? episodes.map((e) => e.episode).sort((a, b) => a - b)
+                : undefined;
+              const total = fallbackEpisodes?.[fallbackEpisodes.length - 1];
+              const grid = fallbackEpisodes ?? Array.from(
+                { length: Math.max(total ?? 0, pickSelection.length ? Math.max(...pickSelection) : 0, episodePickFile.episodes?.length ? Math.max(...episodePickFile.episodes) : 0, 12) },
+                (_, i) => i + 1,
+              );
+
+              return (
+                <>
+                  <div className="grid grid-cols-6 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                    {grid.map((n) => {
+                      const selected = pickSelection.includes(n);
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => togglePickEpisode(n)}
+                          className={cn(
+                            "rounded-md border py-1.5 text-[11px] font-mono transition-colors",
+                            selected
+                              ? "border-signal/60 bg-signal/15 text-signal font-medium"
+                              : "border-white/10 text-foreground/80 hover:border-white/25 hover:bg-white/5",
+                          )}
+                        >
+                          E{String(n).padStart(2, "0")}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      {pickSelection.length} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPickSelection([])}
+                        className="h-8 text-[11px]"
+                      >
+                        Clear
+                      </Button>
+                      <Button size="sm" onClick={commitEpisodePick} className="h-8 text-[11px] gap-1.5">
+                        <CheckIcon className="size-3.5" />
+                        Apply
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>

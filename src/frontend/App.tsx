@@ -2,6 +2,7 @@ import * as React from "react";
 
 import { Sidebar, type NavItem } from "@frontend/components/showflow/Sidebar";
 import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
+import { DebugBadge } from "@frontend/components/showflow/DebugBadge";
 import { Dashboard } from "@frontend/components/showflow/Dashboard";
 import { CalendarView } from "@frontend/components/showflow/CalendarView";
 import { Library } from "@frontend/components/Library";
@@ -121,6 +122,14 @@ export function App() {
           <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
 
           <div className="hidden md:flex items-center gap-1 shrink-0">
+            <DebugBadge
+              className="mr-1"
+              onOpenDebug={() => {
+                setSettingsInitialTab("debug");
+                setActiveNav("settings");
+                setSelected(null);
+              }}
+            />
             <NotificationsPopover />
             <FeedbackButton />
           </div>

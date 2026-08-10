@@ -619,12 +619,12 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       </header>
 
       {/* Hero Banner */}
-      <section className="relative z-10 w-full h-[300px] md:h-[400px] overflow-hidden shrink-0">
+      <section className="relative z-10 w-full aspect-[21/8] max-h-[300px] min-h-[180px] overflow-hidden shrink-0">
         <img
           src={`/api/shows/${show.id}/images/backdrop`}
           alt=""
           aria-hidden
-          className="size-full object-cover"
+          className="size-full object-cover object-center"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <div className="absolute inset-0" style={{
