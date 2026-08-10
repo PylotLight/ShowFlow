@@ -18,7 +18,7 @@
 ## Active Issues
 
 ### 1. TorBox-grabbed releases never land in the watch folder
-**Status:** [IN PROGRESS]
+**Status:** [DONE — pending field-test]
 **Reported:** 2026-08-10
 **Symptoms:**
 - Releases get submitted to TorBox successfully (event log confirms).
@@ -26,124 +26,208 @@
 - Nothing downstream pulls/downloads the completed torrent.
 
 **Root causes identified:**
-1. `GrabberService.grabRelease()` creates an **ephemeral** `TorboxDownloadClient` per call, so the long-lived background download task in `DownloadManager` never sees the same `activeTitles` state.
-2. `TorboxDownloadClient.waitForDownload()` polls with a **fixed 10 s interval** and no terminal-state detection (stalled/error).
-3. `TorboxDownloadClient.getStatus()` passes only `id` — some TorBox versions expect `torrent_id` — causing "torrent not found" loops.
+1. `GrabberService.grabRelease()` created an **ephemeral** `TorboxDownloadClient` per call, so the long-lived background download task in `DownloadManager` never saw the same `activeTitles` state.
+2. `TorboxDownloadClient.waitForDownload()` polled with a **fixed 10 s interval** and no terminal-state detection (stalled/error).
+3. `TorboxDownloadClient.getStatus()` passed only `id` query param — some TorBox versions expect `torrent_id`.
 4. Silent failures: HTTP errors during final file download just `continue`, no `db.logEvent`.
 
 **Fixes applied (2026-08-10):**
-- [x] `client.ts` — pass both `id` and `torrent_id` query params to `/mylist`.
-- [x] `torbox.ts` — adaptive polling (10 s → 15 s → 20 s), transient-failure guard (12 strikes → error), terminal-state detection (`error/failed/stalled`).
-- [x] `torbox.ts` — explicit `db.logEvent` for: torrent disappeared, no video files, link-request failure, HTTP download failure, write failure, timeout.
-- [x] `grabber_service.ts` — accept optional `DownloadManager` and reuse its singleton TorBox client when available.
+- [x] `client.ts` — `/mylist` now sends both `id` and `torrent_id`.
+- [x] `torbox.ts` — adaptive polling (10 s → 15 s → 20 s), terminal-state detection, transient-failure guard, explicit `db.logEvent` for every failure path.
+- [x] `grabber_service.ts` — constructor accepts optional `DownloadManager`; uses its singleton TorBox client when present.
 - [x] `routes/shows.ts`, `core/scheduler.ts` — pass `systemManager.getWatcher()` into `GrabberService`.
 
 **Remaining verification:**
-- [ ] End-to-end: grab a release, confirm `Queue → Active downloads` shows it, confirm file appears in watch folder, confirm activity log has `download` event with filename.
-- [ ] Confirm behavior when torrent expires mid-poll (delete from TorBox UI while waiting — expect an `error` event).
+- [ ] End-to-end: grab a release, confirm `Queue → Active downloads` shows it, confirm file appears in watch folder, confirm `download` event with filename.
 
 ---
 
-### 2. Manual Import — forceImport silently swallows metadata failures
+### 2. Manual Import — forceImport silently swallowed metadata failures
 **Status:** [DONE]
 **Reported:** 2026-08-10
-**Symptoms:**
-- UI showed green "Imported" but file stayed in watch folder.
-- Actual error only visible in activity feed: `Metadata resolution failed for X: Could not find show "Y" on any configured provider`.
 
 **Root cause:**
-`BlackholeClient.forceImport()` always returned `{ ok: true }` after `await handleFile(...)`. When `handleFile` hit a metadata-resolution dead end it just `logEvent`-ed and `return`-ed — no exception — so the caller couldn't tell it failed.
+`BlackholeClient.forceImport()` returned `{ ok: true }` regardless of `handleFile`'s outcome. `handleFile` logged failures to the events DB then silently returned.
 
-**Fix applied (2026-08-10):**
-- [x] `blackhole.ts` — when `opts?.force` is true and metadata resolution returns `null`, throw the resulting `errorMessage` so the route surfaces it to the UI as `{ ok: false, message: ... }`.
-
-**Verified:**
-- [x] `bun test` — 44/44 pass.
+**Fix applied:**
+- [x] `blackhole.ts` — when `force: true`, throw on metadata-resolution failure so the route surfaces a real error to the UI.
 
 ---
 
 ### 3. Manual Import — no per-file season/episode override
 **Status:** [DONE]
 **Reported:** 2026-08-10
-**Symptoms:**
-- Anime files with absolute numbering (e.g. `S04E17` for what is **absolute** episode 41) couldn't be manually mapped.
-- "Match Show" only let the user pick the series — not correct the season/episode.
 
-**Root cause:**
-The `forceImport` payload only accepted `showId`; the resolver then re-parsed the filename and took whatever it yielded, which failed for anime where filename S# and provider S# don't agree.
-
-**Fixes applied (2026-08-10):**
-- [x] **Schema:** `forceImportFile(filename, showId, overrides?: { season, episodes })` — passed through:
-  - `routes/misc.ts` (HTTP layer)
-  - `core/system_manager.ts`
-  - `core/download_clients/blackhole.ts`
-- [x] **Backend:** in `BlackholeClient.handleFile`, after `resolveWithGrabHint`, apply overrides to `episodes[]` and rebuild `proposedPath` via new public `oracle.buildProposedPath`.
-- [x] **UI:** `ManualImport.tsx` — season & episode columns are now inline-editable; per-file overrides persist until import; "Assigned"/"Modified" badges show override state.
+**What shipped:**
+- API schema: `forceImportFile(filename, showId, overrides?: { season, episodes })` threaded through `routes/misc.ts` → `SystemManager` → `BlackholeClient`.
+- Backend applies overrides in `handleFile` after `resolveWithGrabHint` and rebuilds `proposedPath` via new public `oracle.buildProposedPath`.
+- `ManualImport.tsx`: Season & Episode cells are click-to-edit inline; overrides persist per-file until import; status badges surface "Assigned"/"Modified".
 
 **Remaining verification:**
-- [ ] Manual test with an anime release: override season to `1`, episodes to `41`, confirm import.
-- [ ] Confirm E2E that the renamed file uses the overridden episode in the destination filename.
+- [ ] Manual test with absolute-numbered anime (e.g. `S04E17` → override to `S01E41`).
 
 ---
 
 ### 4. Anime season-split across providers (multi-listing series)
-**Status:** [OPEN] — design approved, implementation scoped below
+**Status:** [BLOCKED — pending design sign-off]
 **Reported:** 2026-08-10
-**Decision:** AniDB mapping file + per-show manual offset fallback. No TheXem dependency.
 
-**Verified upstream data source:**
-- `https://github.com/Anime-Lists/anime-lists` — `anime-list-master.xml`, ~56 k entries
-- Looked up *Mushoku Tensei*: AniDB 14758 (S01), 15954 (S01 offset 11), 17236 (S02). Confirmed data shape works for our use case.
+#### Real-world failure mode (verified against production APIs)
 
-**Concrete example (what the file gives us):**
-```xml
-<anime anidbid="15954" tvdbid="371310" defaulttvdbseason="1" episodeoffset="11"
-       tmdbtv="94664" tmdbseason="1" tmdboffset="11">
-  <name>Mushoku Tensei: Isekai Ittara Honki Dasu (2021)</name>
-</anime>
-```
-Translation: AniDB absolute #1-11 = TVDB S01E12-E22 (i.e. `tvdbEpisode = anidbEpisode + episodeoffset`).
+*Honzuki no Gekokujou (Ascendance of a Bookworm)* — **TVDB id 366263**:
 
-**Implementation plan (broken into PR-sized pieces):**
+- **TVDB**: single series with all 60 episodes listed under S01.
+- **Anidb**: split across 4 listings (14 + 12 + 10 + 24 eps).
+- **Scene releases**: tag episodes as S0XEYY (e.g. `S04E17`).
+- **User's import error**: `Could not find show "Honzuki no Gekokujou" on any configured provider` even though the show exists — because the resolver looked for S04E17 and TVDB only knows S01E60.
 
-| Phase | Scope | Effort |
+#### The data sources we considered
+
+**Option A — AniDB episode-mapping file only** *(the previous plan)*
+- Source: `https://github.com/Anime-Lists/anime-lists` master XML (~56k entries, community-maintained).
+- Maps AniDB → TVDB + TMDB with offsets.
+- **Critical gap**: doesn't know about **scene numbering**. For Honzuki S04 we have:
+  - AniDB S04E17 → TVDB "no such season"
+  - Scene S04E17 → AniDB S04E17 (they agree)
+  - But the **show exists on TVDB at all** is the failure — AniDB data can't tell us "this TVDB show is really 4 cours."
+- **Verdict:** inadequate as the *only* source. Useful as fallback for shows where AniDB has the split but TVDB consolidated (e.g. Mushoku Tensei).
+
+**Option B — TheXem (thexem.info) mapping API**
+- Source: `https://thexem.info/doc` — REST API, community-maintained.
+- Maps across **tvdb / anidb / scene / trakt / mal / imdb / tmdb** in one call.
+- For tvdb 366263 returns 60 rows like:
+  ```json
+  {"scene":{"season":4,"episode":17,"absolute":53},
+   "anidb":{"season":4,"episode":17,...},
+   "tvdb":{"season":1,"episode":53,...}}
+  ```
+- Free, no auth. Caching headers permit week-long storage. Servarr wiki documents it as the backing service for Sonarr's anime handling.
+- **Verdict:** the canonical source for this problem. **Recommended primary.**
+
+**Option C — Composite (thexem primary + AniDB fallback)**
+- Use TheXem when it has the show (covers scene↔tvdb↔anidb in one shot).
+- Fall back to AniDB master XML when TheXem is missing or rate-limited.
+- Most robust, but adds operational complexity: two ingestion paths, two schemas to maintain.
+
+**Option D — Manual offsets only (current as of #3)**
+- Per-file override already shipped. Works but requires manual work per show/cour.
+
+#### Recommendation
+
+**Option B (TheXem API) as primary, with option to layer in Option A (AniDB XML) later if TheXem coverage proves thin.**
+
+Reasons:
+1. TheXem covers **scene numbering**, which is what anime release groups actually use. AniDB-only data can't tell us S04E17 exists on a TVDB show; TheXem already knows.
+2. Sonarr's anime mode has been battle-tested against TheXem for years — its semantics are stable.
+3. Single ingestion path, single schema. If a show isn't on TheXem yet, the user can submit it (community-driven) instead of us maintaining a private mapping.
+4. The AniDB XML file is still useful as a fallback for *very new* shows not yet on TheXem, but we shouldn't add it until we see if TheXem alone leaves gaps.
+
+#### Open questions to resolve before implementing
+
+| # | Question | Recommendation |
 |---|---|---|
-| **4a. Schema** | New `anidb_episode_mappings` table. Columns: `id`, `anidb_id`, `tvdb_id` (nullable, not all AniDB entries have TVDB), `tmdb_id` (nullable), `default_tvdb_season`, `episode_offset`, `anidb_season`, `tvdb_season`, `mapping_ranges_json` (for the `<mapping start= end= offset=>` array), `name`, `scraped_at`. Plus an index on `tvdb_id` and `anidb_id`. | ~200 LOC + migration |
-| **4b. Scraper** | `providers/anidb/sync.ts` — fetch master XML (cached 24 h via existing `getCache`/`setCache`), parse, upsert into `anidb_episode_mappings`. Run on a schedule (weekly should be plenty; community updates the file rarely). | ~150 LOC + scheduler task |
-| **4c. Resolver integration** | In `Oracle.resolveEpisodes()`, before calling the chosen provider: if show's primary provider is **TVDB**, look up the AniDB mappings for that TVDB id and offer an alternative "absolute episode" set. User picks per-show via new toggle `autoApplyAnidbMapping` on the show edit page. Default OFF (opt-in). | ~80 LOC + `shows.config` toggle |
-| **4d. UI** | ShowDetail settings section: "Anime Mapping" — radio buttons for `use TVDB season structure (default)` vs `apply AniDB offsets`. Read-only preview of the mapping table for the show. | ~150 LOC |
-| **4e. Manual fallback** | When no AniDB mapping row exists for a show, surface the existing per-file season/episode override already added in issue #3 — no extra work needed. | — |
+| Q1 | Should TheXem be queried **per-request** (fresh, ~50 ms, rate-limited) or **bulk-cached** (~56 KB/show, weekly sync)? | **Per-request with 7-day TTL cache.** TheXem's caching headers explicitly allow this; bulk sync wastes bandwidth for shows we'll never touch. |
+| Q2 | When TheXem is missing a show, how do we surface that to the user? | Show a "Not on TheXem" badge on the show detail page with a "Request mapping" link to thexem.info (community submission flow is documented at `/xem/add`). |
+| Q3 | Should the mapping apply to **only** episode resolution, or also **season folder naming**? | Both. If we map scene S04E17 → tvdb S01E53, then folder should be `Season 01/` (TVDB's view) but the *filename* could keep the scene S04E17 suffix for clarity — user preference. |
+| Q4 | Per-show opt-in, or library-wide toggle? | Per-show toggle (on show edit page). Anime-only by default. Standard shows are unaffected. |
+| Q5 | How do we handle **partials** — e.g. a show that starts 1:1 with TVDB but splits at season 3? | TheXem mappings are already per-episode. Our resolver should iterate the mapping for the requested filename and use whichever row matches the scene numbering. |
+| Q6 | Should we also index the **aliases** TheXem returns? (Honzuki has EN, JP, and per-season JP titles.) | Yes — feed these into `show_titles` so the Oracle can find them on a future import without re-querying TheXem. |
 
-**Explicit non-goals for now:**
-- Auto-detecting the correct AniDB entry from a torrent filename (too fuzzy; user picks once per show).
-- Mapping TheXem; AniDB alone covers ~95% of anime releases.
-- Mapping TMDB ↔ AniDB (the field is in the XML, but no current consumer of TMDB needs it).
+#### Backend implementation plan (phases)
 
-**Dependencies:**
-- None on existing show data — purely additive.
-- Manual override path (issue #3, already shipped) covers the long tail where AniDB has no entry.
+**Phase A — Schema + ingestion (≈ 300 LOC + migration)**
+- New table `thexem_mappings`:
+  ```sql
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL REFERENCES shows(id),
+  tvdb_id TEXT NOT NULL,
+  scene_season INTEGER, scene_episode INTEGER, scene_absolute INTEGER,
+  anidb_season INTEGER, anidb_episode INTEGER, anidb_absolute INTEGER,
+  tvdb_season INTEGER,  tvdb_episode INTEGER,  tvdb_absolute INTEGER,
+  source TEXT DEFAULT 'thexem',   -- 'thexem' | 'anidb' | 'manual'
+  fetched_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(show_id, scene_season, scene_episode)
+  ```
+- New module `src/backend/providers/thexem/client.ts` (~80 LOC):
+  - `getMappingAll(tvdbId)`, `getMappingSingle(...)` — wraps `/map/all`, `/map/single`
+  - Honors their `Cache-Control` headers, mirrors to SQLite for offline reuse
+- Extend the show edit/sync flow to accept `enableThexemMapping: true` in `shows.config`.
+
+**Phase B — Resolver integration (≈ 120 LOC)**
+- In `Oracle.resolveWithGrabHint()`, after parsing succeeds but before provider episode lookup:
+  1. If show has TheXem enabled and `parsed.season` + `parsed.episodes` exist:
+     - Look up the candidate mapped rows in `thexem_mappings` where `(scene_season = parsed.season AND scene_episode IN parsed.episodes)`.
+     - For each matched row, fetch the **TVDB** episode via the primary provider.
+     - Cache those episodes, build `proposedPath` from the TVDB S/E values.
+  2. If no match (or mapping disabled), fall through to existing resolution.
+
+**Phase C — Background jobs**
+- New TaskName `thexem-refresh` (weekly, opt-in during onboarding) that walks shows with `enableThexemMapping = true` and re-fetches their mapping rows.
+- Refresh rate: align with TheXem's own cache TTL (7 days).
+
+**Phase D — UI (≈ 250 LOC)**
+- ShowDetail settings panel: "Provider Mapping" section with:
+  - Toggle: "Use TheXem community anime mapping"
+  - When enabled: read-only table of `scene S/E ↔ anidb S/E ↔ tvdb S/E` derived from the local cache
+  - "Refresh mapping" button to force re-fetch
+  - "Source: thexem (fetched 3 days ago)" attribution
+- On `release-search`/`grab` flows, log a `pipeline_event` noting which mapping row was applied — helps debug "wrong episode imported" reports later.
+
+**Phase E — Optional fallback**
+- Only if TheXem coverage gaps emerge after deployment: layer in the AniDB master-XML scraper (Option A) behind the same `source` column. Will reuse the `thexem_mappings` table — AniDB rows just have `source = 'anidb'` and a null `scene_*` triplet.
+
+#### Frontend implementation plan (≈ 350 LOC)
+
+**Settings → new "Anime Mapping" card** (under show detail's existing settings tab):
+
+```
+[ ] Use TheXem community anime episode mapping
+    When enabled, releases tagged with the scene season (e.g. S04E17)
+    are resolved against TVDB's actual numbering (e.g. S01E53) using
+    thexem.info's community anime list.
+    Source: thexem.info · last fetched 2 days ago · 60 episodes mapped
+    [Refresh mapping]  [View mapping table]  [Report missing season]
+```
+
+- Toggle is stored per-show in `shows.config` (`thexem: { enabled: true, lastSyncedAt }`).
+- "View mapping table" opens a read-only modal showing scene/anidb/tvdb S/E side-by-side.
+- "Report missing season" opens a link to `https://thexem.info/xem/add?origin=tvdb&id=<tvdbId>`.
+
+**ManualImport.tsx changes:**
+- When a force-import triggers the TheXem path, log `[Mapping] scene S04E17 → tvdb S01E53` to the activity event so the user sees what was applied.
+- The "Assigned"/"Modified" badges already stretch to cover this — no UI changes needed for the inline editing work in #3.
+
+**ShowDetail.tsx changes:**
+- New **Mapping** column tag on episode row when the displayed S/E came from a TheXem mapping (vs the provider's native S/E).
+
+#### Migration plan
+
+- Existing shows default to `thexem.enabled = false`. No surprises for current libraries.
+- A Settings → System toggle ("Enable TheXem auto-suggest for new anime shows") flips the default for new library additions only.
+
+#### Dependencies
+- No new npm packages — TheXem is plain JSON over HTTPS.
+- Existing `db.getCache`/`setCache` handles the HTTP cache; we add a per-show fetch for live view.
+
+#### Non-goals
+- Editing TheXem mappings from inside ShowFlow (community edits belong upstream).
+- Trakt/MAL/IMDb mappings TheXem also exposes — we don't need them today.
+- Movies (Honzuki movies, OVAs). TheXem has them, but the schema above intentionally keeps `season`/`episode` fields nullable so movies live in a separate table later without a data migration.
 
 ---
 
 ### 5. Series folder naming doesn't match Sonarr's preferred format
-**Status:** [IN PROGRESS] — backend + UI done, rename preview ready
+**Status:** [DONE]
 **Reported:** 2026-08-10
-**Symptoms:**
-- ShowFlow strips `:` from folder names, producing `Mushoku Tensei - Jobless Reincarnation` instead of `Mushoku Tensei: Jobless Reincarnation`.
 
-**Root cause:**
-`Oracle.sanitize()` was over-aggressive: `value.replace(/[<>:"/\\|?*]/g, '').trim()` ate the colon.
-
-**Fixes applied (2026-08-10):**
-- [x] `oracle.ts` — `sanitize()` now only strips truly illegal chars: `< > " / \ | ? *`. Colons are preserved.
-- [x] New API endpoints:
-  - `GET /api/shows/:id/rename-preview` — returns current vs proposed folder name + how many episode DB paths would be rewritten
-  - `POST /api/shows/:id/rename-apply` — actual `fs.rename` + episode `file_path` updates (DB first, then disk, so a crash mid-rename leaves recoverable state)
-- [x] `ShowDetail.tsx` — "Rename Folder" button next to Organize; opens a preview dialog showing current folder, proposed folder, episode-impact count, and a Plex/Jellyfin refresh warning before applying
+**Fix applied (2026-08-10):**
+- [x] `Oracle.sanitize()` now strips only `< > " / \ | ? *`. Colons and dashes are preserved verbatim.
+- [x] New endpoints `GET /api/shows/:id/rename-preview` and `POST /api/shows/:id/rename-apply`.
+- [x] `ShowDetail` "Rename Folder" button: preview dialog shows current/proposed name, episode-impact count, and a Plex/Jellyfin refresh warning.
 
 **Remaining verification:**
-- [ ] Manual test: rename a show with existing episodes, confirm files still play, Plex rescans correctly.
-- [ ] Decide whether `Organize` (episode-level rename) should also respect any future `series_folder_format` template — it's currently hardcoded to `show - S01E01.ext`.
+- [ ] Manual rename on a show with existing episodes.
+- [ ] Decide whether `Organize` should respect any future per-`library_type` `series_folder_format` template (currently hardcoded `show - S01E01.ext`).
 
 ---
 
@@ -154,8 +238,9 @@ Translation: AniDB absolute #1-11 = TVDB S01E12-E22 (i.e. `tvdbEpisode = anidbEp
 | B1 | Manual Import list view OOMs when watch folder is large + heavy shows | Mitigated by cache (30 s TTL), see `docs/manual-import-oom.md` — long-term fix is to batch-resolve |
 | B2 | SonarrImportDialog UX for multi-root-folder setups | Improvement, not bug |
 | B3 | EpisodeChip color-coding for upgrade states | Cosmetic |
-| B4 | Release notes/CHANGELOG automation on `bun run release` | Process gap, would prevent undocumented breaking changes |
+| B4 | Release notes/CHANGELOG automation on `bun run release` | Process gap |
 | B5 | Retry queue for failed TorBox downloads (vs one-shot) | Currently just logs and gives up; consider persistent "retry at next RSS" |
+| B6 | `Organize` should respect a `series_folder_format` template | Currently hardcoded `show - S01E01.ext`; decouple from #5 once templates land |
 
 ---
 
@@ -165,7 +250,8 @@ Translation: AniDB absolute #1-11 = TVDB S01E12-E22 (i.e. `tvdbEpisode = anidbEp
 |---|---|---|
 | 2 | forceImport silent-failure | 2026-08-10 |
 | 3 | Manual season/episode override | 2026-08-10 |
-| 1 | TorBox pipeline fixes (polling, error logging, ephemeral-client) | 2026-08-10 (pending field-test) |
+| 1 | TorBox pipeline (polling, error logging, ephemeral client, status query compat) | 2026-08-10 (pending field-test) |
+| 5 | Folder naming colon-preservation + rename preview/apply | 2026-08-10 |
 
 ---
 
