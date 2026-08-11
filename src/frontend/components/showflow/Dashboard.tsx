@@ -1,5 +1,5 @@
 import {
-  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw, Menu,
+  CheckIcon, Scan, Activity, ChevronRight, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Menu,
 } from "lucide-react";
 import * as React from "react";
 
@@ -89,6 +89,10 @@ function getRowProximity(airDate: string): { color: string; dot: string } {
   if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
   if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
   return { color: "text-white/50", dot: "bg-white/30" };
+}
+
+function getDateKeyFor(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, onMetadata }: {
@@ -201,6 +205,8 @@ function Dashboard({
   const [processingFiles, setProcessingFiles] = React.useState<string[]>([]);
   const [syncingAll, setSyncingAll] = React.useState(false);
   const [syncProgress, setSyncProgress] = React.useState<{ synced: number; total: number; errors: number } | null>(null);
+  const [selectedDay, setSelectedDay] = React.useState<string | null>(null);
+  const [expandHistory, setExpandHistory] = React.useState(false);
 
   const POLL_INTERVAL = 30_000;
 
@@ -278,6 +284,24 @@ function Dashboard({
     });
   }, [upcoming]);
 
+  // Split: past days → collapsible history; Today + future → primary agenda.
+  const todayKey = getLocalDateKey(new Date().toISOString());
+  const storyGroups = React.useMemo(() => ({
+    history: groupedEpisodes
+      .filter((g) => g.dateKey < todayKey)
+      .sort((a, b) => (a.dateKey > b.dateKey ? -1 : 1)), // newest first
+    upcoming: groupedEpisodes
+      .filter((g) => g.dateKey >= todayKey)
+      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // chronologically
+  }), [groupedEpisodes, todayKey]);
+
+  // Calendar strip day-click filters the upcoming list (toggle: click again to clear).
+  const filteredUpcomingGroups = React.useMemo(() => (
+    selectedDay
+      ? storyGroups.upcoming.filter((g) => g.dateKey === selectedDay)
+      : storyGroups.upcoming
+  ), [storyGroups, selectedDay]);
+
   const uniqueShowsCount = React.useMemo(() => {
     if (!upcoming) return 0;
     return new Set(upcoming.map((ep) => ep.showTitle)).size;
@@ -296,11 +320,12 @@ function Dashboard({
   }, []);
 
   const episodesByDate = React.useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, UpcomingEpisode[]>();
     if (!upcoming) return map;
     upcoming.forEach((ep) => {
-      const dateStr = ep.airDate.slice(0, 10);
-      map.set(dateStr, (map.get(dateStr) || 0) + 1);
+      const dateStr = getLocalDateKey(ep.airDate);
+      const list = map.get(dateStr);
+      if (list) list.push(ep); else map.set(dateStr, [ep]);
     });
     return map;
   }, [upcoming]);
@@ -391,18 +416,23 @@ function Dashboard({
           <div className="border-b border-white/5 px-5 py-2.5 overflow-x-auto">
             <div className="flex gap-1 min-w-max">
               {calendarDays.map((date) => {
-                const dateStr = date.toISOString().slice(0, 10);
-                const count = episodesByDate.get(dateStr) || 0;
-                const isToday = dateStr === new Date().toISOString().slice(0, 10);
+                const dateStr = getDateKeyFor(date);
+                const dayEps = episodesByDate.get(dateStr) || [];
+                const count = dayEps.length;
+                const isToday = dateStr === todayKey;
+                const isSelected = selectedDay === dateStr;
                 return (
-                  <div
+                  <button
                     key={dateStr}
+                    type="button"
+                    onClick={() => setSelectedDay(isSelected ? null : dateStr)}
                     className={cn(
-                      "flex flex-col items-center rounded-md px-2 py-1.5 min-w-[40px] transition-all duration-150",
+                      "flex flex-col items-center rounded-md px-1 py-1 min-w-[34px] transition-all duration-150 cursor-pointer",
                       count > 0
-                        ? "bg-signal/8 border border-signal/12"
-                        : "bg-transparent border border-transparent",
+                        ? "bg-signal/8 border border-signal/12 hover:bg-signal/15"
+                        : "bg-transparent border border-transparent hover:bg-white/[0.04]",
                       isToday && "ring-1 ring-signal/30",
+                      isSelected && "bg-signal/20 border-signal/50 ring-1 ring-signal/50",
                     )}
                   >
                     <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -420,14 +450,14 @@ function Dashboard({
                     {count > 0 && (
                       <span className="text-[8px] font-bold text-signal">{count}</span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
 
           {/* Dense Episode List */}
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className="flex-1 overflow-y-auto px-5 py-3">
             {upcoming === null ? (
               <DashboardSkeleton />
             ) : upcoming.length === 0 ? (
@@ -435,18 +465,114 @@ function Dashboard({
                 NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.
               </div>
             ) : (
-              <div className="space-y-4">
-                {groupedEpisodes.map((group, gi) => (
+              <div className="space-y-3">
+                {/* Recently Released — collapsed by default so past days don't
+                    compete with the primary agenda */}
+                {storyGroups.history.length > 0 && (
+                  <div className="border border-white/5 bg-white/[0.01] rounded-md px-2 py-1">
+                    <button
+                      onClick={() => setExpandHistory(!expandHistory)}
+                      className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white/70 transition-colors py-1 text-left"
+                    >
+                      {expandHistory
+                        ? <ChevronUp className="size-3 shrink-0" />
+                        : <ChevronDown className="size-3 shrink-0" />}
+                      Recently Released
+                      <span className="text-white/25 normal-case font-normal">
+                        ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
+                      </span>
+                      <span className="flex-1" />
+                      {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
+                        g.items.slice(0, 2).map((ep) => (
+                          <span
+                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
+                            className="text-white/25 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
+                          >
+                            {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                          </span>
+                        ))
+                      )}
+                    </button>
+                    {expandHistory && (
+                      <div className="pb-1 space-y-0.5">
+                        {storyGroups.history.map((group) => (
+                          <div key={group.dateKey} className="space-y-0.5">
+                            <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/25 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
+                              {group.label}
+                            </h4>
+                            {group.items.map((ep, i) => {
+                              const showObj = getMatchingShow(ep.showTitle);
+                              return (
+                                <div
+                                  key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
+                                  onClick={() => { if (showObj) onSelectShow(showObj); }}
+                                  className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                                >
+                                  {showObj ? (
+                                    <PosterImage
+                                      showId={showObj.id}
+                                      alt={ep.showTitle}
+                                      className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
+                                    />
+                                  ) : (
+                                    <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
+                                      <span className="font-mono text-[5px] text-white/20">N/A</span>
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                                    <span className="text-xs font-medium text-white/45 truncate transition-colors group-hover:text-white/60">
+                                      {ep.showTitle}
+                                    </span>
+                                    <span className="text-[10px] text-white/25 font-mono shrink-0">
+                                      S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                                    </span>
+                                  </div>
+                                  {ep.filePath && (
+                                    <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
+                                      <CheckIcon className="size-2" strokeWidth={3} />
+                                      Available
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-mono text-white/30 shrink-0 leading-none">
+                                    {getCompactDate(ep.airDate)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Primary upcoming list: Today → Tomorrow → rest, today gets a hero accent */}
+                {filteredUpcomingGroups.map((group, gi) => {
+                  const isToday = group.dateKey === todayKey;
+                  return (
                   <div
                     key={group.dateKey}
-                    className="space-y-0.5 animate-fade-in"
+                    className={cn(
+                      "space-y-0.5 animate-fade-in",
+                      isToday && "rounded-lg bg-signal/[0.04] border border-signal/10 -mx-1 px-3 py-2",
+                    )}
                     style={{ animationDelay: `${gi * 60}ms` }}
                   >
-                    <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/30 border-b border-white/5 pb-1 mb-1">
+                    <h3 className={cn(
+                      "font-mono text-[10px] font-bold uppercase tracking-wider pb-1 mb-1 flex items-center gap-1.5",
+                      isToday
+                        ? "text-signal border-b border-signal/15"
+                        : "text-white/30 border-b border-white/5",
+                    )}>
+                      {isToday && <span className="inline-block size-1.5 rounded-full bg-signal animate-pulse" />}
                       {group.label}
+                      {isToday && (
+                        <span className="ml-auto normal-case font-normal text-[10px] text-signal/70">
+                          {group.items.length} ep{group.items.length !== 1 ? 's' : ''}
+                        </span>
+                      )}
                     </h3>
                     {(() => {
-                      const isToday = group.label === "Today";
                       const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(ep.airDate)) : -1;
                       const hasNowLine = nowLineIdx > 0;
                       return group.items.map((ep, i) => {
@@ -471,7 +597,7 @@ function Dashboard({
                           onClick={() => {
                             if (showObj) onSelectShow(showObj);
                           }}
-                          className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                          className="group flex items-center gap-2.5 rounded-md px-2 py-1 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
                           style={{ animationDelay: `${gi * 60 + i * 30}ms` }}
                         >
                           {showObj ? (
@@ -498,7 +624,10 @@ function Dashboard({
                               S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                             </span>
                             {ep.episodeTitle && (
-                              <span className="text-[12px] text-white/40 truncate hidden sm:inline">
+                              <span
+                                className="text-[12px] text-white/40 truncate hidden sm:inline"
+                                title={ep.episodeTitle}
+                              >
                                 · {ep.episodeTitle}
                               </span>
                             )}
@@ -520,7 +649,21 @@ function Dashboard({
                     });
                     })()}
                   </div>
-                ))}
+                  );
+                })}
+
+                {/* Day-filter offset banner when a calendar day is selected */}
+                {selectedDay && filteredUpcomingGroups.length === 0 && storyGroups.upcoming.length > 0 && (
+                  <div className="text-center py-10">
+                    <p className="text-muted-foreground text-xs font-mono">No episodes on {new Date(selectedDay + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}.</p>
+                    <button
+                      onClick={() => setSelectedDay(null)}
+                      className="mt-2 font-mono text-[10px] font-bold text-signal hover:text-signal/80 uppercase tracking-wider transition-colors"
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
