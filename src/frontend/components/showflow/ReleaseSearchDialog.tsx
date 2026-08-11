@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@frontend/components/ui/dialog";
 import { Input } from "@frontend/components/ui/input";
+import { Panel } from "@frontend/components/ui/panel";
 import { ScrollArea } from "@frontend/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { cn } from "@frontend/lib/utils";
@@ -224,8 +225,8 @@ function ReleaseSearchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] flex flex-col">
         <DialogHeader className="shrink-0">
-          <DialogTitle>Search Releases</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="truncate" title={showTitle}>Search Releases</DialogTitle>
+          <DialogDescription className="truncate" title={`${showTitle} · ${isSeasonScope ? `Season ${season}` : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}`}>
             {showTitle} ·{" "}
             {isSeasonScope
               ? `Season ${season} (packs & episodes)`
@@ -233,7 +234,7 @@ function ReleaseSearchDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+        <Panel className="flex items-center gap-2 shrink-0 flex-wrap">
           <Input
             placeholder="Filter titles..."
             value={textFilter}
@@ -328,10 +329,11 @@ function ReleaseSearchDialog({
             {loading ? <Loader2Icon className="size-3.5 animate-spin" /> : <SearchIcon className="size-3.5" />}
             Refresh
           </Button>
-        </div>
+        </Panel>
 
-        <ScrollArea className="flex-1 min-h-0 mt-3 rounded-lg border border-white/10">
-          <div className="flex flex-col divide-y divide-white/5">
+        <Panel className="flex-1 min-h-0 mt-3 rounded-lg border border-white/10">
+          <ScrollArea className="h-full">
+            <div className="flex flex-col divide-y divide-white/5">
             {loading && (
               <div className="text-muted-foreground flex items-center gap-2 p-6 text-sm">
                 <Loader2Icon className="size-4 animate-spin" /> Searching indexers...
@@ -413,8 +415,9 @@ function ReleaseSearchDialog({
                   </div>
                 );
               })}
-          </div>
-        </ScrollArea>
+            </div>
+          </ScrollArea>
+        </Panel>
       </DialogContent>
     </Dialog>
   );

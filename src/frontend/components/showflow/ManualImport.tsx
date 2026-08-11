@@ -5,6 +5,7 @@ import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@frontend/components/ui/dialog";
 import { Input } from "@frontend/components/ui/input";
+import { Panel } from "@frontend/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { cn } from "@frontend/lib/utils";
 
@@ -480,6 +481,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                       <Select
                         value={displaySeason != null ? String(displaySeason) : undefined}
                         onValueChange={(v) => setSeasonOverride(f.filename, v === "__auto__" ? null : parseInt(v, 10))}
+                        disabled={!assignedShowId}
                       >
                         <SelectTrigger
                           size="sm"
@@ -540,10 +542,10 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                         <td className="px-2 py-2.5 font-mono text-foreground/85 max-w-[200px] truncate" title={f.filename}>
                           {f.filename}
                         </td>
-                        <td className="px-2 py-2.5 text-foreground/70">
+                        <td className="px-2 py-2.5 text-foreground/70 max-w-[180px]">
                           {override ? (
-                            <div className="flex items-center gap-1 text-signal font-medium">
-                              <span title={`Manually assigned to ${override.title}`}>{override.title}</span>
+                            <div className="flex items-center gap-1 text-signal font-medium min-w-0">
+                              <span className="truncate" title={`Manually assigned to ${override.title}`}>{override.title}</span>
                               <button
                                 type="button"
                                 onClick={(e) => clearAssignedShow(f.filename, e)}
@@ -553,9 +555,30 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                                 <XIcon className="size-3" />
                               </button>
                             </div>
-                          ) : (
-                            currentShowTitle || <span className="italic text-muted-foreground">unresolved</span>
-                          )}
+                            ) : (
+                              <div className="min-w-0">
+                                {f.show ? (
+                                  <span
+                                    className={cn(
+                                      "block truncate cursor-pointer hover:text-signal transition-colors",
+                                      !f.resolved && "text-muted-foreground",
+                                    )}
+                                    title={f.show}
+                                    onClick={() => setSelectingFile(f)}
+                                  >
+                                    {f.show}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="italic text-muted-foreground cursor-pointer hover:text-signal"
+                                    onClick={() => setSelectingFile(f)}
+                                    title="Click to assign a show"
+                                  >
+                                    unresolved
+                                  </span>
+                                )}
+                              </div>
+                            )}
                         </td>
                         <td className="px-2 py-2.5 text-foreground/70">
                           {seasonCellContent}
@@ -566,7 +589,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                         <td className="px-2 py-2.5 text-foreground/70 max-w-[160px] truncate" title={f.existingFile}>
                           {f.existingFile || <span className="text-muted-foreground">—</span>}
                         </td>
-                        <td className="px-2 py-2.5">
+                        <td className="px-2 py-2.5 max-w-[140px]">
                           {override || epOverride ? (
                             <span
                               className="rounded bg-signal/10 px-1.5 py-0.5 text-[10px] text-signal font-mono"
@@ -577,7 +600,12 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                           ) : f.resolved ? (
                             <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400 font-mono" title="Matched to library show">Resolved</span>
                           ) : f.error ? (
-                            <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive font-mono" title={f.error}>{f.error}</span>
+                            <span
+                              className="block rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive font-mono truncate"
+                              title={f.error}
+                            >
+                              {f.error}
+                            </span>
                           ) : (
                             <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400 font-mono" title="Unresolved - click 'Match Show' to manually assign">Unresolved</span>
                           )}
@@ -642,12 +670,12 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
               <TvIcon className="size-5 text-signal" />
               Assign Show
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Select a show from your library to associate with <span className="font-mono text-foreground">{selectingFile?.filename}</span>.
+            <DialogDescription className="text-xs min-w-0">
+              Select a show from your library to associate with <span className="font-mono text-foreground break-all">{selectingFile?.filename}</span>.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <Panel className="space-y-3 py-2">
             <div className="relative">
               <SearchIcon className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -670,20 +698,20 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                     key={s.id}
                     type="button"
                     onClick={() => handleAssignShow(s)}
-                    className="w-full text-left rounded-lg p-2.5 hover:bg-white/5 transition-colors border border-transparent hover:border-white/10 flex items-center justify-between group"
+                    className="w-full text-left rounded-lg p-2.5 hover:bg-white/5 transition-colors border border-transparent hover:border-white/10 flex items-center justify-between gap-2 group"
                   >
-                    <div>
-                      <div className="text-xs font-medium text-foreground group-hover:text-signal transition-colors">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium text-foreground group-hover:text-signal transition-colors">
                         {s.title}
                       </div>
                       {s.year && <div className="text-[10px] text-muted-foreground">{s.year}</div>}
                     </div>
-                    <CheckIcon className="size-4 text-signal opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <CheckIcon className="size-4 shrink-0 text-signal opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
                 ))
               )}
             </div>
-          </div>
+          </Panel>
         </DialogContent>
       </Dialog>
 
@@ -695,16 +723,16 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
               <TvIcon className="size-5 text-signal" />
               Select Episodes
             </DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogDescription className="text-xs min-w-0">
               Choose which episode numbers this file should import as.{" "}
-              <span className="font-mono text-foreground">{episodePickFile?.filename}</span>
+              <span className="font-mono text-foreground break-all">{episodePickFile?.filename}</span>
               {episodePickFile && (
                 <> — Season {episodeOverrides[episodePickFile.filename]?.season ?? episodePickFile.season ?? "?"}</>
               )}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <Panel className="space-y-3 py-2">
             {(() => {
               if (!episodePickFile) return null;
               const showId = assignedShows[episodePickFile.filename]?.id ?? episodePickFile.showId;
@@ -766,7 +794,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                 </>
               );
             })()}
-          </div>
+          </Panel>
         </DialogContent>
       </Dialog>
     </div>

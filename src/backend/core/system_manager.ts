@@ -111,6 +111,12 @@ export class SystemManager {
     // Access the BlackholeClient's scan method
     const client = (this.watcher as any).clients?.get('blackhole');
     if (client && typeof client.scanExistingFiles === 'function') {
+      // An explicit rescan re-attempts everything: clear the "held for manual
+      // import" markers so files that failed before (and were parked to avoid
+      // error-spam) are given another chance under the current config.
+      if (typeof client.clearManualHolds === 'function') {
+        client.clearManualHolds();
+      }
       await client.scanExistingFiles(folder);
       return { status: 'rescanned' };
     }

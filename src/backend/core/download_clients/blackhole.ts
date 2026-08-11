@@ -94,6 +94,62 @@ export class BlackholeClient implements DownloadClient {
     return false;
   }
 
+  // ---- Manual-import holds ----------------------------------------------
+  //
+  // When auto-processing a watch-folder file fails for a reason that needs
+  // human attention (metadata couldn't be resolved, no root-folder profiles
+  // configured, no root folder for the show, not an upgrade, collision ...),
+  // the file is left in place for the Manual Import page. Without tracking
+  // that, the 3-minute safety rescan keeps re-queuing the same file and
+  // re-logging the identical error on every pass.
+  //
+  // Held files are skipped by scan/watch events until the user force-imports
+  // them (success clears the hold) or clears it via a watch-folder rescan.
+  // The set is persisted so a pod restart doesn't spam the same errors once.
+  private static readonly MANUAL_HOLDS_KEY = 'blackhole.manual_holds';
+
+  private readManualHolds(): string[] {
+    const raw = db.getSetting(BlackholeClient.MANUAL_HOLDS_KEY);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(typeof raw === 'string' ? raw : raw);
+      return Array.isArray(arr) ? arr.filter(p => typeof p === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private writeManualHolds(paths: string[]) {
+    db.setSetting(BlackholeClient.MANUAL_HOLDS_KEY, paths);
+  }
+
+  isHeldForManual(fullPath: string): boolean {
+    return this.readManualHolds().includes(fullPath);
+  }
+
+  holdForManual(fullPath: string) {
+    const paths = this.readManualHolds();
+    if (!paths.includes(fullPath)) {
+      paths.push(fullPath);
+      this.writeManualHolds(paths);
+      debugLog('Held watch-folder file for manual import', { fullPath });
+    }
+  }
+
+  releaseManualHold(fullPath: string) {
+    const paths = this.readManualHolds();
+    if (paths.includes(fullPath)) {
+      this.writeManualHolds(paths.filter(p => p !== fullPath));
+      debugLog('Released manual-import hold (file imported or removed)', { fullPath });
+    }
+  }
+
+  clearManualHolds(): number {
+    const count = this.readManualHolds().length;
+    db.removeSetting(BlackholeClient.MANUAL_HOLDS_KEY);
+    return count;
+  }
+
   async start() {
     const folder = this.config.downloadClient?.blackhole?.watchFolder;
 
@@ -181,6 +237,11 @@ export class BlackholeClient implements DownloadClient {
           continue;
         }
 
+        if (this.isHeldForManual(fullPath)) {
+          skippedCount++;
+          continue;
+        }
+
         this.enqueue(folder, filename);
         queuedCount++;
       }
@@ -204,6 +265,10 @@ export class BlackholeClient implements DownloadClient {
     const fullPath = path.join(folder, filename);
 
     if (this.pendingSet.has(fullPath) || this.processingQueue.has(fullPath)) {
+      return;
+    }
+
+    if (this.isHeldForManual(fullPath)) {
       return;
     }
 
@@ -251,6 +316,7 @@ export class BlackholeClient implements DownloadClient {
     episodes?: number[];
     existingFile?: string;
     resolved: boolean;
+    held?: boolean;
     error?: string;
   }[]> {
     const folder = this.watchFolder;
@@ -265,6 +331,7 @@ export class BlackholeClient implements DownloadClient {
       episodes?: number[];
       existingFile?: string;
       resolved: boolean;
+      held?: boolean;
       error?: string;
     }[] = [];
 
@@ -274,7 +341,7 @@ export class BlackholeClient implements DownloadClient {
         if (this.isIgnoredFile(filename)) continue;
         const fullPath = path.join(folder, filename);
 
-        const entry: any = { filename, fullPath, resolved: false };
+        const entry: any = { filename, fullPath, resolved: false, held: this.isHeldForManual(fullPath) };
         try {
           const result = await this.oracle.resolveForList(
             filename,
@@ -338,6 +405,7 @@ export class BlackholeClient implements DownloadClient {
     const fullPath = path.join(folder, filename);
     try {
       await unlink(fullPath);
+      this.releaseManualHold(fullPath);
       console.log(`[${this.name}] Deleted ${filename} from watch folder.`);
       db.logEvent({ type: 'delete', entityType: 'file', message: `Deleted ${filename} from watch folder` });
       return { ok: true, message: `Deleted "${filename}"` };
@@ -503,6 +571,7 @@ export class BlackholeClient implements DownloadClient {
     if (opts?.force) {
       throw new Error(errorMessage);
     }
+    this.holdForManual(fullPath);
     return;
       }
 
@@ -582,6 +651,7 @@ export class BlackholeClient implements DownloadClient {
             entityType: 'file',
             message,
           });
+          if (!opts?.force) this.holdForManual(fullPath);
           return;
         }
 
@@ -598,6 +668,7 @@ export class BlackholeClient implements DownloadClient {
 
           console.error(`[${this.name}] ${message}`);
           db.logEvent({ type: 'error', entityType: 'file', message });
+          if (!opts?.force) this.holdForManual(fullPath);
           return;
         }
 
@@ -643,6 +714,7 @@ export class BlackholeClient implements DownloadClient {
             releaseTitle: filename,
           });
         }
+        if (!opts?.force) this.holdForManual(fullPath);
         return;
       }
       const finalPath = path.join(rootFolder, proposedPath);
@@ -687,6 +759,7 @@ export class BlackholeClient implements DownloadClient {
                 releaseTitle: filename,
               });
             }
+            if (!opts?.force) this.holdForManual(fullPath);
             return;
           } else {
             console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
@@ -729,9 +802,19 @@ export class BlackholeClient implements DownloadClient {
           `If this is a k8s hostPath, make sure the destination mount allows writes by the container uid/gid (e.g. fsGroup).`,
         );
       }
-      if (movedTo === null) return;
+      if (movedTo === null) {
+        // Destination already exists and onCollision=skip — the file stays in
+        // the watch folder. Hold it for manual import so the rescan doesn't
+        // keep re-queuing and re-logging the same mistake.
+        if (!opts?.force) this.holdForManual(fullPath);
+        return;
+      }
       BlackholeClient.mem('after move ' + filename.slice(0, 30));
       maybeForcedGc();
+
+      // Import succeeded: the file is no longer in the watch folder, so drop
+      // any manual-import hold keyed to its source path.
+      this.releaseManualHold(fullPath);
 
       console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
       debugLog('File moved successfully', { filename, movedTo });
