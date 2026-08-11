@@ -37,6 +37,13 @@ type TvdbSeries = {
     [key: string]: unknown;
   }>;
   airsTime?: string;
+  /**
+   * ISO 3166-1-alpha-3 lowercase origin country, e.g. "jpn", "usa", "chn".
+   * TVDB's `airsTime` is the local wall-clock in that country with *no*
+   * accompanying timezone field, so the country is the only signal we have to
+   * pin the airtime down to a real instant. Null/absent for some series.
+   */
+  originalCountry?: string | null;
   [key: string]: unknown;
 };
 
@@ -300,6 +307,7 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
         episode,
         this.resolveEpisodeName(episode),
         series?.airsTime,
+        series?.originalCountry,
       ),
     );
 
@@ -519,6 +527,7 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
       match,
       translatedName || this.resolveEpisodeName(match),
       series?.airsTime,
+      series?.originalCountry,
     );
   }
 
@@ -549,6 +558,7 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
       match,
       translatedName || this.resolveEpisodeName(match),
       series?.airsTime,
+      series?.originalCountry,
     );
   }
 
@@ -651,13 +661,14 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
     episode: TvdbEpisode,
     title: string,
     airsTime?: string,
+    originalCountry?: string | null,
   ): Episode {
     return {
       season: episode.seasonNumber,
       episode: episode.number,
       absoluteNumber: episode.absoluteNumber ?? undefined,
       title: title || undefined,
-      airDate: this.buildAirDate(episode.aired, airsTime),
+      airDate: this.buildAirDate(episode.aired, airsTime, originalCountry),
       metadata: episode,
     };
   }
@@ -926,9 +937,101 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
     return undefined;
   }
 
+  /**
+   * Convert a wall-clock "HH:MM" in the given IANA timezone + local date
+   * into a UTC instant. Uses Intl.DateTimeFormat with explicit timeZone so
+   * it's DST-correct and host-TZ agnostic (works in a UTC container).
+   *
+   * Strategy: treat the wall-clock as UTC first, then measure the offset that
+   * timezone observes at that moment and subtract it. Handles DST by checking
+   * the offset at both the naive-UTC instant and its neighbours.
+   */
+  private wallClockToUtc(
+    dateStr: string,
+    hhmm: string,
+    timeZone: string,
+  ): Date | null {
+    const parts = dateStr.split('-').map(Number);
+    const timeParts = hhmm.split(':').map(Number);
+    const y = parts[0], m = parts[1], d = parts[2];
+    const hh = timeParts[0], mm = timeParts[1];
+    if (![y, m, d, hh, mm].every(n => typeof n === 'number' && !Number.isNaN(n))) return null;
+    if (y === undefined || m === undefined || d === undefined || hh === undefined || mm === undefined) return null;
+
+    const naiveUtcMs = Date.UTC(y, m - 1, d, hh, mm, 0);
+
+    const offsetMs = (instantMs: number): number => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(new Date(instantMs));
+      const get = (t: string) => Number(parts.find(p => p.type === t)?.value ?? 0);
+      const asUtcMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') === 24 ? 0 : get('hour'), get('minute'), get('second'));
+      return asUtcMs - Math.floor(instantMs / 1000) * 1000;
+    };
+
+    // Initial guess: offset at the naive instant
+    let guess = naiveUtcMs - offsetMs(naiveUtcMs);
+    // Refine once: the true instant's offset might differ around DST edges
+    guess = naiveUtcMs - offsetMs(guess);
+    return new Date(guess);
+  }
+
+  /** ISO 3166-1 alpha-3 (lowercase) -> IANA timezone for the primary broadcast
+   *  market. Only the common TV origins are needed; multi-TZ countries (USA,
+   *  CAN, AUS...) use the standard broadcast reference zone for TV scheduling
+   *  (network airtime convention, mirroring Sonarr/Skyhook behaviour). */
+  private static readonly COUNTRY_TIMEZONE: Record<string, string> = {
+    jpn: 'Asia/Tokyo',
+    chn: 'Asia/Shanghai',
+    kor: 'Asia/Seoul',
+    usa: 'America/New_York',
+    can: 'America/Toronto',
+    gbr: 'Europe/London',
+    fra: 'Europe/Paris',
+    deu: 'Europe/Berlin',
+    esp: 'Europe/Madrid',
+    ita: 'Europe/Rome',
+    aus: 'Australia/Sydney',
+    bra: 'America/Sao_Paulo',
+    mex: 'America/Mexico_City',
+    ind: 'Asia/Kolkata',
+    rus: 'Europe/Moscow',
+    nld: 'Europe/Amsterdam',
+    swe: 'Europe/Stockholm',
+    nor: 'Europe/Oslo',
+    dnk: 'Europe/Copenhagen',
+    fin: 'Europe/Helsinki',
+    bel: 'Europe/Brussels',
+    aut: 'Europe/Vienna',
+    che: 'Europe/Zurich',
+    pol: 'Europe/Warsaw',
+    tha: 'Asia/Bangkok',
+    twn: 'Asia/Taipei',
+    hkg: 'Asia/Hong_Kong',
+    sgp: 'Asia/Singapore',
+    mys: 'Asia/Kuala_Lumpur',
+    phl: 'Asia/Manila',
+    idn: 'Asia/Jakarta',
+    arg: 'America/Argentina/Buenos_Aires',
+    chi: 'America/Santiago',
+    // col / per / colombia / peru
+    col: 'America/Bogota',
+    per: 'America/Lima',
+    // middle east / africa
+    isr: 'Asia/Jerusalem',
+    are: 'Asia/Dubai',
+    sau: 'Asia/Riyadh',
+    tur: 'Europe/Istanbul',
+    zaf: 'Africa/Johannesburg',
+  };
+
   private buildAirDate(
     aired: string | undefined,
     airsTime: string | undefined,
+    originalCountry?: string | null,
   ): string | undefined {
     if (!aired) {
       return undefined;
@@ -938,10 +1041,23 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
       return aired;
     }
 
+    const dateStr = aired.slice(0, 10);
+
+    // Resolve a timezone from the show's origin country. Without a known
+    // country we can't place the wall-clock in a real zone — Sonarr/Skyhook
+    // has the same problem and falls back to treating airsTime as US Eastern
+    // (the historical default), so we do the same to stay comparable.
+    const countryTz = originalCountry
+      ? TVDBProvider.COUNTRY_TIMEZONE[originalCountry.toLowerCase()]
+      : undefined;
+    const timeZone = countryTz ?? 'America/New_York';
+
+    const utc = this.wallClockToUtc(dateStr, airsTime, timeZone);
+    if (utc) return utc.toISOString();
+
+    // Fallback to legacy naive parse if Intl fails for some reason.
     try {
-      return new Date(
-        `${aired.slice(0, 10)}T${airsTime}:00`,
-      ).toISOString();
+      return new Date(`${dateStr}T${airsTime}:00`).toISOString();
     } catch {
       return aired;
     }
