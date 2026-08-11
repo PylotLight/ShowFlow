@@ -575,7 +575,7 @@ export class BlackholeClient implements DownloadClient {
     return;
       }
 
-    const { show, episodes, proposedPath } = result;
+    const { show, episodes } = result;
 
     // ---- Manual season/episode override --------------------------------
     // let users override the parsed season/episode numbers when automatic
@@ -717,7 +717,7 @@ export class BlackholeClient implements DownloadClient {
         if (!opts?.force) this.holdForManual(fullPath);
         return;
       }
-      const finalPath = path.join(rootFolder, proposedPath);
+      const finalPath = path.join(rootFolder, result.proposedPath);
 
       if (this.config.dryRun) {
         console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);
