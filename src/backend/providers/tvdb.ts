@@ -1045,12 +1045,13 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
 
     // Resolve a timezone from the show's origin country. Without a known
     // country we can't place the wall-clock in a real zone — Sonarr/Skyhook
-    // has the same problem and falls back to treating airsTime as US Eastern
-    // (the historical default), so we do the same to stay comparable.
+    // assumes US Eastern, but the deployment's fallbackTimeZone preference
+    // overrides that when set.
     const countryTz = originalCountry
       ? TVDBProvider.COUNTRY_TIMEZONE[originalCountry.toLowerCase()]
       : undefined;
-    const timeZone = countryTz ?? 'America/New_York';
+    const fallback = (this.config?.fallbackTimeZone as string) || 'America/New_York';
+    const timeZone = countryTz ?? fallback;
 
     const utc = this.wallClockToUtc(dateStr, airsTime, timeZone);
     if (utc) return utc.toISOString();

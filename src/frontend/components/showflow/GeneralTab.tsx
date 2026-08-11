@@ -5,6 +5,7 @@ import { Switch } from "@frontend/components/ui/switch";
 import { LibraryTypeManager } from "./LibraryTypeManager";
 import { UpdatesPanel } from "./UpdatesPanel";
 import { FieldRow } from "./SettingsShared";
+import { TIMEZONE_PRESETS } from "@frontend/lib/timezones";
 
 export function GeneralTab({ config, saveConfig, scrollToSection }: {
   config: any;
@@ -69,6 +70,24 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
             checked={!!config.dryRun}
             onCheckedChange={v => saveConfig({ dryRun: v })}
           />
+        </FieldRow>
+        <FieldRow
+          label="Fallback Timezone"
+          description="Used when a show's origin country doesn't pin airtimes down — defaults to America/New_York (Sonarr-compatible)"
+        >
+          <Select
+            value={config.fallbackTimeZone || "America/New_York"}
+            onValueChange={v => saveConfig({ fallbackTimeZone: v })}
+          >
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMEZONE_PRESETS.map((tz) => (
+                <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </FieldRow>
       </GlassPanel>
 

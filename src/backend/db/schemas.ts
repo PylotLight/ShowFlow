@@ -28,6 +28,12 @@ export const ConfigSchema = z.object({
   dryRun: z.boolean().default(false),
   seasonFolderFormat: z.string().default('Season {season}'),
   importFolder: z.string().optional(),
+  /**
+   * IANA timezone used when a series has no recognisable originCountry
+   * (matches Sonarr/Skyhook's default of assuming US network times; see
+   * TVDBProvider.COUNTRY_TIMEZONE).
+   */
+  fallbackTimeZone: z.string().default('America/New_York'),
   downloadClient: z.object({
     type: z.enum(['blackhole', 'torbox', 'sabnzbd', 'none']).optional(),
     blackhole: z.object({

@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import { SonarrImportProgress } from "@frontend/components/showflow/SonarrImportProgress";
 import type { StepProps, SonarrSeries } from "../types";
+import { TIMEZONE_PRESETS } from "@frontend/lib/timezones";
+import { GlobeIcon } from "lucide-react";
 
 export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpen, setSonarrPanelOpen }: StepProps) {
   const [tvdbKey, setTvdbKey] = React.useState("");
@@ -76,6 +78,23 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
   const [typeFilter, setTypeFilter] = React.useState<string | null>(null);
 
   const { sonarr, prowlarr, downloadClient } = data;
+
+  const [fallbackTimeZone, setFallbackTimeZone] = React.useState("America/New_York");
+
+  React.useEffect(() => {
+    fetch("/api/config").then(r => r.json()).then(cfg => {
+      if (cfg.fallbackTimeZone) setFallbackTimeZone(cfg.fallbackTimeZone);
+    }).catch(() => {});
+  }, []);
+
+  const saveFallbackTimeZone = (tz: string) => {
+    setFallbackTimeZone(tz);
+    fetch("/api/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fallbackTimeZone: tz }),
+    }).catch(() => {});
+  };
 
   // Maps Sonarr series types (Anime, Standard) to library type IDs
   const [sonarrTypeMapping, setSonarrTypeMapping] = React.useState<Record<string, string>>({});
@@ -316,6 +335,29 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               <EyeIcon className="size-3.5" />
               {hasMetadataKey ? "View keys" : "Configure"}
             </Button>
+          </div>
+        </div>
+
+        {/* ├─ Fallback Timezone ──────────────────────────────────── */}
+        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-3">
+            <GlobeIcon className="size-4 text-signal" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold">Broadcast Timezone Fallback</p>
+              <p className="text-xs text-muted-foreground">
+                Used when TVDB can't pin an airtime to a country's timezone
+              </p>
+            </div>
+            <Select value={fallbackTimeZone} onValueChange={saveFallbackTimeZone}>
+              <SelectTrigger className="w-44 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMEZONE_PRESETS.map(tz => (
+                  <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
