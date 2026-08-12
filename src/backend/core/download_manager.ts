@@ -46,6 +46,40 @@ export class DownloadManager {
     return [...local, ...remote];
   }
 
+  /**
+   * Structured view of everything in flight - Blackhole files plus TorBox
+   * downloads with live state/progress - so the Queue page can show real
+   * progress bars instead of a bare filename.
+   */
+  getProcessingDetail(): {
+    id: string;
+    title: string;
+    client: 'blackhole' | 'torbox';
+    state: string;
+    progress: number | null;
+  }[] {
+    const blackhole = this.clients.get('blackhole') as BlackholeClient | undefined;
+    const torbox = this.clients.get('torbox') as TorboxDownloadClient | undefined;
+
+    const local = (blackhole ? blackhole.getProcessingFiles() : []).map((f, i) => ({
+      id: `blackhole-${i}`,
+      title: f,
+      client: 'blackhole' as const,
+      state: 'importing',
+      progress: null,
+    }));
+
+    const remote = (torbox ? torbox.getActiveDownloadsDetail() : []).map(d => ({
+      id: `torbox-${d.title}`,
+      title: d.title,
+      client: 'torbox' as const,
+      state: d.state,
+      progress: d.progress,
+    }));
+
+    return [...local, ...remote];
+  }
+
   getTorboxClient(): TorboxDownloadClient | undefined {
     return this.clients.get('torbox') as TorboxDownloadClient | undefined;
   }

@@ -1,20 +1,65 @@
 import { db } from '../db';
 import type { ReasonCode } from './pipeline/reason_codes';
 
-/** Common technical tags always extracted from filenames regardless of
- *  profile configuration. These keep the tag display comprehensive even
- *  when no matching custom format has been added to the profile yet. */
+/**
+ * Known technical "format families" - a single canonical concept that a
+ * release can spell in many ways (H.265 == h265 == HEVC == x265, etc.).
+ *
+ * Custom formats that are *identified* as belonging to a family (their name
+ * or regex mentions any of the family's keywords) automatically match the
+ * ENTIRE family's alias set. That's the fix for the tedium of hand-defining
+ * `H265`, `h-265`, `265`, `HEVC`, `x265`... as separate formats: add ONE
+ * H.265 format and every spelling is caught.
+ */
+interface FormatFamily {
+  label: string;
+  /** Regexes tested against a format's own name+regex to flag it as this family. */
+  detect: RegExp;
+  /** Regex tested against release filenames to see if the family is present. */
+  match: RegExp;
+}
+
+const FORMAT_FAMILIES: FormatFamily[] = [
+  {
+    label: 'H.265',
+    detect: /265|hevc|h265|hevc1?/i,
+    match: /\b(?:x[.\-_ ]?265|h[.\-_ ]?265|hevc|hev1|hvc1|265)\b/i,
+  },
+  {
+    label: 'H.264',
+    detect: /264|avc|x264|h264/i,
+    match: /\b(?:x[.\-_ ]?264|h[.\-_ ]?264|avc1?|264)\b/i,
+  },
+  {
+    label: 'AV1',
+    detect: /av1|av01/i,
+    match: /\b(?:av1|av01)\b/i,
+  },
+  {
+    label: 'VP9',
+    detect: /vp9/i,
+    match: /\bvp9\b/i,
+  },
+  {
+    label: 'HDR',
+    detect: /\bhdr/i,
+    match: /\b(?:hdr10\+|hdr10plus|hdr10|hdrplus|hdr)\b/i,
+  },
+  {
+    label: 'Dolby Vision',
+    detect: /\bdv\b|dolby/i,
+    match: /\b(?:dolby[.\-_ ]?vision|dolbyvision|dv)\b/i,
+  },
+  {
+    label: '10-bit',
+    detect: /10[.\-_ ]?bit|hi10p/i,
+    match: /\b(?:10[.\-_ ]?bit|hi10p)\b/i,
+  },
+];
+
+/** Technical tags that DON'T map to a family - scanned verbatim. */
 const COMMON_TAGS: { name: string; patterns: string[] }[] = [
-  { name: 'HDR', patterns: ['hdr'] },
-  { name: 'DV', patterns: ['dolby vision', 'dolbyvision', 'dv'] },
-  { name: 'HDR10+', patterns: ['hdr10+', 'hdr10plus'] },
   { name: 'HLG', patterns: ['hlg'] },
-  { name: 'x265', patterns: ['x265'] },
-  { name: 'x264', patterns: ['x264'] },
-  { name: 'HEVC', patterns: ['hevc'] },
-  { name: 'AV1', patterns: ['av1'] },
-  { name: 'VP9', patterns: ['vp9'] },
-  { name: '10bit', patterns: ['10bit', '10-bit'] },
   { name: 'TrueHD', patterns: ['truehd'] },
   { name: 'DTS', patterns: ['dts'] },
   { name: 'Atmos', patterns: ['atmos'] },
@@ -28,9 +73,13 @@ const COMMON_TAGS: { name: string; patterns: string[] }[] = [
 
 function scanCommonTags(filename: string): string[] {
   const lower = filename.toLowerCase();
-  return COMMON_TAGS
+  const tags = COMMON_TAGS
     .filter(t => t.patterns.some(p => lower.includes(p)))
     .map(t => t.name);
+  for (const fam of FORMAT_FAMILIES) {
+    if (fam.match.test(filename)) tags.push(fam.label);
+  }
+  return [...new Set(tags)];
 }
 
 export interface ReleaseScore {
@@ -101,7 +150,15 @@ export class QualityEngine {
 
     for (const f of formats) {
       const regex = new RegExp(f.regex, 'i');
-      const matches = regex.test(filename);
+      const userMatches = regex.test(filename);
+
+      // Auto-expand: if this format is a member of a known family (H.265,
+      // H.264, HDR, ...) it also matches any of the family's aliases, so one
+      // format catches every way the release spells the same thing.
+      const family = FORMAT_FAMILIES.find(fam => fam.detect.test(`${f.name} ${f.regex}`));
+      const familyMatches = family ? family.match.test(filename) : false;
+
+      const matches = userMatches || familyMatches;
 
       if (f.profile_format_type === 'forbidden' && matches) {
         return { score: 0, isForbidden: true, forbiddenName: f.name, missingRequired: [], matchedFormats: [] };

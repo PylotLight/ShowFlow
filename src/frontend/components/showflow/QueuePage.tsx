@@ -1,4 +1,4 @@
-import { FileIcon, Loader2Icon, PauseIcon, PlayIcon, RadioIcon, RefreshCwIcon } from "lucide-react";
+import { FileIcon, Loader2Icon, PauseIcon, PlayIcon, RadioIcon, RefreshCwIcon, CloudDownloadIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
@@ -13,6 +13,14 @@ interface ActivityEvent {
   timestamp: string;
 }
 
+interface ProcessingItem {
+  id: string;
+  title: string;
+  client: "blackhole" | "torbox";
+  state: string;
+  progress: number | null;
+}
+
 const EVENT_BADGES: Record<string, string> = {
   grab: "bg-signal/15 text-signal font-semibold border border-signal/10",
   download: "bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/10",
@@ -25,13 +33,28 @@ const EVENT_BADGES: Record<string, string> = {
   dryrun: "bg-yellow-500/15 text-yellow-400 font-semibold border border-yellow-500/10",
 };
 
-function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+function formatTorBoxState(state: string): string {
+  switch (state) {
+    case 'downloading':
+      return 'downloading';
+    case 'uploading':
+      return 'verifying';
+    case 'seeding':
+      return 'seeding';
+    case 'stalled':
+      return 'stalled';
+    case 'paused':
+      return 'paused';
+    case 'completed':
+      return 'downloaded';
+    default:
+      return state || 'downloading';
+  }
 }
 
 function QueuePage() {
   const [watching, setWatching] = React.useState<boolean | null>(null);
-  const [processing, setProcessing] = React.useState<string[] | null>(null);
+  const [processing, setProcessing] = React.useState<ProcessingItem[] | null>(null);
   const [events, setEvents] = React.useState<ActivityEvent[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [rescanning, setRescanning] = React.useState(false);
@@ -39,7 +62,7 @@ function QueuePage() {
 
   const refresh = React.useCallback(() => {
     fetch("/api/system/status").then((r) => r.json()).then((d) => setWatching(d.watching)).catch(() => setWatching(null));
-    fetch("/api/system/processing").then((r) => r.json()).then((files: string[]) => setProcessing(Array.isArray(files) ? files : [])).catch(() => setProcessing([]));
+    fetch("/api/system/processing/detail").then((r) => r.json()).then((items: ProcessingItem[]) => setProcessing(Array.isArray(items) ? items : [])).catch(() => setProcessing([]));
     fetch("/api/events?limit=25").then((r) => r.json()).then((data: ActivityEvent[]) => setEvents(Array.isArray(data) ? data : [])).catch(() => setEvents([]));
   }, []);
 
@@ -152,11 +175,35 @@ function QueuePage() {
           <p className="text-muted-foreground text-sm px-5 py-8 text-center">Nothing in the queue right now.</p>
         ) : (
           <div className="divide-y divide-white/5">
-            {processing.map((path, i) => (
-              <div key={`${path}-${i}`} className="flex items-center gap-3 px-5 py-3">
-                <FileIcon className="size-4 text-accent-amber shrink-0" />
-                <span className="font-mono text-xs text-white/85 truncate" title={path}>{fileName(path)}</span>
-                <Loader2Icon className="size-3.5 animate-spin text-muted-foreground ml-auto shrink-0" />
+            {processing.map((item) => (
+              <div key={item.id} className="px-5 py-3">
+                <div className="flex items-center gap-3">
+                  {item.client === "torbox" ? (
+                    <CloudDownloadIcon className="size-4 text-signal shrink-0" />
+                  ) : (
+                    <FileIcon className="size-4 text-accent-amber shrink-0" />
+                  )}
+                  <span className="font-mono text-xs text-white/85 truncate" title={item.title}>{item.title}</span>
+                  {item.progress != null ? (
+                    <span className="text-xs font-semibold text-signal ml-auto shrink-0 tabular-nums">{Math.round(item.progress)}%</span>
+                  ) : (
+                    <Loader2Icon className="size-3.5 animate-spin text-muted-foreground ml-auto shrink-0" />
+                  )}
+                </div>
+                <div className="mt-2 flex items-center gap-3">
+                  <div className="h-1.5 flex-1 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-500",
+                        item.client === "torbox" ? "bg-signal" : "bg-accent-amber"
+                      )}
+                      style={{ width: `${item.progress ?? 100}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                    {item.client === "torbox" ? formatTorBoxState(item.state) : "importing"}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { db } from '../../db';
 import type { Config } from '../../db';
 import { TorboxService } from '../../providers/torbox/services';
+import { backgroundJobs } from '../background_jobs';
 import type { DownloadClient } from './types';
 
 export interface TorboxClientConfig {
@@ -38,6 +39,7 @@ export class TorboxDownloadClient implements DownloadClient {
   private config: TorboxClientConfig;
   private processing = new Set<string>();
   private activeTitles = new Set<string>();
+  private activeDetails = new Map<string, { state: string; progress: number | null }>();
   private watchHandle: ReturnType<typeof watch> | null = null;
 
   constructor(config: Config) {
@@ -169,6 +171,13 @@ export class TorboxDownloadClient implements DownloadClient {
     return [...this.activeTitles];
   }
 
+  getActiveDownloadsDetail(): { title: string; state: string; progress: number | null }[] {
+    return [...this.activeTitles].map(title => ({
+      title,
+      ...(this.activeDetails.get(title) ?? { state: 'queued', progress: null }),
+    }));
+  }
+
   async submitReleaseBackground(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<{ ok: boolean; message: string }> {
     const { magnetUrl, downloadUrl, infoHash, title } = release;
 
@@ -230,6 +239,21 @@ export class TorboxDownloadClient implements DownloadClient {
   private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
     console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
 
+    // Expose this download in the header popover + queue as a live job.
+    const jobId = `torbox-grab-${torrentId}`;
+    this.activeDetails.set(label, { state: 'queued', progress: 0 });
+    backgroundJobs.register({
+      id: jobId,
+      type: 'torbox-grab',
+      label: `Downloading: ${label}`,
+      total: 100,
+      link: '/queue',
+    });
+
+    const failJob = (message: string) => {
+      backgroundJobs.fail(jobId, message);
+    };
+
     const maxAttempts = 600; // ~100 minutes with the adaptive schedule below
     let attempts = 0;
     let lastLoggedState = '';
@@ -251,6 +275,8 @@ export class TorboxDownloadClient implements DownloadClient {
             entityType: 'release',
             message: `TorBox status polling failed repeatedly for "${label}" (torrent ${torrentId}): ${msg}. Download state unknown.`,
           });
+          this.activeDetails.delete(label);
+          failJob(`Status polling failed: ${msg}`);
           return false;
         }
       }
@@ -269,6 +295,8 @@ export class TorboxDownloadClient implements DownloadClient {
             entityType: 'release',
             message: `TorBox torrent ${torrentId} ("${label}") disappeared from the account — download likely removed or expired.`,
           });
+          this.activeDetails.delete(label);
+          failJob('Torrent disappeared from TorBox account');
           return false;
         }
 
@@ -282,6 +310,14 @@ export class TorboxDownloadClient implements DownloadClient {
           lastLoggedState = stateSummary;
         }
 
+        // Publish live progress to the header job + queue page.
+        this.activeDetails.set(label, { state: stateSummary, progress });
+        backgroundJobs.update(jobId, {
+          total: 100,
+          completed: progress ?? 0,
+          detail: stateSummary,
+        });
+
         // Terminal failure states — bail out early instead of polling forever
         if (rawState.includes('error') || rawState.includes('fail') || rawState.includes('stalled')) {
           console.error(`[${this.name}] Torrent ${torrentId} entered terminal failure state: ${rawState}`);
@@ -290,6 +326,8 @@ export class TorboxDownloadClient implements DownloadClient {
             entityType: 'release',
             message: `TorBox download failed for "${label}" (state: ${rawState}).`,
           });
+          this.activeDetails.delete(label);
+          failJob(`Torrent entered ${rawState} state`);
           return false;
         }
 
@@ -308,6 +346,8 @@ export class TorboxDownloadClient implements DownloadClient {
               entityType: 'release',
               message: `TorBox download for "${label}" completed but contained no video files (found: ${allNames}).`,
             });
+            this.activeDetails.delete(label);
+            failJob('Torrent completed but contained no video files');
             return false;
           }
 
@@ -345,7 +385,8 @@ export class TorboxDownloadClient implements DownloadClient {
                 });
                 continue;
               }
-              await Bun.write(outputPath, res);
+              const data = await res.arrayBuffer();
+              await Bun.write(outputPath, data);
               console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
               anyDownloaded = true;
             } catch (fetchErr) {
@@ -359,6 +400,8 @@ export class TorboxDownloadClient implements DownloadClient {
           }
 
           if (anyDownloaded) {
+            this.activeDetails.delete(label);
+            backgroundJobs.complete(jobId, 'Downloaded — handed off for import');
             return true;
           } else {
             db.logEvent({
@@ -366,6 +409,8 @@ export class TorboxDownloadClient implements DownloadClient {
               entityType: 'release',
               message: `TorBox download for "${label}" marked complete but every file download failed.`,
             });
+            this.activeDetails.delete(label);
+            failJob('Every file download failed');
             return false;
           }
         }
@@ -384,6 +429,8 @@ export class TorboxDownloadClient implements DownloadClient {
       entityType: 'release',
       message: `TorBox download timed out for "${label}" after ${maxAttempts} status checks (~${Math.round(maxAttempts * 15 / 60)} minutes).`,
     });
+    this.activeDetails.delete(label);
+    failJob('Download timed out');
     return false;
   }
 

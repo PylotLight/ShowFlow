@@ -45,3 +45,45 @@ test("QualityEngine Scoring", async () => {
   expect(qualityEngine.shouldUpgrade(file720, file1080, 'p1')).toBe(true);
   expect(qualityEngine.shouldUpgrade(file1080HDR, file1080, 'p1')).toBe(false);
 });
+
+test("Codec families auto-match every spelling of a format", async () => {
+  db.db.run('PRAGMA foreign_keys = OFF');
+  db.db.run('DELETE FROM quality_definitions');
+  db.db.run('DELETE FROM quality_profiles');
+  db.db.run('DELETE FROM custom_formats');
+  db.db.run('DELETE FROM profile_formats');
+  db.db.run('PRAGMA foreign_keys = ON');
+
+  db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
+  db.saveProfile({ id: 'p2', name: 'Codec Profile' });
+
+  // A single "H.265" format should catch every spelling:
+  // x265, X.265, h265, h.265, h-265, HEVC, hvc1, and bare "265".
+  db.saveCustomFormat({ id: 'fh265', name: 'H.265', regex: 'H.265', score: 50 });
+  db.addProfileFormat('p2', 'fh265');
+
+  const cases = [
+    "Show.S01E01.1080p.x265.mkv",
+    "Show.S01E01.1080p.X.265.mkv",
+    "Show.S01E01.1080p.h265.mkv",
+    "Show.S01E01.1080p.H.265.mkv",
+    "Show.S01E01.1080p.h-265.mkv",
+    "Show.S01E01.1080p.HEVC.mkv",
+    "Show.S01E01.1080p.hvc1.mkv",
+    "Show.S01E01.1080p.265.mkv",
+  ];
+  for (const file of cases) {
+    const score = qualityEngine.getReleaseScore(file, 'p2');
+    expect(score.rejected).toBe(false);
+    expect(score.formatScore).toBe(50);
+    expect(score.matchedTags).toContain("H.265");
+  }
+
+  // A different codec must NOT match the H.265 format.
+  const h264 = qualityEngine.getReleaseScore("Show.S01E01.1080p.x264.mkv", 'p2');
+  expect(h264.formatScore).toBe(0);
+
+  // Tag scanning surfaces the family label regardless of spelling.
+  const tags = qualityEngine.getReleaseScore("Show.S01E01.1080p.HEVC.mkv", 'p2').matchedTags;
+  expect(tags).toContain("H.265");
+});

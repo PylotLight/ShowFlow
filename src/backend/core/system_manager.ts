@@ -95,6 +95,10 @@ export class SystemManager {
     return this.watcher ? this.watcher.getProcessingFiles() : [];
   }
 
+  getProcessingDetail() {
+    return this.watcher ? this.watcher.getProcessingDetail() : [];
+  }
+
   getWatcher(): DownloadManager | null {
     return this.watcher;
   }

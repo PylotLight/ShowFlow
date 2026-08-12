@@ -69,11 +69,19 @@ function formatBytes(bytes: number): string {
 }
 
 function formatAge(hours: number): string {
-  if (hours < 24) return `${Math.round(hours)}h`;
-  const days = hours / 24;
-  if (days < 30) return `${Math.round(days)}d`;
-  const months = days / 30;
-  if (months < 12) return `${Math.round(months)}mo`;
+  const h = Number.isFinite(hours) && hours > 0 ? hours : 0;
+  const totalMinutes = Math.round(h * 60);
+  if (totalMinutes < 1) return "just now";
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (wholeHours < 24) {
+    return mins > 0 ? `${wholeHours}h ${mins}m` : `${wholeHours}h`;
+  }
+  const days = Math.floor(wholeHours / 24);
+  if (days < 30) return `${days}d`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo`;
   return `${Math.round(months / 12)}y`;
 }
 
@@ -114,7 +122,7 @@ function ReleaseSearchDialog({
   season,
   episode,
   onGrabbed,
-  autoCloseOnSuccess,
+  autoCloseOnSuccess = true,
 }: ReleaseSearchDialogProps) {
   const isSeasonScope = episode == null;
 

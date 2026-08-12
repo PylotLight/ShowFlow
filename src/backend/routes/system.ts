@@ -105,6 +105,16 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
       },
     },
 
+    "/api/system/processing/detail": {
+      async GET() {
+        try {
+          return json(systemManager.getProcessingDetail());
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/tasks": {
       async GET() {
         try {
