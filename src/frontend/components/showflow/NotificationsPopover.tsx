@@ -55,7 +55,7 @@ function groupConsecutive(items: Notification[]): RecentGroup[] {
   return groups;
 }
 
-type Tab = 'all' | 'alerts' | 'activity';
+type Tab = 'all' | 'alerts' | 'jobs' | 'activity';
 
 // Single combined control for everything time-based: alerts that need
 // attention, live background jobs, and the routine activity log. One icon,
@@ -108,6 +108,20 @@ export function NotificationsPopover() {
   const activeJobs = jobs.filter(j => j.status === 'running');
   const finishedJobs = jobs.filter(j => j.status !== 'running');
 
+  async function dismissAll() {
+    if (!data || data.priority.length === 0) return;
+    try {
+      const res = await fetch("/api/notifications/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: data.priority.map(n => n.id) }),
+      });
+      if (res.ok) {
+        setData(prev => (prev ? { ...prev, priority: [], unreadCount: 0 } : prev));
+      }
+    } catch {}
+  }
+
   function severityIcon(sev: string) {
     switch (sev) {
       case 'error': return <XCircleIcon className="size-4 shrink-0 text-red-400" />;
@@ -134,9 +148,9 @@ export function NotificationsPopover() {
   const hasJobs = activeJobs.length > 0 || finishedJobs.length > 0;
   const hasRecent = recentGroups.length > 0;
 
-  const showPriority = hasPriority && tab !== 'activity';
-  const showJobs = hasJobs && tab !== 'alerts';
-  const showRecent = hasRecent && tab !== 'alerts';
+  const showPriority = hasPriority && (tab === 'all' || tab === 'alerts');
+  const showJobs = hasJobs && (tab === 'all' || tab === 'jobs');
+  const showRecent = hasRecent && (tab === 'all' || tab === 'activity');
   const nothingToShow = !showPriority && !showJobs && !showRecent;
 
   return (
@@ -169,7 +183,7 @@ export function NotificationsPopover() {
               Notifications
             </p>
             <div className="flex items-center gap-1">
-              {(['all', 'alerts', 'activity'] as Tab[]).map(t => (
+              {(['all', 'alerts', 'jobs', 'activity'] as Tab[]).map(t => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -189,16 +203,23 @@ export function NotificationsPopover() {
           <div className="max-h-[28rem] overflow-y-auto">
             {nothingToShow && (
               <p className="p-4 text-sm text-muted-foreground text-center">
-                {tab === 'alerts' ? "No alerts" : tab === 'activity' ? "No recent activity" : "No notifications"}
+                {tab === 'alerts' ? "No alerts" : tab === 'jobs' ? "No background jobs" : tab === 'activity' ? "No recent activity" : "No notifications"}
               </p>
             )}
 
             {showPriority && (
               <>
-                <div className="px-3 py-1.5">
+                <div className="px-3 py-1.5 flex items-center justify-between gap-2">
                   <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-red-400/80">
                     Needs Attention
                   </p>
+                  <button
+                    onClick={dismissAll}
+                    className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06]"
+                    title="Dismiss all current alerts"
+                  >
+                    Clear
+                  </button>
                 </div>
                 {data!.priority.map(n => (
                   <div key={n.id} className="flex items-start gap-3 p-3 border-b border-white/5 last:border-0">

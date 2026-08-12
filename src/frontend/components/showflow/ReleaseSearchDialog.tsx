@@ -110,7 +110,7 @@ interface ReleaseSearchDialogProps {
   showTitle: string;
   season: number;
   episode?: number;
-  onGrabbed?: (message: string) => void;
+  onGrabbed?: (message: string, success: boolean) => void;
   autoCloseOnSuccess?: boolean;
 }
 
@@ -221,9 +221,9 @@ function ReleaseSearchDialog({
           setTimeout(() => onOpenChange(false), 350);
         }
       }
-      onGrabbed?.(message);
+      onGrabbed?.(message, !!data.success);
     } catch (err: any) {
-      onGrabbed?.(err.message ?? "Grab failed");
+      onGrabbed?.(err.message ?? "Grab failed", false);
     } finally {
       setGrabbingGuid(null);
     }

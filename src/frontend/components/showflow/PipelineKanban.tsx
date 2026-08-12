@@ -558,8 +558,8 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
           showTitle={searchTarget.showTitle}
           season={searchTarget.seasonNumber}
           episode={searchTarget.episodeNumber}
-          onGrabbed={(message) => {
-            setGrabMsg({ ok: !message.toLowerCase().includes("fail"), text: message });
+          onGrabbed={(message, success) => {
+            setGrabMsg({ ok: success, text: message });
             setGrabbedKeys(prev => new Set(prev).add(epKey(searchTarget)));
           }}
         />

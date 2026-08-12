@@ -868,8 +868,8 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           showTitle={show.title}
           season={searchTarget.season}
           episode={searchTarget.episode}
-          onGrabbed={(message) => {
-            flashStatus(message, /grabbed/i.test(message));
+          onGrabbed={(message, success) => {
+            flashStatus(message, success);
             loadEpisodes();
           }}
           autoCloseOnSuccess
