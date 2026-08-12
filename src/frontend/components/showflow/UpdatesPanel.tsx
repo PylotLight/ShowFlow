@@ -46,10 +46,33 @@ export function UpdatesPanel() {
   const [reconnectAttempt, setReconnectAttempt] = React.useState(0);
   const pageRef = React.useRef(1);
   const pollTimerRef = React.useRef<any>(null);
+  const pollDelayRef = React.useRef(3000);
   const reconnectTimerRef = React.useRef<any>(null);
 
   function headers(): Record<string, string> {
     return { Authorization: `Bearer ${token ?? tokenRef.current}` };
+  }
+
+  // Adaptive live-poll for the "Track Build" loop. The backend caches GitHub
+  // responses, so polling our own /api is cheap — but we still stretch the
+  // interval (3s -> 5.4s -> 9.7s ... capped at 30s) via a self-rescheduling
+  // timer, keeping total request volume low.
+  function startBuildPoll() {
+    stopBuildPoll();
+    const tick = () => {
+      fetchAll(true);
+      pollDelayRef.current = Math.min(pollDelayRef.current * 1.8, 30_000);
+      pollTimerRef.current = setTimeout(tick, pollDelayRef.current);
+    };
+    pollTimerRef.current = setTimeout(tick, pollDelayRef.current);
+  }
+
+  function stopBuildPoll() {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    pollDelayRef.current = 3000;
   }
 
   function fetchAll(quiet = false) {
@@ -73,12 +96,7 @@ export function UpdatesPanel() {
           setCurrentStep(1);
           setStepStatus("running");
           setStepMessage(`CI build in progress for ${buildingRelease.tagName}. Tracking GitHub Actions workflow...`);
-          
-          if (!pollTimerRef.current) {
-            pollTimerRef.current = setInterval(() => {
-              fetchAll(true);
-            }, 3000);
-          }
+          startBuildPoll();
         }
 
         // If watching a release build in progress, update step state
@@ -88,17 +106,11 @@ export function UpdatesPanel() {
             if (target.hasRequiredAssets) {
               setStepStatus("success");
               setStepMessage(`Release ${target.tagName} assets ready! Click "Update to ${target.tagName}" below.`);
-              if (pollTimerRef.current) {
-                clearInterval(pollTimerRef.current);
-                pollTimerRef.current = null;
-              }
+              stopBuildPoll();
             } else if (!target.buildInProgress) {
               setStepStatus("error");
               setStepMessage("CI build completed but missing required showflow tarball asset.");
-              if (pollTimerRef.current) {
-                clearInterval(pollTimerRef.current);
-                pollTimerRef.current = null;
-              }
+              stopBuildPoll();
             } else {
               const runName = target.buildDetails?.name ?? "Build";
               const dur = target.buildDetails?.durationSeconds ? `${target.buildDetails.durationSeconds}s` : "running";
@@ -198,11 +210,7 @@ export function UpdatesPanel() {
     setCurrentStep(1);
     setStepStatus("running");
     setStepMessage("Watching CI build & asset generation on GitHub Actions...");
-    
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    pollTimerRef.current = setInterval(() => {
-      fetchAll(true);
-    }, 3000);
+    startBuildPoll();
   }
 
   async function doInstall(githubReleaseId: number, tagName: string) {
@@ -558,7 +566,7 @@ export function UpdatesPanel() {
                           {build ? `Actions Run "${build.name}": status is ${build.status} (${build.durationSeconds ?? 0}s elapsed)` : "Monitoring GitHub Actions release workflow..."}
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono text-sky-400/80">Polling live every 3s</span>
+                      <span className="text-[10px] font-mono text-sky-400/80">Polling live · {Math.round(pollDelayRef.current / 1000)}s</span>
                     </div>
                   )}
                 </div>

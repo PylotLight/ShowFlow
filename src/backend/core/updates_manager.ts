@@ -25,6 +25,65 @@ import { mkdir } from "node:fs/promises";
 
 const GITHUB_API = "https://api.github.com";
 
+// GitHub's *unauthenticated* API budget is 60 req/hr per IP. The Updates
+// panel polls the releases list every few seconds, so without a cache a
+// single "Track Build" session burns the whole budget in minutes and every
+// subsequent poll gets a 429. We cache raw responses with a TTL that's
+// generous for unauthenticated calls and tight when a token is configured.
+const RELEASE_LIST_TTL_UNAUTHED_MS = 90_000;
+const RELEASE_LIST_TTL_AUTHED_MS = 15_000;
+const BUILD_DETAIL_TTL_UNAUTHED_MS = 90_000;
+const BUILD_DETAIL_TTL_AUTHED_MS = 15_000;
+/** When GitHub reports this few requests remaining, stop hammering and let
+ *  the cache go stale rather than exhaust the quota mid-build. */
+const RATE_LIMIT_SAFETY_FLOOR = 10;
+/** How long to hold cache entries after hitting the safety floor. */
+const RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000;
+
+interface CacheEntry {
+  value: unknown;
+  expiresAt: number;
+}
+
+const responseCache = new Map<string, CacheEntry>();
+
+function cacheGet<T>(key: string): T | undefined {
+  const entry = responseCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    responseCache.delete(key);
+    return undefined;
+  }
+  return entry.value as T;
+}
+
+function cacheSet(key: string, value: unknown, ttlMs: number): void {
+  responseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+/** Applies the GitHub quota-cooldown to every cache key sharing a repo+token
+ *  bucket, so one exhausted response backs the whole panel off at once. */
+function applyRateLimitCooldown(): void {
+  const until = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  for (const entry of responseCache.values()) {
+    if (entry.expiresAt < until) entry.expiresAt = until;
+  }
+}
+
+function ttlFor(token: string | undefined, authedTtl: number, unauthTtl: number): number {
+  return token ? authedTtl : unauthTtl;
+}
+
+function rateLimited(res: Response): boolean {
+  const remaining = Number(res.headers.get("x-ratelimit-remaining") ?? "");
+  if (Number.isFinite(remaining) && remaining >= 0 && remaining < RATE_LIMIT_SAFETY_FLOOR) {
+    console.warn(`[updates] GitHub rate limit nearly exhausted (${remaining} remaining) — cooling down cache for 10 min`);
+    applyRateLimitCooldown();
+    return true;
+  }
+  return false;
+}
+
 // Matches the supervisor's own defaults exactly (supervisor/state.ts) — the
 // app and the supervisor are two processes sharing the same /data PVC
 // inside one pod, so both must agree on this path without any IPC beyond
@@ -93,12 +152,22 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
     // GITHUB_REPO not set — local/dev deployment without GitHub integration
     return { releases: [], hasMore: false };
   }
+
+  // Serve from cache when fresh — the Updates panel polls every few seconds
+  // and GitHub's unauthenticated quota (60/hr) cannot survive that.
+  const cacheKey = `releases:${repo}:${token ? 'auth' : 'unauth'}:${page}`;
+  const ttl = ttlFor(token, RELEASE_LIST_TTL_AUTHED_MS, RELEASE_LIST_TTL_UNAUTHED_MS);
+  const cached = cacheGet<{ releases: ReleaseSummary[]; hasMore: boolean }>(cacheKey);
+  if (cached) return cached;
+
   const res = await fetch(`${GITHUB_API}/repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`, {
     headers: githubHeaders(token),
   });
   if (!res.ok) {
+    if (res.status === 429) rateLimited(res);
     throw new Error(`GitHub releases API returned ${res.status}: ${await res.text()}`);
   }
+  rateLimited(res);
   const raw = (await res.json()) as any[];
 
   const releases = await Promise.all(
@@ -107,7 +176,7 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
       .map(async (r): Promise<ReleaseSummary> => {
         const assets = (r.assets ?? []) as any[];
         const hasTarball = assets.some((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
-        const build = hasTarball ? null : await fetchBuildDetails(token, repo, r.tag_name);
+        const build = hasTarball ? null : await fetchBuildDetailsCached(token, repo, r.tag_name);
         const inProgress = build?.status === "in_progress" || build?.status === "queued" || build?.status === "requested";
 
         return {
@@ -125,7 +194,24 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
       }),
   );
 
-  return { releases, hasMore: raw.length === RELEASES_PER_PAGE };
+  const result = { releases, hasMore: raw.length === RELEASES_PER_PAGE };
+  cacheSet(cacheKey, result, ttl);
+  return result;
+}
+
+/**
+ * `fetchBuildDetails` behind the same TTL cache, so a "Track Build" poll
+ * loop that re-lists releases doesn't re-hit the Actions API every 3s.
+ */
+async function fetchBuildDetailsCached(token: string | undefined, repo: string, tagName: string): Promise<BuildDetails | null> {
+  const cacheKey = `build:${repo}:${token ? 'auth' : 'unauth'}:${tagName}`;
+  const ttl = ttlFor(token, BUILD_DETAIL_TTL_AUTHED_MS, BUILD_DETAIL_TTL_UNAUTHED_MS);
+  const cached = cacheGet<BuildDetails | null>(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const build = await fetchBuildDetails(token, repo, tagName);
+  cacheSet(cacheKey, build, ttl);
+  return build;
 }
 
 /**
