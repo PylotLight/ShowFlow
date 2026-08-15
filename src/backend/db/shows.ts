@@ -850,6 +850,7 @@ export function listUpcomingEpisodes(self: DatabaseManager, futureDays: number, 
     .from(schema.episodes)
     .leftJoin(schema.shows, eq(schema.episodes.show_id, schema.shows.id))
     .where(and(
+      eq(schema.episodes.is_tracked, 1),
       sql`${schema.episodes.air_date} IS NOT NULL`,
       sql`${schema.episodes.air_date} >= ${start}`,
       sql`${schema.episodes.air_date} <= ${end}`,
