@@ -28,7 +28,15 @@ import {
 } from "./state";
 import { ensureDataDirs, ensureBootstrapInstalled } from "./bootstrap";
 import { ReleaseManager } from "./activate";
-import { proxy, unavailableResponse } from "./proxy";
+import {
+  proxy,
+  unavailableResponse,
+  isWebSocketUpgrade,
+  attemptWebSocketUpgrade,
+  openDebugBridge,
+  forwardDebugMessage,
+  closeDebugBridge,
+} from "./proxy";
 
 const args = process.argv.slice(2);
 
@@ -114,17 +122,30 @@ async function runDaemon(): Promise<void> {
   // Public proxy — every request while not `stable` gets an explicit 503
   // rather than hanging or erroring, per the design decision to prefer a
   // real (short) outage window over a design that pretends there's zero
-  // downtime during cutover.
+  // downtime during cutover. WebSocket upgrades are intercepted before the
+  // fetch() proxy and bridged through to the active app instead, so the
+  // debug console's live log keeps working inside the pod.
   const publicServer = Bun.serve({
     port: PUBLIC_PORT,
-    async fetch(req) {
+    async fetch(req, server) {
       const port = manager.activePort;
       if (port === null) return unavailableResponse();
+
+      if (isWebSocketUpgrade(req)) {
+        if (attemptWebSocketUpgrade(req, server as any, port)) return;
+        return new Response("Upgrade failed", { status: 400 });
+      }
+
       try {
         return await proxy(req, port);
       } catch {
         return unavailableResponse();
       }
+    },
+    websocket: {
+      open(ws) { openDebugBridge(ws as any); },
+      message(ws, message) { forwardDebugMessage(ws as any, message as any); },
+      close(ws, code, reason) { closeDebugBridge(ws as any, code, reason); },
     },
   });
 

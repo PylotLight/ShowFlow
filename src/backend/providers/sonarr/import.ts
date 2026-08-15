@@ -296,7 +296,30 @@ export class SonarrImporter {
           absoluteNumber: ep.absoluteEpisodeNumber ?? undefined,
           title: ep.title ?? undefined,
           filePath: ep.episodeFile?.path ?? undefined,
+          airDate: ep.airDateUtc ?? ep.airDate ?? undefined,
         });
+
+        // Record on-disk provenance when Sonarr already has the file stored.
+        // Sonarr's sceneName is the original release title; prefer it for the
+        // release display, and stash the file size + date added alongside.
+        if (ep.episodeFile?.path) {
+          try {
+            db.recordEpisodeFile({
+              showId: showUuid,
+              season: ep.seasonNumber,
+              episode: ep.episodeNumber,
+              filePath: ep.episodeFile.path,
+              originalName: ep.episodeFile.path.split(/[\\/]/).pop() ?? ep.episodeFile.path,
+              fileSize: ep.episodeFile.size ?? null,
+              sourceKind: ep.episodeFile.sceneName ? 'release' : 'import',
+              releaseTitle: ep.episodeFile.sceneName ?? null,
+              indexerName: null,
+              publishDate: ep.episodeFile.dateAdded ?? null,
+            });
+          } catch (err) {
+            console.warn(`[sonarr-import] Failed to record provenance for ${showUuid} S${ep.seasonNumber}E${ep.episodeNumber}:`, err);
+          }
+        }
 
         // Set tracked state from Sonarr's monitored flag
         if (ep.monitored) {

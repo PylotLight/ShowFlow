@@ -1,7 +1,19 @@
-import { Check, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchIcon } from "lucide-react";
+import { Check, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchIcon, Info, Clock } from "lucide-react";
 import * as React from "react";
 
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
+import { expectedReleaseTime, formatFileSize, formatImportDate } from "@frontend/lib/airtime";
+
+export interface EpisodeFileInfo {
+  path?: string | null;
+  name?: string | null;
+  size?: number | null;
+  sourceKind?: string | null;
+  releaseTitle?: string | null;
+  indexerName?: string | null;
+  publishDate?: string | null;
+  importedAt?: string | null;
+}
 
 export interface EpisodeData {
   season: number;
@@ -10,6 +22,9 @@ export interface EpisodeData {
   filePath?: string;
   tracked: boolean;
   airDate?: string | null;
+  airTime?: string | null;
+  expectedReleaseAt?: string | null;
+  file?: EpisodeFileInfo | null;
   searchMode?: 'auto' | 'interactive';
 }
 
@@ -24,6 +39,78 @@ function formatAirTime(airDate: string) {
   const d = new Date(airDate);
   if (isNaN(d.getTime())) return null;
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+/** Entry-row detail popover: granular "what file + which release" for an
+ *  episode. Hover/click the info glyph in the row. */
+function InfoPopover({ episode }: { episode: EpisodeData }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const rel = episode.file?.releaseTitle ?? episode.file?.name;
+  const release = episode.file;
+  const expected = expectedReleaseTime(episode.expectedReleaseAt, episode.airDate);
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        aria-label="File and release details"
+        title="File & release details"
+        className="text-muted-foreground/40 hover:text-white/80 transition-colors p-0.5"
+      >
+        <Info className="size-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 z-40 w-72 rounded-lg border border-white/10 bg-[#15181f] shadow-2xl shadow-black/50 p-3 text-left animate-fade-in">
+          <div className="font-mono text-[9px] font-bold uppercase tracking-widest text-signal mb-2">
+            // Release provenance
+          </div>
+          {rel ? (
+            <div className="space-y-1.5">
+              <Detail label="Release" value={rel} />
+              {release?.sourceKind && <Detail label="Source" value={release.sourceKind} />}
+              {release?.indexerName && <Detail label="Indexer" value={release.indexerName} />}
+              {release?.publishDate && <Detail label="Published" value={formatImportDate(release.publishDate)} />}
+              {release?.importedAt && <Detail label="Imported" value={formatImportDate(release.importedAt)} />}
+              {release?.size != null && <Detail label="Size" value={formatFileSize(release.size)} />}
+              {release?.path && <Detail label="Path" value={release.path} mono />}
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {episode.filePath ? episode.filePath : "No file stored for this episode yet."}
+            </div>
+          )}
+          {expected && !rel && (
+            <div className="mt-2 flex items-center gap-1.5 border-t border-white/5 pt-2 text-[11px] text-signal/80">
+              <Clock className="size-3" /> Expected release {expected}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3 text-xs">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className={`text-white/85 text-right break-all ${mono ? "font-mono text-[10px]" : "font-medium"}`} title={value}>
+        {value}
+      </span>
+    </div>
+  );
 }
 
 function EpisodeRow({
@@ -97,7 +184,7 @@ function EpisodeRow({
             ? (() => {
                 const d = new Date(episode.airDate);
                 const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-                const time = formatAirTime(episode.airDate);
+                const time = expectedReleaseTime(episode.expectedReleaseAt, episode.airDate) ?? formatAirTime(episode.airDate);
                 return time ? `${date} ${time}` : date;
               })()
             : '—'}
@@ -111,10 +198,13 @@ function EpisodeRow({
 
       {/* Status */}
       {showStatus && (
-        <span className={`font-mono text-caption uppercase tracking-wider whitespace-nowrap ${
-          available ? "text-signal/70" : "text-muted-foreground/50"
-        }`}>
-          {available ? "Available" : "Missing"}
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <span className={`font-mono text-caption uppercase tracking-wider ${
+            available ? "text-signal/70" : "text-muted-foreground/50"
+          }`}>
+            {available ? "Available" : "Missing"}
+          </span>
+          <InfoPopover episode={episode} />
         </span>
       )}
 

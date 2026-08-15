@@ -693,6 +693,35 @@ export class BlackholeClient implements DownloadClient {
         });
       }
 
+      // Record on-disk provenance for each episode this file maps to: which
+      // release it came from (grabbed) vs. a direct drop without a grab.
+      // Attach the matching grab's release title/indexer/publish date so the
+      // show detail page and dashboard can show exactly what's stored.
+      for (const ep of episodes) {
+        try {
+          const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);
+          let fileSize: number | null = null;
+          try {
+            const st = await stat(movedTo);
+            fileSize = st.size;
+          } catch {}
+          db.recordEpisodeFile({
+            showId,
+            season: ep.season,
+            episode: ep.episode,
+            filePath: movedTo,
+            originalName: filename,
+            fileSize,
+            sourceKind: grab ? 'release' : 'import',
+            releaseTitle: grab?.release_title ?? null,
+            indexerName: grab?.indexer_name ?? null,
+            publishDate: grab?.publish_date ?? null,
+          });
+        } catch (err) {
+          console.warn(`[${this.name}] Failed to record provenance for ${filename}:`, err);
+        }
+      }
+
       for (const ep of episodes) {
         db.logPipelineEvent({
           showId, seasonNumber: ep.season, episodeNumber: ep.episode,

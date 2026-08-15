@@ -1,5 +1,5 @@
 import {
-  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw, Menu,
+  CheckIcon, Scan, Activity, ChevronRight, RotateCcw, RefreshCw, Menu, Clock,
 } from "lucide-react";
 import * as React from "react";
 
@@ -11,6 +11,7 @@ import type { ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
+import { expectedReleaseTime, formatDelayMinutes } from "@frontend/lib/airtime";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -19,11 +20,7 @@ interface UpcomingEpisode {
   episode: number;
   airDate: string;
   filePath: string | null;
-}
-
-function isDateOnly(airDate: string): boolean {
-  const d = new Date(airDate);
-  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+  expectedReleaseAt?: string | null;
 }
 
 function formatAirTime(airDate: string) {
@@ -31,6 +28,12 @@ function formatAirTime(airDate: string) {
   const d = new Date(airDate);
   if (isNaN(d.getTime())) return null;
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+/** Clock chip label: prefer the learned/forecast release time when the air
+ *  date carries no time, otherwise fall back to the defined air time. */
+function clockLabel(ep: UpcomingEpisode): string | null {
+  return expectedReleaseTime(ep.expectedReleaseAt, ep.airDate);
 }
 
 function getLocalDateKey(airDate: string): string {
@@ -59,16 +62,21 @@ function getCompactDate(airDate: string): string {
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  const time = formatAirTime(airDate);
-  const timeStr = time ? ` ${time}` : "";
-
-  if (diffDays === 0) return `Today${timeStr}`;
-  if (diffDays === -1) return `Yesterday${timeStr}`;
-  if (diffDays === 1) return `Tomorrow${timeStr}`;
+  if (diffDays === 0) return `Today`;
+  if (diffDays === -1) return `Yesterday`;
+  if (diffDays === 1) return `Tomorrow`;
 
   const label = target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  if (time) return `${label}${timeStr}`;
   return label;
+}
+
+/** Visual accent for a day-group header so Today/Tomorrow/past days read
+ *  instantly, and the rest of the week still stands out as distinct bands. */
+function getDayAccent(label: string): { border: string; dot: string; text: string; chip: string } {
+  if (label === "Today") return { border: "border-l-signal/70", dot: "bg-signal", text: "text-signal", chip: "bg-signal/10 text-signal" };
+  if (label === "Tomorrow") return { border: "border-l-accent-amber/70", dot: "bg-accent-amber", text: "text-accent-amber", chip: "bg-accent-amber/10 text-accent-amber" };
+  if (label === "Yesterday" || label.endsWith(" days ago")) return { border: "border-l-white/15", dot: "bg-white/30", text: "text-white/45", chip: "bg-white/5 text-white/40" };
+  return { border: "border-l-white/30", dot: "bg-white/50", text: "text-white/90", chip: "bg-white/5 text-white/60" };
 }
 
 function isPast(airDate: string): boolean {
@@ -89,6 +97,12 @@ function getRowProximity(airDate: string): { color: string; dot: string } {
   if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
   if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
   return { color: "text-white/50", dot: "bg-white/30" };
+}
+
+/** Basis timestamp for any "when" logic - the learned release forecast wins
+ *  over the raw air date, so dashboards show true expected availability. */
+function whenBasis(ep: UpcomingEpisode): string {
+  return ep.expectedReleaseAt || ep.airDate;
 }
 
 function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, onMetadata }: {
@@ -442,17 +456,28 @@ function Dashboard({
                     className="space-y-0.5 animate-fade-in"
                     style={{ animationDelay: `${gi * 60}ms` }}
                   >
-                    <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/30 border-b border-white/5 pb-1 mb-1">
-                      {group.label}
-                    </h3>
+                    {(() => {
+                      const accent = getDayAccent(group.label);
+                      return (
+                        <div className={cn("mb-1.5 flex items-center gap-2 border-l-2 rounded-r-md bg-white/[0.03] px-3 py-2", accent.border)}>
+                          <span className={cn("size-2 rounded-full shrink-0", accent.dot)} />
+                          <h3 className={cn("font-display text-[15px] font-bold leading-none tracking-tight", accent.text)}>
+                            {group.label}
+                          </h3>
+                          <span className="ml-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {group.items.length} ep
+                          </span>
+                        </div>
+                      );
+                    })()}
                     {(() => {
                       const isToday = group.label === "Today";
-                      const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(ep.airDate)) : -1;
+                      const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(whenBasis(ep))) : -1;
                       const hasNowLine = nowLineIdx > 0;
                       return group.items.map((ep, i) => {
                       const showObj = getMatchingShow(ep.showTitle);
-                      const prox = getRowProximity(ep.airDate);
-                      const time = formatAirTime(ep.airDate);
+                      const prox = getRowProximity(whenBasis(ep));
+                      const time = clockLabel(ep);
                       return (
                         <React.Fragment key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}>
                           {hasNowLine && i === nowLineIdx && (
@@ -508,6 +533,12 @@ function Dashboard({
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />
                                 Available
+                              </span>
+                            )}
+                            {time && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.05] border border-white/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-signal shrink-0">
+                                <Clock className="size-3" strokeWidth={2.25} />
+                                {time}
                               </span>
                             )}
                             <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">

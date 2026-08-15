@@ -14,6 +14,14 @@ export const shows = sqliteTable('shows', {
   title: text('title').notNull(),
   original_title: text('original_title'),
   year: integer('year'),
+  /**
+   * Learned offset (minutes) between an episode's expected air datetime and
+   * when a release actually first appears on indexers, based on the show's
+   * historical grads (grabbed_releases.publish_date vs the episode's air
+   * datetime). Null until enough evidence exists; expected_release_at on
+   * episodes falls back to a sensible default (<<~45 min) for unaired shows.
+   */
+  release_delay_minutes: integer('release_delay_minutes'),
   // --- Legacy columns (pre-Library-Type model) ---
   // Kept and still written to during the migration window described in
   // docs/design-brief-platform-ux-systems.md §1 - `library_type_id` below is
@@ -160,6 +168,21 @@ export const episodes = sqliteTable('episodes', {
   file_path: text('file_path'),
   is_tracked: integer('is_tracked').default(0),
   air_date: text('air_date'),
+  /**
+   * Time-of-day (HH:MM) the episode is scheduled to air, captured from the
+   * airtime provider (TVDB airsTime, AniList airingAt) when available. The
+   * legacy air_date column often holds a date-only value from TMDB; combining
+   * this with air_date gives the "air window" start for release forecasting.
+   */
+  air_time: text('air_time'),
+  /**
+   * ISO timestamp for when this episode's release is *expected* to be
+   * available on indexers. Computed as the air datetime plus the show's
+   * learned release delay (see shows.release_delay_minutes, default ~45 min).
+   * When the actual release publish date is observed at grab time this gets
+   * overwritten with the real publish time.
+   */
+  expected_release_at: text('expected_release_at'),
   search_mode: text('search_mode').default('auto'),
   last_updated: text('last_updated').default(sql`(datetime('now'))`),
 }, (table) => ({
@@ -194,6 +217,7 @@ export const showsRelations = relations(shows, ({ many }) => ({
   titles: many(showTitles),
   seasons: many(seasons),
   episodes: many(episodes),
+  episodeFiles: many(episodeFiles),
   artworks: many(showArtworks),
 }));
 
@@ -242,10 +266,70 @@ export const grabbedReleases = sqliteTable('grabbed_releases', {
   release_title: text('release_title').notNull(),
   normalized_title: text('normalized_title').notNull(),
   indexer_name: text('indexer_name'),
+  /**
+   * ISO timestamp of when the indexer actually published this release. Used
+   * both for provenance display (feature: file/release details) and to learn
+   * each show's typical release delay after airing (air window forecasting).
+   */
+  publish_date: text('publish_date'),
   grabbed_at: text('grabbed_at').default(sql`(datetime('now'))`),
 }, (table) => ({
   releaseTitleIndex: index('idx_grabbed_releases_title').on(table.normalized_title),
   showIndex: index('idx_grabbed_releases_show').on(table.show_id),
+}));
+
+// ---- On-disk files (provenance) ------------------------------------------
+//
+// What's actually stored for each episode and which release it came from
+// (vs. a file imported directly into the watch folder with no grab). Powers
+// the "available" detail on the show detail page and the dashboard, so users
+// can see the granular stored file / release instead of just a green dot.
+//
+// Appended on every import (one row per episode a file maps to - a season
+// pack writes N rows), so a file can be re-tracked across upgrades. The most
+// recent row per (show, season, episode) with is_current=1 is the live file;
+// older rows remain as history.
+export const episodeFiles = sqliteTable('episode_files', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  show_id: text('show_id')
+    .notNull()
+    .references(() => shows.id, { onDelete: 'cascade' }),
+  season_number: integer('season_number').notNull(),
+  episode_number: integer('episode_number').notNull(),
+  /** The on-disk path ShowFlow itself stored to (final path the file was
+   *  moved/renamed into, e.g. inside the show's library root folder). */
+  file_path: text('file_path').notNull(),
+  /** Original basename the file carried when it entered the pipeline (before
+   *  ShowFlow renames it into the library). This is also the release title for
+   *  a direct import. */
+  original_name: text('original_name').notNull(),
+  /** Size of the file in bytes at import time. */
+  file_size: integer('file_size'),
+  /** 'release' = was grabbed from an indexer (release_title/indexer set);
+   *  'import' = placed/dropped directly into the pipeline with no grab. */
+  source_kind: text('source_kind').default('import'),
+  /** Release title this file came from (indexer-provided for grabs; the
+   *  original filename for direct imports). Null for unknown. */
+  release_title: text('release_title'),
+  /** Indexer (Prowlarr/Native) name that supplied a grabbed release. */
+  indexer_name: text('indexer_name'),
+  /** publishDate of the release at grab time (indexer-derived). */
+  publish_date: text('publish_date'),
+  /** When the file was imported/moved into the library. */
+  imported_at: text('imported_at').default(sql`(datetime('now'))`),
+  /** 1 for the live file, 0 for superseded history rows. */
+  is_current: integer('is_current').default(1),
+}, (table) => ({
+  showIndex: index('idx_episode_files_show').on(table.show_id),
+  episodeIndex: index('idx_episode_files_episode').on(table.show_id, table.season_number, table.episode_number),
+  currentIndex: index('idx_episode_files_current').on(table.is_current),
+}));
+
+export const episodeFilesRelations = relations(episodeFiles, ({ one }) => ({
+  show: one(shows, {
+    fields: [episodeFiles.show_id],
+    references: [shows.id],
+  }),
 }));
 
 // ---- Metadata cache ----

@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -7,6 +7,7 @@ import { ManageSourcesDialog } from "@frontend/components/showflow/ManageSources
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
+import { formatDelayMinutes } from "@frontend/lib/airtime";
 
 
 interface SeasonStat {
@@ -73,6 +74,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [rootFolderPath, setRootFolderPath] = React.useState<string | null>(null);
   const [rootFolderSaving, setRootFolderSaving] = React.useState(false);
   const [seriesType, setSeriesType] = React.useState<string>("standard");
+  const [releaseDelayMinutes, setReleaseDelayMinutes] = React.useState<number | null>(null);
 
   const [manageSourcesOpen, setManageSourcesOpen] = React.useState(false);
   const [searchTarget, setSearchTarget] = React.useState<SearchTarget | null>(null);
@@ -108,6 +110,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     fetch(`/api/shows/${show.id}`).then(r => r.json()).then(data => {
       const resolvedType = data.seriesType ?? data.config?.seriesType ?? (show.providerType === 'anilist' ? 'anime' : 'standard');
       setSeriesType(resolvedType);
+      setReleaseDelayMinutes(data.releaseDelayMinutes ?? null);
       if (data.rootFolderPath) {
         setRootFolderPath(data.rootFolderPath);
       }
@@ -590,6 +593,15 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
                   <span>{seasons.length} season{seasons.length !== 1 ? "s" : ""}</span>
                   <span className="text-white/15">·</span>
                   <span>{seasons.reduce((a, s) => a + s.episodeCount, 0)} episodes</span>
+                </>
+              )}
+              {releaseDelayMinutes != null && (
+                <>
+                  <span className="text-white/15">·</span>
+                  <span className="inline-flex items-center gap-1 text-accent-amber/90" title="Learned release delay: expected minutes after air time that releases typically appear for this show">
+                    <Clock className="size-3" />
+                    releases ~{formatDelayMinutes(releaseDelayMinutes)} after air
+                  </span>
                 </>
               )}
             </div>

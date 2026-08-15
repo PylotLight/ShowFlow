@@ -7,6 +7,7 @@ import { NATIVE_INDEXER_META } from '../providers/indexers/native/types';
 import { qualityEngine, type ReleaseScore } from './quality_engine';
 import { debugLog, logDebug } from './debug';
 import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
+import { reconcileShowAirWindows } from './air_window';
 
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'is', 'it', 'its']);
 
@@ -348,7 +349,17 @@ export class GrabberService {
           episode: context.episode ?? null,
           releaseTitle: release.title,
           indexerName: release.indexer.name,
+          publishDate: release.publishDate ?? null,
         });
+        // Observe the real publish date -> tighten this show's air-window
+        // forecast. Non-fatal: the grab itself already succeeded.
+        try {
+          reconcileShowAirWindows(context.showId, false);
+        } catch (err) {
+          debugLog('Air-window reconcile after grab failed (non-fatal)', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } catch (err) {
         debugLog('Failed to record grabbed release (non-fatal)', {
           error: err instanceof Error ? err.message : String(err),

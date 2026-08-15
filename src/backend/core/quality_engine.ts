@@ -3,34 +3,56 @@ import type { ReasonCode } from './pipeline/reason_codes';
 
 /** Common technical tags always extracted from filenames regardless of
  *  profile configuration. These keep the tag display comprehensive even
- *  when no matching custom format has been added to the profile yet. */
-const COMMON_TAGS: { name: string; patterns: string[] }[] = [
-  { name: 'HDR', patterns: ['hdr'] },
-  { name: 'DV', patterns: ['dolby vision', 'dolbyvision', 'dv'] },
-  { name: 'HDR10+', patterns: ['hdr10+', 'hdr10plus'] },
-  { name: 'HLG', patterns: ['hlg'] },
-  { name: 'x265', patterns: ['x265'] },
-  { name: 'x264', patterns: ['x264'] },
-  { name: 'HEVC', patterns: ['hevc'] },
-  { name: 'AV1', patterns: ['av1'] },
-  { name: 'VP9', patterns: ['vp9'] },
-  { name: '10bit', patterns: ['10bit', '10-bit'] },
-  { name: 'TrueHD', patterns: ['truehd'] },
-  { name: 'DTS', patterns: ['dts'] },
-  { name: 'Atmos', patterns: ['atmos'] },
-  { name: 'FLAC', patterns: ['flac'] },
-  { name: 'AAC', patterns: ['aac'] },
-  { name: 'Repack', patterns: ['repack'] },
-  { name: 'Proper', patterns: ['proper'] },
-  { name: 'Remux', patterns: ['remux'] },
-  { name: 'Internal', patterns: ['internal'] },
+ *  when no matching custom format has been added to the profile yet.
+ *
+ *  Matching is by word-boundary regex rather than plain substring so that
+ *  real-world release names parse correctly:
+ *    - "H.265" / "H 265" / "h265" all read as HEVC (previously only
+ *      "x265"/"hevc" matched, so "…AAC2.0 H.265" releases lost their codec)
+ *    - "DV" doesn't trip on "DVD", "HDR" doesn't match mid-word hashes, and
+ *      tags inside brackets/groups like "[WEB.1080p.AV1]" are still found.
+ */
+const COMMON_TAGS: { name: string; patterns: RegExp[] }[] = [
+  // ---- HDR / vision ------------------------------------------------------
+  { name: 'HDR10+', patterns: [/\bhdr10\+?\b/i, /\bhdr[ ._-]?10plus\b/i] },
+  { name: 'DV', patterns: [/\bdolby[\s._-]?vision\b/i, /\bhdr(?:\s?[\d.]+)?\s?dv\b/i, /\bdv\b/i] },
+  { name: 'HLG', patterns: [/\bhlg\b/i] },
+  { name: 'HDR', patterns: [/\bhdr[\s._-]?(?:\d{2}[._]?)?\b/i] },
+  // ---- Video codecs ------------------------------------------------------
+  { name: 'H.265', patterns: [/\bh[\s._-]?265\b/i] },
+  { name: 'x265', patterns: [/\bx26?5\b/i, /\bx265\b/i] },
+  { name: 'HEVC', patterns: [/\bhevc\b/i] },
+  { name: 'H.264', patterns: [/\bh[\s._-]?264\b/i] },
+  { name: 'x264', patterns: [/\bx264\b/i] },
+  { name: 'AV1', patterns: [/\bav1(?:\.[\d.]*)?\b/i, /\bav01\b/i] },
+  { name: 'VP9', patterns: [/\bvp9\b/i] },
+  { name: '10bit', patterns: [/\b10[\s._-]?bits?\b/i, /\b10bit\b/i] },
+  // ---- Audio codecs ------------------------------------------------------
+  { name: 'TrueHD', patterns: [/\btruehd\b/i] },
+  { name: 'DTS', patterns: [/\bdts[\s._-]?hd(?:\sma)?\b/i, /\bdtsx\b/i, /\bdts[\s._-]?\d+(?:\.\d+)?\b/i, /\bdts\b/i] },
+  { name: 'Atmos', patterns: [/\batmos\b/i] },
+  { name: 'FLAC', patterns: [/\bflac\b/i] },
+  { name: 'AAC', patterns: [/\baac(?:\d+(?:\.\d+)?)?\b/i] },
+  { name: 'AC3', patterns: [/\bac-?3\b/i, /\bddp\b/i, /\beatmos\b/i] },
+  // ---- Source types ------------------------------------------------------
+  { name: 'Web-DL', patterns: [/\bweb[\s._-]?dl\b/i] },
+  { name: 'WebRip', patterns: [/\bweb[\s._-]?rips?\b/i] },
+  { name: 'BluRay', patterns: [/\bblu[\s._-]?rays?\b/i, /\bbdrip\b/i] },
+  { name: 'HDTV', patterns: [/\bhdtv\b/i, /\bdsr\b/i, /\bdvb\b/i] },
+  // ---- General -----------------------------------------------------------
+  { name: 'Repack', patterns: [/\brepack\b/i] },
+  { name: 'Proper', patterns: [/\bproper\b/i] },
+  { name: 'Remux', patterns: [/\bremux\b/i] },
+  { name: 'Internal', patterns: [/\binternal\b/i] },
+  { name: 'Multi-Subs', patterns: [/\bmulti[\s._-]?(?:subs?|subtitle|language)\b/i] },
 ];
 
 function scanCommonTags(filename: string): string[] {
-  const lower = filename.toLowerCase();
-  return COMMON_TAGS
-    .filter(t => t.patterns.some(p => lower.includes(p)))
-    .map(t => t.name);
+  const matched: string[] = [];
+  for (const tag of COMMON_TAGS) {
+    if (tag.patterns.some(p => p.test(filename))) matched.push(tag.name);
+  }
+  return matched;
 }
 
 export interface ReleaseScore {

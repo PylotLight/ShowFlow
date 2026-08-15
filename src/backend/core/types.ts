@@ -78,6 +78,11 @@ export const EpisodeSchema = z.object({
   absoluteNumber: z.number().optional(),
   title: z.string().optional(),
   airDate: z.string().optional(),
+  /** Scheduled time-of-day the episode airs ("HH:MM") when the provider
+   *  supplies it distinctly (TVDB series airsTime, AniList airingAt).
+   *  Kept separate from airDate so a date-only airDate (TMDB) can still
+   *  produce a full air-window datetime. */
+  airTime: z.string().optional(),
   metadata: z.record(z.string(), z.any()).optional(),
 });
 
