@@ -392,6 +392,35 @@ export const episodeFiles = sqliteTable('episode_files', {
   imported_at: text('imported_at').default(sql`(datetime('now'))`),
   /** 1 for the live file, 0 for superseded history rows. */
   is_current: integer('is_current').default(1),
+  // --- Probed media info (feature: stored-episode media badges) ------------
+  // Populated by src/backend/core/media_probe.ts using mediabunny (a pure-TS
+  // demuxer - no external ffprobe binary, which the distroless image can't
+  // run). Kept as plain columns so upgrade decisions and badges can compare
+  // resolution/bitrate without re-reading the file; a null value means "not
+  // probed yet" (backfilled on scan/import).
+  /** Container format name, e.g. 'Matroska' or ISOBMFF-style. */
+  container: text('container'),
+  /** Display height in pixels (post aspect/rotation), proxy for 1080p/2160p. */
+  video_width: integer('video_width'),
+  /** Display width in pixels (post aspect/rotation). */
+  video_height: integer('video_height'),
+  /** Primary video codec, e.g. 'hevc' / 'h264' / 'av1'. */
+  video_codec: text('video_codec'),
+  /** Best-guess frames per second. */
+  video_fps: integer('video_fps'),
+  /** 1 if the video carries HDR color metadata. */
+  hdr: integer('hdr'),
+  /** Audio codec of the first audio track, e.g. 'eac3' / 'truehd' / 'aac'. */
+  audio_codec: text('audio_codec'),
+  /** Channel count of the first audio track (6 == 5.1). */
+  audio_channels: integer('audio_channels'),
+  /** Duration in seconds. */
+  duration_seconds: integer('duration_seconds'),
+  /** Overall average bitrate in bits/sec (fileSize*8/duration when the
+   *  container carries none). */
+  bitrate_kbps: integer('bitrate_kbps'),
+  /** When the file was last probed (null = never). */
+  probed_at: text('probed_at'),
 }, (table) => ({
   showIndex: index('idx_episode_files_show').on(table.show_id),
   episodeIndex: index('idx_episode_files_episode').on(table.show_id, table.season_number, table.episode_number),

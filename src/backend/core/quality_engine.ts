@@ -1,5 +1,6 @@
 import { db } from '../db';
 import type { ReasonCode } from './pipeline/reason_codes';
+import type { MediaProbeInfo } from './media_probe';
 
 /**
  * Known technical "format families" - a single canonical concept that a
@@ -261,6 +262,94 @@ export class QualityEngine {
     if (newcomer.rejected) return false;
 
     return newcomer.totalScore > existing.totalScore;
+  }
+
+  /**
+   * Media-aware upgrade decision for the blackhole import path.
+   *
+   * Stored library files are renamed to clean names (no resolution/codec in
+   * the filename, e.g. "Reacher - S04E01 - City of Brotherly Love.mkv"), so a
+   * filename-only comparison naively treats ANY incoming tagged release as an
+   * upgrade over a stored 2160p file. When `existingProbe` is provided we
+   * score the EXISTING file from its probed media (resolution, bitrate,
+   * codec, HDR) instead of its name, so a stored 2160p is never "upgraded"
+   * by an arriving 1080p.
+   */
+  shouldUpgradeWithMedia(
+    existingProbe: Pick<MediaProbeInfo, 'video' | 'audio' | 'overallBitrate' | 'fileSize'> | null,
+    existingFilename: string,
+    newFilename: string,
+    profileId: string,
+  ): boolean {
+    const existing = existingProbe
+      ? this.getReleaseScoreFromMedia(existingProbe, profileId)
+      : this.getReleaseScore(existingFilename, profileId);
+    const newcomer = this.getReleaseScore(newFilename, profileId);
+
+    if (newcomer.rejected) return false;
+
+    // Media probing is lossy (no source-type knowledge like WEB vs Remux in
+    // the file's own streams) but resolution + bitrate are the dominant
+    // terms; require a strict tie-break win so we never replace an
+    // equivalent-resolution file just because its bitrate read slightly
+    // higher or lower.
+    return newcomer.totalScore > existing.totalScore;
+  }
+
+  /**
+   * Score a file from its probed media streams rather than its (possibly
+   * cleaned/renamed) filename. Builds a synthetic "release name" carrying the
+   * resolution/codec/HDR/audio tags that detectQuality + the format scorer
+   * understand, then reuses the exact same scoring pipeline.
+   */
+  getReleaseScoreFromMedia(
+    probe: Pick<MediaProbeInfo, 'video' | 'audio' | 'overallBitrate' | 'fileSize'>,
+    profileId: string,
+  ): ReleaseScore {
+    const tags: string[] = [];
+
+    // Resolution: bucket by display height (+ width as a tie-breaker for the
+    // unusual "1080p but only 1920x960" cropped encodes).
+    const width = probe.video?.width ?? null;
+    const height = probe.video?.height ?? null;
+    const px = width != null && height != null ? width * height : null;
+    let resolutionTag: string | null = null;
+    if (px != null && px >= 7680 * 4320 * 0.9) resolutionTag = '8K';
+    else if (px != null && px >= 3840 * 2160 * 0.8 || (height ?? 0) >= 2000) resolutionTag = '2160p';
+    else if (px != null && px >= 1920 * 1080 * 0.8 || (height ?? 0) >= 1000) resolutionTag = '1080p';
+    else if ((height ?? 0) >= 700) resolutionTag = '720p';
+    else if ((height ?? 0) > 0) resolutionTag = '480p';
+    if (resolutionTag) tags.push(resolutionTag);
+
+    // Codec families reusing the same alias sets the format matcher knows.
+    const codec = probe.video?.codec ?? '';
+    const lowerCodec = codec.toLowerCase();
+    if (/265|hevc|h265/.test(lowerCodec)) tags.push('H.265');
+    if (/264|avc|h264/.test(lowerCodec)) tags.push('H.264');
+    if (/av1|av01/.test(lowerCodec)) tags.push('AV1');
+    if (/vp9/.test(lowerCodec)) tags.push('VP9');
+    if (probe.video?.hdr) tags.push('HDR');
+
+    // Audio codecs as their COMMON_TAGS names so bonus formats match.
+    const audio = probe.audio?.[0]?.codec?.toLowerCase() ?? '';
+    if (/truehd/.test(audio)) tags.push('TrueHD');
+    if (/dts|ac-?3/.test(audio)) tags.push('DTS');
+    if (/eac3|ec-?3|ac-?3/.test(audio)) tags.push('AC3');
+    if (/aac/.test(audio)) tags.push('AAC');
+    if (/flac/.test(audio)) tags.push('FLAC');
+    if (/mlp|atmos/.test(audio)) tags.push('Atmos');
+
+    // Bitrate floors: a 1.8Mbps 1080p encode is not the same "1080p" as an
+    // 8Mbps one. Tag low-bitrate files with a hint that depresses their score
+    // relative to heavy files. 4 Mbps is the classic "small WEBRip" ceiling.
+    const mbps = (probe.overallBitrate ?? 0) / 1_000_000;
+    if (mbps < 4) tags.push('bitrate-low');
+    // HDR + heavily encoded content signals a remux/BD-grade release.
+    if (probe.video?.hdr && mbps >= 20) tags.push('Remux');
+
+    const syntheticName = `Synthetic Release ${tags.join(' ')}`.trim();
+    const score = this.getReleaseScore(syntheticName, profileId);
+    return score;
   }
 }
 

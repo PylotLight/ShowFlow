@@ -60,3 +60,33 @@ export function formatImportDate(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+/** Human resolution label from a probed display height (e.g. 2160 -> "2160p",
+ *  1080 -> "1080p", 960 -> "1080p" for the cropped variant). */
+export function formatResolution(height: number | null | undefined, width?: number | null): string {
+  if (!height) return "";
+  const px = width != null ? width * height : null;
+  if (px != null && px >= 7680 * 4320 * 0.9) return "8K";
+  if ((px != null && px >= 3840 * 2160 * 0.8) || height >= 2000) return "2160p";
+  if ((px != null && px >= 1920 * 1080 * 0.8) || height >= 1000) return "1080p";
+  if (height >= 700) return "720p";
+  if (height >= 400) return "480p";
+  return `${height}p`;
+}
+
+/** Bitrate formatting for the media badges: "18.7 Mbps", "1.8 Mbps". */
+export function formatBitrate(kbps: number | null | undefined): string {
+  if (kbps == null || kbps <= 0) return "";
+  const mbps = kbps / 1000;
+  return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`;
+}
+
+/** Duration formatting: "46m" / "1h 10m". */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0) return "";
+  const mins = Math.round(seconds / 60);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
