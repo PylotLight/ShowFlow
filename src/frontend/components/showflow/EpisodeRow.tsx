@@ -2,7 +2,28 @@ import { Check, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchI
 import * as React from "react";
 
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
-import { expectedReleaseTime, formatFileSize, formatImportDate } from "@frontend/lib/airtime";
+import {
+  expectedReleaseTime,
+  formatFileSize,
+  formatImportDate,
+  formatResolution,
+  formatBitrate,
+  formatDuration,
+} from "@frontend/lib/airtime";
+
+export interface FileMedia {
+  container?: string | null;
+  videoWidth?: number | null;
+  videoHeight?: number | null;
+  videoCodec?: string | null;
+  videoFps?: number | null;
+  hdr?: boolean;
+  audioCodec?: string | null;
+  audioChannels?: number | null;
+  durationSeconds?: number | null;
+  bitrateKbps?: number | null;
+  probedAt?: string | null;
+}
 
 export interface EpisodeFileInfo {
   path?: string | null;
@@ -13,6 +34,7 @@ export interface EpisodeFileInfo {
   indexerName?: string | null;
   publishDate?: string | null;
   importedAt?: string | null;
+  media?: FileMedia | null;
 }
 
 export interface EpisodeData {
@@ -58,7 +80,21 @@ function InfoPopover({ episode }: { episode: EpisodeData }) {
 
   const rel = episode.file?.releaseTitle ?? episode.file?.name;
   const release = episode.file;
+  const media = release?.media;
   const expected = expectedReleaseTime(episode.expectedReleaseAt, episode.airDate);
+
+  const mediaBadges: { label: string; key: string }[] = [];
+  if (media?.container) mediaBadges.push({ label: media.container, key: 'container' });
+  const res = media?.videoWidth != null || media?.videoHeight != null
+    ? formatResolution(media.videoHeight, media.videoWidth)
+    : "";
+  if (res) mediaBadges.push({ label: res, key: 'res' });
+  if (media?.videoCodec) mediaBadges.push({ label: media.videoCodec.toUpperCase(), key: 'codec' });
+  if (media?.hdr) mediaBadges.push({ label: "HDR", key: 'hdr' });
+  if (media?.audioCodec) mediaBadges.push({ label: media.audioCodec.toUpperCase(), key: 'audio' });
+  if (media?.audioChannels) mediaBadges.push({ label: `${media.audioChannels}ch`, key: 'ch' });
+  if (media?.bitrateKbps) mediaBadges.push({ label: formatBitrate(media.bitrateKbps), key: 'br' });
+  if (media?.durationSeconds) mediaBadges.push({ label: formatDuration(media.durationSeconds), key: 'dur' });
 
   return (
     <div ref={ref} className="relative inline-flex">
@@ -85,6 +121,18 @@ function InfoPopover({ episode }: { episode: EpisodeData }) {
               {release?.importedAt && <Detail label="Imported" value={formatImportDate(release.importedAt)} />}
               {release?.size != null && <Detail label="Size" value={formatFileSize(release.size)} />}
               {release?.path && <Detail label="Path" value={release.path} mono />}
+              {mediaBadges.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-0.5" aria-label="Media info">
+                  {mediaBadges.map((b) => (
+                    <span
+                      key={b.key}
+                      className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/70"
+                    >
+                      {b.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-xs text-muted-foreground">

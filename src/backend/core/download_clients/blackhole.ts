@@ -10,6 +10,8 @@ import type { Episode } from '../types';
 import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
+import { probeMediaFile, mediaFromStoredRow } from '../media_probe';
+import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
 
@@ -731,6 +733,7 @@ export class BlackholeClient implements DownloadClient {
         if (existingEp && existingEp.file_path) {
           const existingFilename = path.basename(existingEp.file_path);
           const profileId = db.getShow(showId)?.profile || 'standard';
+          const existingFileRow = db.getCurrentEpisodeFile(showId, firstEp.season, firstEp.episode);
 
           if (opts?.force) {
             console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
@@ -744,24 +747,42 @@ export class BlackholeClient implements DownloadClient {
               entityType: 'file',
               message: `Force-imported ${filename} over ${existingFilename} for ${show.title}`
             });
-          } else if (!qualityEngine.shouldUpgrade(existingFilename, filename, profileId)) {
-            console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}. Skipping. File remains in watch folder for manual review.`);
-            db.logEvent({
-              type: 'skip',
-              entityType: 'file',
-              message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
-            });
-            if (firstEp) {
-              db.logPipelineEvent({
-                showId, seasonNumber: firstEp.season, episodeNumber: firstEp.episode,
-                stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
-                message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
-                releaseTitle: filename,
-              });
-            }
-            if (!opts?.force) this.holdForManual(fullPath);
-            return;
           } else {
+            // Use the stored file's PROBED media when we have it (resolution,
+            // bitrate, codec...) so a renamed/cleaned 2160p file on disk is
+            // never "upgraded" by an arriving 1080p. Fall back to a fresh on
+            // disk probe (orphan case), then to the raw filename.
+            let existingProbe: ProbeMediaForComparison | null = null;
+            if (existingFileRow?.container) {
+              existingProbe = mediaFromStoredRow(existingFileRow);
+            } else if (existingEp.file_path && (await Bun.file(existingEp.file_path).exists())) {
+              existingProbe = await probeMediaFile(existingEp.file_path);
+            }
+
+            const isUpgrade = existingProbe
+              ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
+              : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
+
+            if (!isUpgrade) {
+              const via = existingProbe && existingFileRow?.container ? 'probed' : existingProbe ? 'probed-on-disk' : '';
+              console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}${via ? ` (${via} ${existingProbe?.video?.height ?? ''}p)` : ''}. Skipping. File remains in watch folder for manual review.`);
+              db.logEvent({
+                type: 'skip',
+                entityType: 'file',
+                message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
+              });
+              if (firstEp) {
+                db.logPipelineEvent({
+                  showId, seasonNumber: firstEp.season, episodeNumber: firstEp.episode,
+                  stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
+                  message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
+                  releaseTitle: filename,
+                });
+              }
+              if (!opts?.force) this.holdForManual(fullPath);
+              return;
+            }
+
             console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
             db.logEvent({
               type: 'upgrade',
@@ -851,6 +872,23 @@ export class BlackholeClient implements DownloadClient {
       // release it came from (grabbed) vs. a direct drop without a grab.
       // Attach the matching grab's release title/indexer/publish date so the
       // show detail page and dashboard can show exactly what's stored.
+      // Probing the moved file once gives us its real resolution/codec/bitrate
+      // for the media badges + upgrade decisions later.
+      const mediaProbe = await probeMediaFile(movedTo);
+      const mediaCols = mediaProbe
+        ? {
+            container: mediaProbe.container,
+            video_width: mediaProbe.video?.width ?? null,
+            video_height: mediaProbe.video?.height ?? null,
+            video_codec: mediaProbe.video?.codec?.toLowerCase() ?? null,
+            video_fps: mediaProbe.video?.fps ? Math.round(mediaProbe.video.fps) : null,
+            hdr: mediaProbe.video?.hdr ? 1 : null,
+            audio_codec: mediaProbe.audio?.[0]?.codec?.toLowerCase() ?? null,
+            audio_channels: mediaProbe.audio?.[0]?.channels ?? null,
+            duration_seconds: mediaProbe.durationSeconds ? Math.round(mediaProbe.durationSeconds) : null,
+            bitrate_kbps: mediaProbe.overallBitrate ? Math.round(mediaProbe.overallBitrate / 1000) : null,
+          }
+        : null;
       for (const ep of episodes) {
         try {
           const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);
@@ -870,6 +908,7 @@ export class BlackholeClient implements DownloadClient {
             releaseTitle: grab?.release_title ?? null,
             indexerName: grab?.indexer_name ?? null,
             publishDate: grab?.publish_date ?? null,
+            media: mediaCols,
           });
         } catch (err) {
           console.warn(`[${this.name}] Failed to record provenance for ${filename}:`, err);

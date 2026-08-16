@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'bun';
 import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
@@ -107,6 +108,51 @@ export class DatabaseManager {
         episodeFiles.backfillEpisodeFiles(this);
       }
     }
+
+    // Kick off a non-blocking media-probe backfill for episode_files rows
+    // that exist but were recorded before probing existed (no container yet).
+    // Probing happens in the background so startup isn't stalled while the
+    // first scan re-probes the library. Idempotent: rows already probed are
+    // skipped by listUnprobedEpisodeFiles.
+    if ((efCol?.c ?? 0) > 0) {
+      try {
+        const unprobed = episodeFiles.listUnprobedEpisodeFiles(this);
+        if (unprobed.length > 0) {
+          setImmediate(() => {
+            void (async () => {
+              const { probeMediaFile } = await import('../core/media_probe');
+              let probed = 0;
+              for (const row of unprobed) {
+                try {
+                  const st = await stat(row.file_path).catch(() => null);
+                  if (!st) continue;
+                  const m = await probeMediaFile(row.file_path);
+                  if (!m) continue;
+                  episodeFiles.updateEpisodeFileMedia(this, row.id, {
+                    container: m.container,
+                    video_width: m.video?.width ?? null,
+                    video_height: m.video?.height ?? null,
+                    video_codec: m.video?.codec?.toLowerCase() ?? null,
+                    video_fps: m.video?.fps ? Math.round(m.video.fps) : null,
+                    hdr: m.video?.hdr ? 1 : null,
+                    audio_codec: m.audio?.[0]?.codec?.toLowerCase() ?? null,
+                    audio_channels: m.audio?.[0]?.channels ?? null,
+                    duration_seconds: m.durationSeconds ? Math.round(m.durationSeconds) : null,
+                    bitrate_kbps: m.overallBitrate ? Math.round(m.overallBitrate / 1000) : null,
+                  });
+                  probed++;
+                } catch {
+                  // skip on individual probe failure
+                }
+              }
+              console.log(`[probe] Media backfill complete: probed ${probed}/${unprobed.length} stored files.`);
+            })().catch(() => {});
+          });
+        }
+      } catch {
+        // non-fatal
+      }
+    }
   }
 
   // ---- Shows -------------------------------------------------------------
@@ -189,6 +235,8 @@ export class DatabaseManager {
   getCurrentEpisodeFilesByShow(showId: string) { return episodeFiles.getCurrentEpisodeFilesByShow(this, showId); }
   listAllCurrentEpisodeFiles() { return episodeFiles.listAllCurrentEpisodeFiles(this); }
   backfillEpisodeFiles() { return episodeFiles.backfillEpisodeFiles(this); }
+  updateEpisodeFileMedia(rowId: number, media: Parameters<typeof episodeFiles.updateEpisodeFileMedia>[2]) { return episodeFiles.updateEpisodeFileMedia(this, rowId, media); }
+  listUnprobedEpisodeFiles() { return episodeFiles.listUnprobedEpisodeFiles(this); }
 
   // ---- Episode mapping (anime season-splits, issues-tracking.md #4) --------
 

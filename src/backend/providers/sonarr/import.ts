@@ -4,6 +4,7 @@ import type { Config } from '../../db';
 import { SonarrClient, type SonarrSeries, type SonarrEpisode } from './client';
 import { SyncManager } from '../../core/sync_manager';
 import { backgroundJobs } from '../../core/background_jobs';
+import { probeMediaFile } from '../../core/media_probe';
 
 export interface ImportResult {
   seriesId: string;
@@ -304,6 +305,11 @@ export class SonarrImporter {
         // release display, and stash the file size + date added alongside.
         if (ep.episodeFile?.path) {
           try {
+            // Probe the on-disk file so the provenance row carries its real
+            // resolution/codec/bitrate (media badges + upgrade compare). Probe
+            // failure is non-fatal: we still record provenance, just without
+            // the media columns.
+            const probe = await probeMediaFile(ep.episodeFile.path);
             db.recordEpisodeFile({
               showId: showUuid,
               season: ep.seasonNumber,
@@ -315,6 +321,20 @@ export class SonarrImporter {
               releaseTitle: ep.episodeFile.sceneName ?? null,
               indexerName: null,
               publishDate: ep.episodeFile.dateAdded ?? null,
+              media: probe
+                ? {
+                    container: probe.container,
+                    video_width: probe.video?.width ?? null,
+                    video_height: probe.video?.height ?? null,
+                    video_codec: probe.video?.codec?.toLowerCase() ?? null,
+                    video_fps: probe.video?.fps ? Math.round(probe.video.fps) : null,
+                    hdr: probe.video?.hdr ? 1 : null,
+                    audio_codec: probe.audio?.[0]?.codec?.toLowerCase() ?? null,
+                    audio_channels: probe.audio?.[0]?.channels ?? null,
+                    duration_seconds: probe.durationSeconds ? Math.round(probe.durationSeconds) : null,
+                    bitrate_kbps: probe.overallBitrate ? Math.round(probe.overallBitrate / 1000) : null,
+                  }
+                : null,
             });
           } catch (err) {
             console.warn(`[sonarr-import] Failed to record provenance for ${showUuid} S${ep.seasonNumber}E${ep.episodeNumber}:`, err);

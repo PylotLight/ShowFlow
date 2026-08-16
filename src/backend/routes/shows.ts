@@ -55,6 +55,24 @@ function resolveShowFolder(show: any, rootFolder: string, episodes: any[]) {
   return { currentFolderPath, currentFolderName, sanitizedTitle, targetFolderPath, wouldChange };
 }
 
+// Format the media columns as a compact frontend-usable object, or null
+// when the file hasn't been probed yet.
+function serializeFileMedia(f: any) {
+  return {
+    container: f.container ?? null,
+    videoWidth: f.video_width ?? null,
+    videoHeight: f.video_height ?? null,
+    videoCodec: f.video_codec ?? null,
+    videoFps: f.video_fps ?? null,
+    hdr: !!f.hdr,
+    audioCodec: f.audio_codec ?? null,
+    audioChannels: f.audio_channels ?? null,
+    durationSeconds: f.duration_seconds ?? null,
+    bitrateKbps: f.bitrate_kbps ?? null,
+    probedAt: f.probed_at ?? null,
+  };
+}
+
 export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
   return {
 
@@ -776,6 +794,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                       indexerName: file.indexer_name,
                       publishDate: file.publish_date,
                       importedAt: file.imported_at,
+                      media: serializeFileMedia(file),
                     }
                   : null,
                 searchMode: e.search_mode || 'auto',
@@ -828,6 +847,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               publishDate: f.publish_date,
               importedAt: f.imported_at,
               isCurrent: !!f.is_current,
+              media: serializeFileMedia(f),
             })),
           });
         } catch (err) {
@@ -1019,6 +1039,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                   indexerName: f.indexer_name,
                   publishDate: f.publish_date,
                   sourceKind: f.source_kind,
+                  media: serializeFileMedia(f),
                 } : null;
               })(),
             })),

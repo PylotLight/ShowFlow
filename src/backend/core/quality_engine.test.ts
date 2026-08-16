@@ -87,3 +87,49 @@ test("Codec families auto-match every spelling of a format", async () => {
   const tags = qualityEngine.getReleaseScore("Show.S01E01.1080p.HEVC.mkv", 'p2').matchedTags;
   expect(tags).toContain("H.265");
 });
+
+test("Media-aware scoring: cleaned stored names don't lose to lower resolutions", async () => {
+  db.db.run('PRAGMA foreign_keys = OFF');
+  db.db.run('DELETE FROM quality_definitions');
+  db.db.run('DELETE FROM quality_profiles');
+  db.db.run('DELETE FROM custom_formats');
+  db.db.run('DELETE FROM profile_formats');
+  db.db.run('PRAGMA foreign_keys = ON');
+
+  db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
+  db.saveQuality({ id: 'q_2160p', name: '2160p', rank: 40 });
+  db.saveProfile({ id: 'p3', name: 'Media Profile' });
+
+  // The exact Reacher S04E01 scenario: a 6.5GB 2160p HEVC file stored under a
+  // clean name ("Reacher - S04E01 - City of Brotherly Love.mkv") vs an
+  // arriving WEBRip-1080p.
+  const stored2160 = {
+    video: { codec: 'hevc', width: 3840, height: 2160, fps: 23.976, codedWidth: 3840, codedHeight: 2160, bitrate: null, averageBitrate: null, hdr: false },
+    audio: [{ codec: 'eac3', channels: 6, sampleRate: 48000, bitrate: null, averageBitrate: null }],
+    overallBitrate: 18_731_592,
+    fileSize: 6_510_427_156,
+  };
+
+  // Filename-only comparison says the WEBRip IS an upgrade -> the root cause.
+  const cleanName = "Reacher - S04E01 - City of Brotherly Love.mkv";
+  const arriving1080 = "Reacher.S04E01.WEBRip.1080p.HEVC.x265.mkv";
+  expect(qualityEngine.shouldUpgrade(cleanName, arriving1080, 'p3')).toBe(true);
+
+  // Media-aware comparison sees the stored 2160p and correctly refuses.
+  expect(qualityEngine.shouldUpgradeWithMedia(stored2160, cleanName, arriving1080, 'p3')).toBe(false);
+
+  // A real 2160p arrival still upgrades a stored 1080p.
+  const stored1080 = {
+    video: { codec: 'hevc', width: 1920, height: 960, fps: 23.976, codedWidth: 1920, codedHeight: 960, bitrate: null, averageBitrate: null, hdr: false },
+    audio: [{ codec: 'eac3', channels: 6, sampleRate: 48000, bitrate: null, averageBitrate: null }],
+    overallBitrate: 1_828_638,
+    fileSize: 635_562_686,
+  };
+  const arriving2160 = "Reacher.S04E01.2160p.WEBDL.HEVC.mkv";
+  expect(qualityEngine.shouldUpgradeWithMedia(stored1080, cleanName, arriving2160, 'p3')).toBe(true);
+
+  // getReleaseScoreFromMedia matches a 2160p tag to the 2160p quality rank.
+  const s = qualityEngine.getReleaseScoreFromMedia(stored2160, 'p3');
+  expect(s.rejected).toBe(false);
+  expect(s.qualityName).toBe('2160p');
+});
