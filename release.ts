@@ -9,8 +9,10 @@ import pkg from "./package.json" with { type: "json" };
  *   bun run release -- major     # major bump (0.1.12 -> 1.0.0)
  *   bun run release -- 1.2.3     # explicit version
  *
- * Uses the `ghp` provider wrapper (PylotLight-scoped GitHub token) rather
- * than the global `gh`, which is authenticated as a read-only account.
+ * Uses the `gh` CLI (GitHub's official tool) for tagging + release creation.
+ * `gh` must be logged in with an account that has write access to the repo
+ * (e.g. behind a PylotLight-scoped token). The historical `ghp` wrapper was
+ * a laptop-only convenience and was dropped in favor of standard `gh`.
  */
 
 const bumpArg = process.argv[2];
@@ -65,6 +67,6 @@ await Bun.$`git tag ${tag}`;
 
 await Bun.$`git push origin main --tags`;
 
-await Bun.$`ghp release create ${tag} --title ${tag} --verify-tag --generate-notes`;
+await Bun.$`gh release create ${tag} --title ${tag} --verify-tag --generate-notes`;
 
 console.log(`✓ Released ${tag}`);
