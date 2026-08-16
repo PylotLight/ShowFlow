@@ -17,6 +17,7 @@ import * as analytics from './analytics';
 import * as health from './health';
 import * as grabs from './grabs';
 import * as mappings from './mappings';
+import * as episodeFiles from './episode_files';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -90,6 +91,22 @@ export class DatabaseManager {
     if (!titleCount || titleCount.c === 0) {
       backfillShowTitles(this);
     }
+
+    // One-time provenance backfill: rows that had file paths before the
+    // episode_files table existed. Cheap guard via the column-level check
+    // below so it only runs meaningfully once.
+    const efCol = this.db.query(
+      "SELECT count(*) as c FROM pragma_table_info('episode_files') WHERE name = 'file_path'"
+    ).get() as { c: number } | undefined;
+    if ((efCol?.c ?? 0) > 0) {
+      const fileCount = this.db.query('SELECT count(*) as c FROM episode_files').get() as { c: number } | undefined;
+      const epFileCount = this.db.query(
+        "SELECT count(*) as c FROM episodes WHERE file_path IS NOT NULL AND file_path != ''"
+      ).get() as { c: number } | undefined;
+      if ((fileCount?.c ?? 0) === 0 && (epFileCount?.c ?? 0) > 0) {
+        episodeFiles.backfillEpisodeFiles(this);
+      }
+    }
   }
 
   // ---- Shows -------------------------------------------------------------
@@ -132,6 +149,8 @@ export class DatabaseManager {
   updateEpisodeFilePath(showId: string, seasonNumber: number, episodeNumber: number, filePath: string) { return shows.updateEpisodeFilePath(this, showId, seasonNumber, episodeNumber, filePath); }
   listShowEpisodes(showId: string) { return shows.listShowEpisodes(this, showId); }
   updateEpisodeSearchMode(showId: string, seasonNumber: number, episodeNumber: number, mode: string) { return shows.updateEpisodeSearchMode(this, showId, seasonNumber, episodeNumber, mode); }
+  updateEpisodeAirWindow(showId: string, seasonNumber: number, episodeNumber: number, updates: Parameters<typeof shows.updateEpisodeAirWindow>[4]) { return shows.updateEpisodeAirWindow(this, showId, seasonNumber, episodeNumber, updates); }
+  setShowReleaseDelay(showId: string, delayMinutes: number) { return shows.setShowReleaseDelay(this, showId, delayMinutes); }
 
   // ---- Show misc ---------------------------------------------------------
 
@@ -159,6 +178,17 @@ export class DatabaseManager {
   recordGrabbedRelease(input: Parameters<typeof grabs.recordGrabbedRelease>[1]) { return grabs.recordGrabbedRelease(this, input); }
   findGrabbedReleaseForEpisode(season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForEpisode(this, season, episode, withinDays); }
   findMostRecentGrabForShow(showId: string, withinDays?: number) { return grabs.findMostRecentGrabForShow(this, showId, withinDays); }
+  findGrabbedReleaseForShowEpisode(showId: string, season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForShowEpisode(this, showId, season, episode, withinDays); }
+  listGrabbedReleasesForShow(showId: string, limit?: number) { return grabs.listGrabbedReleasesForShow(this, showId, limit); }
+
+  // ---- Episode files (provenance) ----------------------------------------
+
+  recordEpisodeFile(input: Parameters<typeof episodeFiles.recordEpisodeFile>[1]) { return episodeFiles.recordEpisodeFile(this, input); }
+  getCurrentEpisodeFile(showId: string, seasonNumber: number, episodeNumber: number) { return episodeFiles.getCurrentEpisodeFile(this, showId, seasonNumber, episodeNumber); }
+  listEpisodeFilesByShow(showId: string) { return episodeFiles.listEpisodeFilesByShow(this, showId); }
+  getCurrentEpisodeFilesByShow(showId: string) { return episodeFiles.getCurrentEpisodeFilesByShow(this, showId); }
+  listAllCurrentEpisodeFiles() { return episodeFiles.listAllCurrentEpisodeFiles(this); }
+  backfillEpisodeFiles() { return episodeFiles.backfillEpisodeFiles(this); }
 
   // ---- Episode mapping (anime season-splits, issues-tracking.md #4) --------
 

@@ -1,6 +1,7 @@
 import { db, type Config } from '../db';
 import { ProviderFactory, type ProviderType } from '../providers/factory';
 import { debugLog } from './debug';
+import { reconcileShowAirWindows } from './air_window';
 
 export class SyncManager {
   constructor(private config: Config) {}
@@ -56,9 +57,19 @@ export class SyncManager {
                 absoluteNumber: e.absoluteNumber,
                 title: e.title,
                 airDate: e.airDate,
+                airTime: e.airTime,
               };
             })
           );
+        }
+
+        // Compute + persist predicted release windows off the fresh air
+        // dates. This also re-learns the show's release delay from any
+        // historical grabs, so forecasts tighten as evidence accumulates.
+        try {
+          reconcileShowAirWindows(showId, false);
+        } catch (err) {
+          debugLog(`Air-window reconcile failed for ${show.title}: ${err}`);
         }
       }
 

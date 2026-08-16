@@ -279,6 +279,10 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             rootFolderPath: show.root_folder_path,
             seriesType: show.series_type ?? 'standard',
             lastUpdated: show.last_updated,
+            // Learned release delay forecast (minutes after air). Used by the
+            // UI to show the show's expected release window alongside air
+            // dates.
+            releaseDelayMinutes: show.release_delay_minutes,
             config,
           });
         } catch (err) {
@@ -745,17 +749,38 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
         try {
           const seasonNumber = parseInt(req.params.season!, 10);
           const episodes = db.listEpisodes(req.params.id!, seasonNumber);
+          const fileMap = db.getCurrentEpisodeFilesByShow(req.params.id!);
           return json(
-            episodes.map((e: any) => ({
-              season: e.season_number,
-              episode: e.episode_number,
-              absoluteNumber: e.absolute_number,
-              title: e.title,
-              filePath: e.file_path,
-              tracked: !!e.is_tracked,
-              airDate: e.air_date || null,
-              searchMode: e.search_mode || 'auto',
-            })),
+            episodes.map((e: any) => {
+              const file = fileMap.get(`${e.season_number}:${e.episode_number}`);
+              return {
+                season: e.season_number,
+                episode: e.episode_number,
+                absoluteNumber: e.absolute_number,
+                title: e.title,
+                filePath: e.file_path,
+                tracked: !!e.is_tracked,
+                airDate: e.air_date || null,
+                airTime: e.air_time || null,
+                expectedReleaseAt: e.expected_release_at || null,
+                // Granular on-disk file + release provenance (features:
+                // "what file do I actually have" and "which release did it
+                // come from").
+                file: file
+                  ? {
+                      path: file.file_path,
+                      name: file.original_name,
+                      size: file.file_size,
+                      sourceKind: file.source_kind,
+                      releaseTitle: file.release_title,
+                      indexerName: file.indexer_name,
+                      publishDate: file.publish_date,
+                      importedAt: file.imported_at,
+                    }
+                  : null,
+                searchMode: e.search_mode || 'auto',
+              };
+            }),
           );
         } catch (err) {
           return errorResponse(err, 500);
@@ -772,6 +797,39 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const episode = parseInt(req.params.episode!, 10);
           const result = await grabber.grabBestRelease(req.params.id!, season, episode);
           return json({ ...result, bestRelease: result.bestRelease ? serializeRelease(result.bestRelease) : undefined, release: result.release ? serializeRelease(result.release) : undefined });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    // Full granular file/release list for a show - every file ever stored,
+    // live rows first. Powers the "what exactly do I have on disk" view on
+    // the show detail page (which release it came from, indexer, publish
+    // date, size, when it was imported).
+    "/api/shows/:id/files": {
+      async GET(req: RouteReq) {
+        try {
+          const files = db.listEpisodeFilesByShow(req.params.id!);
+          const show = db.getShow(req.params.id!);
+          return json({
+            showId: req.params.id!,
+            showTitle: show?.title ?? null,
+            releaseDelayMinutes: show?.release_delay_minutes ?? null,
+            files: files.map((f) => ({
+              season: f.season_number,
+              episode: f.episode_number,
+              path: f.file_path,
+              name: f.original_name,
+              size: f.file_size,
+              sourceKind: f.source_kind,
+              releaseTitle: f.release_title,
+              indexerName: f.indexer_name,
+              publishDate: f.publish_date,
+              importedAt: f.imported_at,
+              isCurrent: !!f.is_current,
+            })),
+          });
         } catch (err) {
           return errorResponse(err, 500);
         }
@@ -934,6 +992,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const days = parseInt(url.searchParams.get("days") ?? "7", 10);
           const past = parseInt(url.searchParams.get("past") ?? "0", 10);
           const episodes = db.listUpcomingEpisodes(Number.isNaN(days) ? 7 : days, Number.isNaN(past) ? 0 : past);
+          // One extra pass to attach the live file/release detail per episode
+          // (used by the dashboard "available" chip + calendar).
+          const filesByShow = new Map<string, Map<string, any>>();
+          for (const ep of episodes) {
+            const showId = ep.show_id;
+            if (!filesByShow.has(showId)) filesByShow.set(showId, db.getCurrentEpisodeFilesByShow(showId));
+          }
           return json(
             episodes.map((ep: any) => ({
               showId: ep.show_id,
@@ -942,7 +1007,20 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               season: ep.season_number,
               episode: ep.episode_number,
               airDate: ep.air_date,
+              airTime: ep.air_time,
+              expectedReleaseAt: ep.expected_release_at,
               filePath: ep.file_path ?? null,
+              file: (() => {
+                const f = filesByShow.get(ep.show_id)?.get(`${ep.season_number}:${ep.episode_number}`);
+                return f ? {
+                  path: f.file_path,
+                  name: f.original_name,
+                  releaseTitle: f.release_title,
+                  indexerName: f.indexer_name,
+                  publishDate: f.publish_date,
+                  sourceKind: f.source_kind,
+                } : null;
+              })(),
             })),
           );
         } catch (err) {

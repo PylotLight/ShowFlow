@@ -776,6 +776,8 @@ export function saveEpisode(self: DatabaseManager, episode: {
   absoluteNumber?: number;
   title?: string;
   filePath?: string;
+  airDate?: string;
+  airTime?: string;
 }) {
   self.drizz.insert(schema.episodes).values({
     show_id: episode.showId,
@@ -784,12 +786,14 @@ export function saveEpisode(self: DatabaseManager, episode: {
     absolute_number: episode.absoluteNumber ?? 0,
     title: episode.title ?? '',
     file_path: episode.filePath ?? '',
+    air_date: episode.airDate ?? null,
   }).onConflictDoUpdate({
     target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
     set: {
       title: episode.title ?? '',
       absolute_number: episode.absoluteNumber ?? 0,
       file_path: episode.filePath ?? '',
+      air_date: episode.airDate ?? null,
       last_updated: sql`(datetime('now'))`,
     },
   }).run();
@@ -801,6 +805,7 @@ export function syncEpisodes(self: DatabaseManager, showId: string, episodes: {
   absoluteNumber?: number;
   title?: string;
   airDate?: string;
+  airTime?: string;
 }[]) {
   const transaction = self.db.transaction((eps: typeof episodes) => {
     for (const ep of eps) {
@@ -811,12 +816,14 @@ export function syncEpisodes(self: DatabaseManager, showId: string, episodes: {
         absolute_number: ep.absoluteNumber ?? 0,
         title: ep.title ?? '',
         air_date: ep.airDate ?? null,
+        air_time: ep.airTime ?? null,
       }).onConflictDoUpdate({
         target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
         set: {
           title: ep.title ?? '',
           absolute_number: ep.absoluteNumber ?? 0,
           air_date: ep.airDate ?? null,
+          air_time: ep.airTime ?? null,
           last_updated: sql`(datetime('now'))`,
         },
       }).run();
@@ -862,6 +869,7 @@ export function listUpcomingEpisodes(self: DatabaseManager, futureDays: number, 
     .from(schema.episodes)
     .leftJoin(schema.shows, eq(schema.episodes.show_id, schema.shows.id))
     .where(and(
+      eq(schema.episodes.is_tracked, 1),
       sql`${schema.episodes.air_date} IS NOT NULL`,
       sql`${schema.episodes.air_date} >= ${start}`,
       sql`${schema.episodes.air_date} <= ${end}`,
@@ -936,6 +944,28 @@ export function updateEpisodeSearchMode(self: DatabaseManager, showId: string, s
       eq(schema.episodes.season_number, seasonNumber),
       eq(schema.episodes.episode_number, episodeNumber),
     )).run();
+}
+
+/** Persist the air-window forecast (air time + expected release time). */
+export function updateEpisodeAirWindow(self: DatabaseManager, showId: string, seasonNumber: number, episodeNumber: number, updates: {
+  airTime?: string | null;
+  expectedReleaseAt?: string | null;
+}) {
+  const setData: Record<string, any> = { last_updated: sql`(datetime('now'))` };
+  if (updates.airTime !== undefined) setData.air_time = updates.airTime;
+  if (updates.expectedReleaseAt !== undefined) setData.expected_release_at = updates.expectedReleaseAt;
+  self.drizz.update(schema.episodes).set(setData)
+    .where(and(
+      eq(schema.episodes.show_id, showId),
+      eq(schema.episodes.season_number, seasonNumber),
+      eq(schema.episodes.episode_number, episodeNumber),
+    )).run();
+}
+
+/** Store the show's learned release delay (minutes after air). */
+export function setShowReleaseDelay(self: DatabaseManager, showId: string, delayMinutes: number) {
+  self.drizz.update(schema.shows).set({ release_delay_minutes: delayMinutes, last_updated: sql`(datetime('now'))` })
+    .where(eq(schema.shows.id, showId)).run();
 }
 
 export function getShowRootFolder(self: DatabaseManager, showId: string): string | null {

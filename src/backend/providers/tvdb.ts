@@ -668,7 +668,8 @@ export class TVDBProvider extends BaseProvider implements IMetadataProvider {
       episode: episode.number,
       absoluteNumber: episode.absoluteNumber ?? undefined,
       title: title || undefined,
-      airDate: this.buildAirDate(episode.aired, airsTime, originalCountry),
+airDate: this.buildAirDate(episode.aired, airsTime, originalCountry),
+      airTime: airsTime || undefined,
       metadata: episode,
     };
   }

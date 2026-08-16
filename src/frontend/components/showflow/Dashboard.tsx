@@ -11,6 +11,7 @@ import type { ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
+import { expectedReleaseTime } from "@frontend/lib/airtime";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -19,11 +20,7 @@ interface UpcomingEpisode {
   episode: number;
   airDate: string;
   filePath: string | null;
-}
-
-function isDateOnly(airDate: string): boolean {
-  const d = new Date(airDate);
-  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+  expectedReleaseAt?: string | null;
 }
 
 function formatAirTime(airDate: string) {
@@ -31,6 +28,18 @@ function formatAirTime(airDate: string) {
   const d = new Date(airDate);
   if (isNaN(d.getTime())) return null;
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+/** Clock chip label: prefer the learned/forecast release time when the air
+ *  date carries no time, otherwise fall back to the defined air time. */
+function clockLabel(ep: UpcomingEpisode): string | null {
+  return expectedReleaseTime(ep.expectedReleaseAt, ep.airDate);
+}
+
+/** Basis timestamp for any "when" logic - the learned release forecast wins
+ *  over the raw air date, so dashboards show true expected availability. */
+function whenBasis(ep: UpcomingEpisode): string {
+  return ep.expectedReleaseAt || ep.airDate;
 }
 
 function getLocalDateKey(airDate: string): string {
@@ -573,12 +582,12 @@ function Dashboard({
                       )}
                     </h3>
                     {(() => {
-                      const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(ep.airDate)) : -1;
+                      const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(whenBasis(ep))) : -1;
                       const hasNowLine = nowLineIdx > 0;
                       return group.items.map((ep, i) => {
                       const showObj = getMatchingShow(ep.showTitle);
-                      const prox = getRowProximity(ep.airDate);
-                      const time = formatAirTime(ep.airDate);
+                      const prox = getRowProximity(whenBasis(ep));
+                      const time = clockLabel(ep);
                       return (
                         <React.Fragment key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}>
                           {hasNowLine && i === nowLineIdx && (

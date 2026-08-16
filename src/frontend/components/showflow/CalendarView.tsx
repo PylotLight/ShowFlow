@@ -6,7 +6,7 @@ import * as React from "react";
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
-import { formatAirtime } from "@frontend/lib/airtime";
+import { formatAirtime, expectedReleaseTime } from "@frontend/lib/airtime";
 import { cn } from "@frontend/lib/utils";
 
 interface UpcomingEpisode {
@@ -17,10 +17,17 @@ interface UpcomingEpisode {
   airDate: string;
   showId: string;
   filePath: string | null;
+  expectedReleaseAt?: string | null;
 }
 
 function key(ep: UpcomingEpisode) {
   return `${ep.showTitle}-${ep.season}-${ep.episode}-${ep.airDate}`;
+}
+
+/** Clock label for an episode - prefers the learned release forecast, falls
+ *  back to the raw air time. */
+function clockLabel(ep: UpcomingEpisode): string | null {
+  return expectedReleaseTime(ep.expectedReleaseAt, ep.airDate) ?? formatAirtime(ep.airDate);
 }
 
 function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => void }) {
@@ -324,9 +331,9 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                               <span className="font-mono text-[9px] text-signal/80 shrink-0">
                                 S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                               </span>
-                              {formatAirtime(ep.airDate) && (
+                              {clockLabel(ep) && (
                                 <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">
-                                  {formatAirtime(ep.airDate)}
+                                  {clockLabel(ep)}
                                 </span>
                               )}
                             </div>
@@ -388,8 +395,8 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                         {ep.showTitle}
                                       </span>
                                       <EpisodeChip season={ep.season} episode={ep.episode} state={available ? "tracked" : "airing"} className="shrink-0 text-[9px]" />
-                                      {formatAirtime(ep.airDate) && (
-                                        <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">{formatAirtime(ep.airDate)}</span>
+                                      {clockLabel(ep) && (
+                                        <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">{clockLabel(ep)}</span>
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">

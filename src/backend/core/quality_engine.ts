@@ -57,25 +57,40 @@ const FORMAT_FAMILIES: FormatFamily[] = [
   },
 ];
 
-/** Technical tags that DON'T map to a family - scanned verbatim. */
-const COMMON_TAGS: { name: string; patterns: string[] }[] = [
-  { name: 'HLG', patterns: ['hlg'] },
-  { name: 'TrueHD', patterns: ['truehd'] },
-  { name: 'DTS', patterns: ['dts'] },
-  { name: 'Atmos', patterns: ['atmos'] },
-  { name: 'FLAC', patterns: ['flac'] },
-  { name: 'AAC', patterns: ['aac'] },
-  { name: 'Repack', patterns: ['repack'] },
-  { name: 'Proper', patterns: ['proper'] },
-  { name: 'Remux', patterns: ['remux'] },
-  { name: 'Internal', patterns: ['internal'] },
+/** Technical tags that DON'T map to a family - scanned verbatim.
+ *
+ *  Matching is by word-boundary regex rather than plain substring so that
+ *  real-world release names parse correctly (e.g. "DV" doesn't trip on
+ *  "DVD", "HDR" doesn't match mid-word hashes, and tags inside brackets/
+ *  groups like "[WEB.1080p.AV1]" are still found). */
+const COMMON_TAGS: { name: string; patterns: RegExp[] }[] = [
+  // ---- HDR / vision ------------------------------------------------------
+  { name: 'HLG', patterns: [/\bhlg\b/i] },
+  // ---- Audio codecs ------------------------------------------------------
+  { name: 'TrueHD', patterns: [/\btruehd\b/i] },
+  { name: 'DTS', patterns: [/\bdts[\s._-]?hd(?:\sma)?\b/i, /\bdtsx\b/i, /\bdts[\s._-]?\d+(?:\.\d+)?\b/i, /\bdts\b/i] },
+  { name: 'Atmos', patterns: [/\batmos\b/i] },
+  { name: 'FLAC', patterns: [/\bflac\b/i] },
+  { name: 'AAC', patterns: [/\baac(?:\d+(?:\.\d+)?)?\b/i] },
+  { name: 'AC3', patterns: [/\bac-?3\b/i, /\bddp\b/i, /\beatmos\b/i] },
+  // ---- Source types ------------------------------------------------------
+  { name: 'Web-DL', patterns: [/\bweb[\s._-]?dl\b/i] },
+  { name: 'WebRip', patterns: [/\bweb[\s._-]?rips?\b/i] },
+  { name: 'BluRay', patterns: [/\bblu[\s._-]?rays?\b/i, /\bbdrip\b/i] },
+  { name: 'HDTV', patterns: [/\bhdtv\b/i, /\bdsr\b/i, /\bdvb\b/i] },
+  // ---- General -----------------------------------------------------------
+  { name: 'Repack', patterns: [/\brepack\b/i] },
+  { name: 'Proper', patterns: [/\bproper\b/i] },
+  { name: 'Remux', patterns: [/\bremux\b/i] },
+  { name: 'Internal', patterns: [/\binternal\b/i] },
+  { name: 'Multi-Subs', patterns: [/\bmulti[\s._-]?(?:subs?|subtitle|language)\b/i] },
 ];
 
 function scanCommonTags(filename: string): string[] {
-  const lower = filename.toLowerCase();
-  const tags = COMMON_TAGS
-    .filter(t => t.patterns.some(p => lower.includes(p)))
-    .map(t => t.name);
+  const tags: string[] = [];
+  for (const tag of COMMON_TAGS) {
+    if (tag.patterns.some(p => p.test(filename))) tags.push(tag.name);
+  }
   for (const fam of FORMAT_FAMILIES) {
     if (fam.match.test(filename)) tags.push(fam.label);
   }

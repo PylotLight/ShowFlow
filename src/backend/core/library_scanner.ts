@@ -4,6 +4,30 @@ import { debugLog } from './debug';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Map a scanned/parsed episode assignment to both episodes.file_path and the
+// episode_files provenance table. Scanned files have no release provenance
+// (they were placed directly on disk), so source_kind stays 'import' unless
+// a matching grab exists.
+function mapScannedFile(showId: string, season: number, episodeNumber: number, file: string) {
+  db.updateEpisodeFilePath(showId, season, episodeNumber, file);
+  try {
+    const grab = db.findGrabbedReleaseForShowEpisode(showId, season, episodeNumber, 30);
+    db.recordEpisodeFile({
+      showId,
+      season,
+      episode: episodeNumber,
+      filePath: file,
+      originalName: file.split(/[\\/]/).pop() ?? file,
+      sourceKind: grab ? 'release' : 'import',
+      releaseTitle: grab?.release_title ?? null,
+      indexerName: grab?.indexer_name ?? null,
+      publishDate: grab?.publish_date ?? null,
+    });
+  } catch (err) {
+    debugLog(`Failed to record provenance for ${file}: ${err}`);
+  }
+}
+
 export class LibraryScanner {
   private parser = new FilenameParser();
 
@@ -61,7 +85,7 @@ export class LibraryScanner {
 
       if (parsed.season !== undefined && parsed.episodes) {
         for (const epNum of parsed.episodes) {
-          db.updateEpisodeFilePath(showId, parsed.season, epNum, file);
+          mapScannedFile(showId, parsed.season, epNum, file);
           foundCount++;
           db.logEvent({
             type: 'scan',
@@ -78,7 +102,7 @@ export class LibraryScanner {
         for (const absNum of parsed.absoluteNumbers) {
           const ep = episodes.find(e => e.absolute_number === absNum);
           if (ep) {
-            db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, file);
+            mapScannedFile(showId, ep.season_number, ep.episode_number, file);
             foundCount++;
             db.logEvent({
               type: 'scan',
@@ -157,7 +181,7 @@ export class LibraryScanner {
 
         if (parsed.season !== undefined && parsed.episodes) {
           for (const epNum of parsed.episodes) {
-            db.updateEpisodeFilePath(showId, parsed.season, epNum, file);
+            mapScannedFile(showId, parsed.season, epNum, file);
             foundCount++;
             db.logEvent({
               type: 'scan',
@@ -171,7 +195,7 @@ export class LibraryScanner {
           for (const absNum of parsed.absoluteNumbers) {
             const ep = episodes.find((e: any) => e.absolute_number === absNum);
             if (ep) {
-              db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, file);
+              mapScannedFile(showId, ep.season_number, ep.episode_number, file);
               foundCount++;
               db.logEvent({
                 type: 'scan',

@@ -23,6 +23,7 @@ export interface GrabbedReleaseRow {
   release_title: string;
   normalized_title: string;
   indexer_name: string | null;
+  publish_date: string | null;
   grabbed_at: string | null;
 }
 
@@ -33,6 +34,7 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
   episode?: number | null;
   releaseTitle: string;
   indexerName?: string | null;
+  publishDate?: string | null;
 }) {
   const normalized = normalizeReleaseTitle(input.releaseTitle);
   if (!normalized) return;
@@ -45,6 +47,7 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
       release_title: input.releaseTitle,
       normalized_title: normalized,
       indexer_name: input.indexerName ?? null,
+      publish_date: input.publishDate ?? null,
     })
     .run();
 
@@ -112,4 +115,48 @@ export function findMostRecentGrabForShow(
     .limit(5)
     .all() as GrabbedReleaseRow[];
   return rows[0] ?? null;
+}
+
+/**
+ * The most recent grab for a specific episode *of a show*. Stricter than
+ * findGrabbedReleaseForEpisode (which is show-agnostic and serves as an
+ * import hint); this is used to attach provenance when a landed file maps
+ * back to the show it was grabbed for.
+ */
+export function findGrabbedReleaseForShowEpisode(
+  self: DatabaseManager,
+  showId: string,
+  season: number,
+  episode: number,
+  withinDays = 30,
+): GrabbedReleaseRow | null {
+  const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000).toISOString();
+  const rows = self.drizz
+    .select()
+    .from(schema.grabbedReleases)
+    .where(and(
+      eq(schema.grabbedReleases.show_id, showId),
+      eq(schema.grabbedReleases.season_number, season),
+      eq(schema.grabbedReleases.episode_number, episode),
+      gte(schema.grabbedReleases.grabbed_at, cutoff),
+    ))
+    .orderBy(desc(schema.grabbedReleases.id))
+    .limit(1)
+    .all() as GrabbedReleaseRow[];
+  return rows[0] ?? null;
+}
+
+/** All grabs recorded for a show (used to learn the show's release delay). */
+export function listGrabbedReleasesForShow(
+  self: DatabaseManager,
+  showId: string,
+  limit = 200,
+): GrabbedReleaseRow[] {
+  return self.drizz
+    .select()
+    .from(schema.grabbedReleases)
+    .where(eq(schema.grabbedReleases.show_id, showId))
+    .orderBy(desc(schema.grabbedReleases.id))
+    .limit(limit)
+    .all() as GrabbedReleaseRow[];
 }
