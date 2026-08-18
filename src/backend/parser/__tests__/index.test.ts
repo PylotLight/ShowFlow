@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { FilenameParser } from '../index';
+import { FilenameParser, cleanReleaseName } from '../index';
 
 describe('FilenameParser', () => {
   const parser = new FilenameParser();
@@ -121,5 +121,36 @@ describe('FilenameParser', () => {
     const result = parser.parse('Some Anime 12.mkv');
     expect(result?.show).toBe('Some Anime');
     expect(result?.absoluteNumbers).toContain(12);
+  });
+});
+
+describe('cleanReleaseName', () => {
+  test('strips webrip quality token from display name', () => {
+    expect(cleanReleaseName('Reacher - S04E01 - City of Brotherly Love WEBRip-1080p.mkv'))
+      .toBe('Reacher - S04E01 - City of Brotherly Love');
+  });
+
+  test('strips bluray remux quality tokens', () => {
+    expect(cleanReleaseName('Breaking Bad - S03E08 - I See You Bluray-1080p Remux.mkv'))
+      .toBe('Breaking Bad - S03E08 - I See You');
+  });
+
+  test('keeps clean names unchanged', () => {
+    expect(cleanReleaseName('Reacher - S04E01 - City of Brotherly Love.mkv'))
+      .toBe('Reacher - S04E01 - City of Brotherly Love');
+  });
+
+  test('strips codec/hdr/audio tokens and release groups', () => {
+    expect(cleanReleaseName('[Group] Show.Name S01E02 1080p.HEVC.HDR.truehd.mkv'))
+      .toBe('Show Name S01E02');
+  });
+
+  test('strips bracketed resolution tags', () => {
+    expect(cleanReleaseName('Show S01E03 [1080p] [GROUP].mkv'))
+      .toBe('Show S01E03');
+  });
+
+  test('does not touch plain extensions only', () => {
+    expect(cleanReleaseName('Anime E1050.mkv')).toBe('Anime E1050');
   });
 });

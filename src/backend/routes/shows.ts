@@ -11,6 +11,7 @@ import fs from "node:fs";
 import type { RouteReq } from "./_shared";
 import { json, errorResponse, loadConfig, isProviderType, serializeRelease, toIsoUtc } from "./_shared";
 import { describeReasonCode } from "../core/pipeline/reason_codes";
+import { cleanReleaseName } from "../parser";
 
 /**
  * Resolve the show's own folder on disk so a folder-rename targets the right
@@ -787,7 +788,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                 file: file
                   ? {
                       path: file.file_path,
-                      name: file.original_name,
+                      name: cleanReleaseName(file.original_name),
                       size: file.file_size,
                       sourceKind: file.source_kind,
                       releaseTitle: file.release_title,
@@ -839,7 +840,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               season: f.season_number,
               episode: f.episode_number,
               path: f.file_path,
-              name: f.original_name,
+              name: cleanReleaseName(f.original_name),
               size: f.file_size,
               sourceKind: f.source_kind,
               releaseTitle: f.release_title,
@@ -1034,7 +1035,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                 const f = filesByShow.get(ep.show_id)?.get(`${ep.season_number}:${ep.episode_number}`);
                 return f ? {
                   path: f.file_path,
-                  name: f.original_name,
+                  name: cleanReleaseName(f.original_name),
                   releaseTitle: f.release_title,
                   indexerName: f.indexer_name,
                   publishDate: f.publish_date,

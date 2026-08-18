@@ -12,6 +12,8 @@ import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
 import { expectedReleaseTime } from "@frontend/lib/airtime";
+import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
+import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -21,6 +23,7 @@ interface UpcomingEpisode {
   airDate: string;
   filePath: string | null;
   expectedReleaseAt?: string | null;
+  file?: EpisodeFileInfo | null;
 }
 
 function formatAirTime(airDate: string) {
@@ -642,6 +645,9 @@ function Dashboard({
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {ep.filePath && (
+                              <MediaBadges media={ep.file?.media} max={3} className="hidden lg:inline-flex" />
+                            )}
                             {ep.filePath && (
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />

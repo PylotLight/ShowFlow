@@ -5,6 +5,8 @@ import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
+import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
+import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 import { cn } from "@frontend/lib/utils";
 
 export interface UpcomingEpisode {
@@ -14,6 +16,7 @@ export interface UpcomingEpisode {
   episode: number;
   airDate: string;
   filePath: string | null;
+  file?: EpisodeFileInfo | null;
 }
 
 function isPast(airDate: string): boolean {
@@ -167,6 +170,9 @@ function AgendaList({
                             )}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            {available && (
+                              <MediaBadges media={ep.file?.media} max={3} />
+                            )}
                             {available && (
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />

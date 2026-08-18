@@ -129,3 +129,36 @@ export class FilenameParser {
       .trim();
   }
 }
+
+/**
+ * Release-quality / rendering noise tokens that should not leak into a
+ * human-facing name. Matches the tokens Sonarr drops from its clean titles
+ * ({Episode Clean Title}) so ShowFlow's displayed file names line up with the
+ * Sonarr standard instead of embedding "WEBRip-1080p" / "Bluray-1080p Remux".
+ */
+const RELEASE_NOISE_PATTERN =
+  /\b(?:2160p|1440p|1080p|720p|576p|480p|360p|web[ ._-]?dl|web[ ._-]?rip|blu[ ._-]?ray|hdtv|dvd[ ._-]?rip|bd[ ._-]?rip|hd[ ._-]?rip|x264|x265|h[ ._-]?264|h[ ._-]?265|hevc|av1|10bit|8bit|hdr10|hdr|dolby[ ._-]?vision|dv|remux|repack|proper|extended|aac\d*|ac3|eac3?\d*|ddp\d*|flac|opus|truehd|dts[ ._-]?hd(?:[ ._-]?(?:ma|x))?|atmos|multilang(?:uages?)?|multi[ ._-]?audio|dual[ ._-]?audio|speakeasy|constantly|scale[ ._-]?web)\b/gi;
+
+/** Quietly removes the container extension from a filename for display. */
+export function removeContainerExtension(name: string): string {
+  return name.replace(/\.[^.\/\\]+$/, '');
+}
+
+/**
+ * Strips release-quality/noise tokens from a file name for display, keeping
+ * the on-disk filename untouched. Transforms
+ * "Reacher - S04E01 - City of Brotherly Love WEBRip-1080p.mkv" into
+ * "Reacher - S04E01 - City of Brotherly Love" - the same clean title logic
+ * Sonarr applies to "{Episode Clean Title}".
+ */
+export function cleanReleaseName(name: string): string {
+  let cleaned = removeContainerExtension(name)
+    .replace(/[\[\(\{][^\]\)\}]*[\]\)\}]/g, ' ')
+    .replace(RELEASE_NOISE_PATTERN, ' ')
+    .replace(/[._]+/g, ' ')
+    .replace(/\s+-\s+/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .replace(/[-\s]+$/, '')
+    .trim();
+  return cleaned || removeContainerExtension(name).trim();
+}

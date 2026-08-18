@@ -8,6 +8,8 @@ import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { formatAirtime, expectedReleaseTime } from "@frontend/lib/airtime";
 import { cn } from "@frontend/lib/utils";
+import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
+import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -18,6 +20,7 @@ interface UpcomingEpisode {
   showId: string;
   filePath: string | null;
   expectedReleaseAt?: string | null;
+  file?: EpisodeFileInfo | null;
 }
 
 function key(ep: UpcomingEpisode) {
@@ -412,6 +415,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                         </span>
                                       )}
                                     </div>
+                                    {available && <MediaBadges media={ep.file?.media} max={4} />}
                                   </div>
                                 </button>
                               );
