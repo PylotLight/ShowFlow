@@ -1,5 +1,6 @@
 import { db, ProwlarrConfigSchema, SonarrConfigSchema, JellyfinConfigSchema } from "../db";
 import { json, errorResponse, loadConfig, invalidateConfigCache } from "./_shared";
+import { renderEpisodeName, formatForSeriesType, type NamingConfig } from "../core/episode_naming";
 
 export function configRoutes() {
   return {
@@ -22,6 +23,41 @@ export function configRoutes() {
           const keys = Object.keys(body).join(', ');
           db.logEvent({ type: 'config', entityType: 'system', message: `Settings saved: ${keys}` });
           return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err);
+        }
+      },
+    },
+
+    "/api/naming/preview": {
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = (await req.json().catch(() => ({}))) as Partial<NamingConfig> & { seriesTitle?: string; originalFilename?: string };
+          const cfg = loadConfig() as unknown as NamingConfig & { seriesTitle?: string; originalFilename?: string };
+          const seriesTitle = body?.seriesTitle || cfg?.seriesTitle || "The Series Title's";
+          const originalFilename = body?.originalFilename || cfg?.originalFilename || "The.Series.Title's.S01E01.WEBRip.1080p.HEVC.x265.NSW.mkv";
+          const config: NamingConfig = {
+            standardEpisodeFormat: body?.standardEpisodeFormat ?? cfg?.standardEpisodeFormat,
+            dailyEpisodeFormat: body?.dailyEpisodeFormat ?? cfg?.dailyEpisodeFormat,
+            animeEpisodeFormat: body?.animeEpisodeFormat ?? cfg?.animeEpisodeFormat,
+            multiEpisodeStyle: body?.multiEpisodeStyle ?? cfg?.multiEpisodeStyle,
+            replaceIllegalCharacters: body?.replaceIllegalCharacters ?? cfg?.replaceIllegalCharacters,
+            colonReplacement: body?.colonReplacement ?? cfg?.colonReplacement,
+          };
+
+          const media = { height: 1080, codec: 'hevc', hdr: false, audioCodec: 'eac3', audioChannels: 6, container: 'mkv' };
+
+          const sample = (fmt: string, episodes: { season: number; episode: number; absoluteNumber?: number; title?: string; airDate?: string }[], seriesType: 'standard' | 'daily' | 'anime') =>
+            renderEpisodeName({ seriesTitle, seriesType, episodes, originalFilename, media, config }, fmt);
+
+          const fmt = (t: string) => formatForSeriesType(t, config);
+          return json({
+            standard: sample(fmt('standard'), [{ season: 1, episode: 1, title: "Episode Title" }], 'standard'),
+            standardMulti: sample(fmt('standard'), [{ season: 1, episode: 1, title: "Episode Title" }, { season: 1, episode: 2, title: "Episode Title" }, { season: 1, episode: 3, title: "Episode Title" }], 'standard'),
+            daily: sample(fmt('daily'), [{ season: 1, episode: 1, title: "Episode Title", airDate: "2013-10-30" }], 'daily'),
+            anime: sample(fmt('anime'), [{ season: 1, episode: 1, absoluteNumber: 1, title: "Episode Title" }], 'anime'),
+            animeMulti: sample(fmt('anime'), [{ season: 1, episode: 1, absoluteNumber: 1, title: "Episode Title" }, { season: 1, episode: 2, absoluteNumber: 2, title: "Episode Title" }], 'anime'),
+          });
         } catch (err) {
           return errorResponse(err);
         }

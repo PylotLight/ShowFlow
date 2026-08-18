@@ -27,6 +27,13 @@ export const ConfigSchema = z.object({
   onCollision: z.enum(['overwrite', 'skip', 'version']).default('skip'),
   dryRun: z.boolean().default(false),
   seasonFolderFormat: z.string().default('Season {season}'),
+  renameEpisodes: z.boolean().default(true),
+  replaceIllegalCharacters: z.boolean().default(true),
+  colonReplacement: z.enum(['smart', 'space', 'dash', 'delete']).default('smart'),
+  multiEpisodeStyle: z.enum(['extend', 'scene', 'office', 'repeat']).default('extend'),
+  standardEpisodeFormat: z.string().default('{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}'),
+  dailyEpisodeFormat: z.string().default('{Series Title} - {Air Date} - {Episode Title} {Quality Full}'),
+  animeEpisodeFormat: z.string().default('{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}'),
   importFolder: z.string().optional(),
   /**
    * IANA timezone used when a series has no recognisable originCountry

@@ -12,6 +12,7 @@ import type { RouteReq } from "./_shared";
 import { json, errorResponse, loadConfig, isProviderType, serializeRelease, toIsoUtc } from "./_shared";
 import { describeReasonCode } from "../core/pipeline/reason_codes";
 import { cleanReleaseName } from "../parser";
+import { buildEpisodeFileName, type NamingConfig } from "../core/episode_naming";
 
 /**
  * Resolve the show's own folder on disk so a folder-rename targets the right
@@ -503,6 +504,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const show = db.getShow(showId);
           if (!show) return errorResponse("Show not found", 404);
 
+          const config = loadConfig();
+          const fileMap = db.getCurrentEpisodeFilesByShow(showId);
           const episodes = db.listShowEpisodes(showId);
           const results: { season: number; episode: number; ok: boolean; skipped?: boolean; error?: string }[] = [];
 
@@ -510,7 +513,31 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             if (!ep.file_path) continue;
             const ext = path.extname(ep.file_path);
             const dir = path.dirname(ep.file_path);
-            const newName = `${show.title} - S${String(ep.season_number).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')}${ext}`;
+            const file = fileMap.get(`${ep.season_number}:${ep.episode_number}`);
+            const namingInput = {
+              seriesTitle: show.title,
+              seriesType: (show as any).series_type ?? 'standard',
+              episodes: [{
+                season: ep.season_number,
+                episode: ep.episode_number,
+                absoluteNumber: undefined,
+                title: undefined,
+                airDate: undefined,
+              }],
+              originalFilename: file?.original_name ?? null,
+              media: file
+                ? {
+                    height: file.video_height,
+                    codec: file.video_codec,
+                    hdr: !!file.hdr,
+                    audioCodec: file.audio_codec,
+                    audioChannels: file.audio_channels,
+                    container: file.container,
+                  }
+                : null,
+              config: (config as Record<string, unknown> & Partial<NamingConfig>),
+            };
+            const newName = buildEpisodeFileName(namingInput, ext) ?? path.basename(ep.file_path);
             const newPath = path.join(dir, newName);
 
             if (newPath === ep.file_path) {

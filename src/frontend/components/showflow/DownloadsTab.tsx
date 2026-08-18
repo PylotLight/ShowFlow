@@ -115,13 +115,6 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
             })}
           />
         </FieldRow>
-        <FieldRow label="Season Folder Format" description="Template for season subdirectories">
-          <Input
-            value={config.seasonFolderFormat || "Season {season}"}
-            onChange={e => saveConfig({ seasonFolderFormat: e.target.value })}
-            placeholder="Season {season}"
-          />
-        </FieldRow>
       </div>
     </GlassPanel>
   );

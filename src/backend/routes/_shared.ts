@@ -63,6 +63,13 @@ export function loadConfig(): Config {
     db.setSetting("onCollision", "skip");
     db.setSetting("dryRun", false);
     db.setSetting("seasonFolderFormat", "Season {season}");
+    db.setSetting("renameEpisodes", true);
+    db.setSetting("replaceIllegalCharacters", true);
+    db.setSetting("colonReplacement", "smart");
+    db.setSetting("multiEpisodeStyle", "extend");
+    db.setSetting("standardEpisodeFormat", "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}");
+    db.setSetting("dailyEpisodeFormat", "{Series Title} - {Air Date} - {Episode Title} {Quality Full}");
+    db.setSetting("animeEpisodeFormat", "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}");
     db.setSetting("apiKeys", {});
     db.setSetting("downloadClient", { type: "blackhole" });
     return loadConfig();

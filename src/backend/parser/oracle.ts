@@ -11,6 +11,7 @@ import type {
 } from '../core/types';
 import { debugLog } from '../core/debug';
 import { EpisodeMappingService } from '../core/episode_mappings';
+import { buildEpisodeFileName, type NamingConfig } from '../core/episode_naming';
 
 type ShowTitleType =
   | 'canonical'
@@ -897,12 +898,6 @@ export class Oracle {
 
     const seasonPadded = String(firstEpisode.season).padStart(2, '0');
 
-    const episodeCode = episodes.length === 1
-      ? `S${seasonPadded}E${String(firstEpisode.episode).padStart(2, '0')}`
-      : `S${seasonPadded}E${String(firstEpisode.episode).padStart(2, '0')}-${String(
-          episodes.at(-1)?.episode ?? firstEpisode.episode,
-        ).padStart(2, '0')}`;
-
     const seasonFolderFormat =
       (config?.seasonFolderFormat as string) || 'Season {season}';
     const seasonFolder = seasonFolderFormat
@@ -910,14 +905,27 @@ export class Oracle {
       .replace('{season}', String(firstEpisode.season));
 
     const safeShowTitle = this.sanitize(show.title);
-    const safeEpisodeTitle = firstEpisode.title
-      ? ` - ${this.sanitize(firstEpisode.title)}`
-      : '';
+
+    const seriesType =
+      (config?.seriesType as string) || (show.metadata?.seriesType as string) || 'standard';
+    const fileName = buildEpisodeFileName({
+      seriesTitle: show.title,
+      seriesType: (seriesType === 'daily' || seriesType === 'anime' ? seriesType : 'standard'),
+      episodes: episodes.map(e => ({
+        season: e.season,
+        episode: e.episode,
+        absoluteNumber: e.absoluteNumber,
+        title: e.title,
+        airDate: e.airDate,
+      })),
+      originalFilename,
+      config: (config ?? {}) as NamingConfig,
+    }, extension);
 
     return [
       safeShowTitle,
       seasonFolder,
-      `${safeShowTitle} - ${episodeCode}${safeEpisodeTitle}${extension}`,
+      fileName ?? originalFilename,
     ].join('/');
   }
 

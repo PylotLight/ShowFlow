@@ -12,6 +12,7 @@ import { IndexersTab } from "./IndexersTab";
 import { IntegrationsTab } from "./IntegrationsTab";
 import { AppearanceTab } from "./AppearanceTab";
 import { DownloadsTab } from "./DownloadsTab";
+import { NamingTab } from "./NamingTab";
 import { TasksPanel } from "./TasksPanel";
 import { BackupPanel } from "./BackupPanel";
 import { AnalyticsPanel } from "./AnalyticsPanel";
@@ -25,6 +26,7 @@ const SETTINGS_TABS = [
   { id: "indexers", label: "Indexers" },
   { id: "integrations", label: "Integrations" },
   { id: "quality", label: "Quality" },
+  { id: "naming", label: "Naming" },
   { id: "downloads", label: "Downloads" },
   { id: "tasks", label: "Tasks" },
   { id: "backup", label: "Backup" },
@@ -533,6 +535,13 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
         )}
 
         {tab === "quality" && <QualityProfilesTab />}
+
+        {tab === "naming" && (
+          <NamingTab
+            config={config}
+            saveConfig={saveConfig}
+          />
+        )}
 
         {tab === "downloads" && (
           <DownloadsTab
