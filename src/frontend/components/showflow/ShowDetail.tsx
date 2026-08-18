@@ -935,26 +935,33 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
 
       {organizePreview && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
-          <div className="w-full max-w-xl rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
             style={{ backdropFilter: "blur(16px)" }}>
-            <h3 className="font-display text-lg font-semibold text-white/90">Organize episodes?</h3>
-            <p className="text-xs text-muted-foreground -mt-2">
-              Files will be moved into the show's proper folder structure with your naming pattern. All paths relative to the show's library root.
-            </p>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-display text-lg font-semibold text-white/90">Organize episodes?</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Files will be moved into the show's proper folder structure with your naming pattern. All paths relative to the show's library root.
+                </p>
+              </div>
+              <span className="shrink-0 rounded-md bg-white/5 px-2 py-1 font-mono text-[11px] text-white/60">
+                {organizePreview.items.filter(i => i.action === 'move').length} move{organizePreview.items.filter(i => i.action === 'move').length === 1 ? '' : 's'}
+              </span>
+            </div>
 
             <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
               <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Naming pattern</div>
               <code className="text-signal text-xs break-all">{organizePreview.namingPattern}</code>
             </div>
 
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-black/20 divide-y divide-white/[0.04]">
+            <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-white/10 bg-black/20 divide-y divide-white/[0.04]">
               {organizePreview.items.length === 0 && (
                 <p className="px-3 py-3 text-xs text-muted-foreground">No episode files on disk to organize.</p>
               )}
               {organizePreview.items.map((item, idx) => {
                 const move = item.action === 'move';
                 return (
-                  <div key={idx} className="px-3 py-2 text-xs space-y-1">
+                  <div key={idx} className="px-3 py-2.5 text-xs space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-muted-foreground shrink-0">S{item.season}E{item.episode}</span>
                       <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${move ? "bg-amber-500/15 text-amber-400" : "bg-emerald-500/10 text-emerald-400"}`}>
@@ -962,11 +969,19 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
                       </span>
                     </div>
                     {move && (
-                      <>
-                        <div className="text-muted-foreground/60 truncate" title={item.currentPath}>{item.currentPath}</div>
-                        <div className="text-muted-foreground/40 font-mono text-[10px]">↓</div>
-                        <div className="text-signal truncate" title={item.targetPath}>{item.targetPath}</div>
-                      </>
+                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                        <div className="space-y-0.5">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60">From</div>
+                          <div className="text-muted-foreground/70 break-all font-mono text-[11px] leading-relaxed">{item.currentPath}</div>
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60">To</div>
+                          <div className="text-signal break-all font-mono text-[11px] leading-relaxed">{item.targetPath}</div>
+                        </div>
+                      </div>
+                    )}
+                    {!move && (
+                      <div className="text-muted-foreground/60 break-all font-mono text-[11px] leading-relaxed">{item.currentPath}</div>
                     )}
                   </div>
                 );
