@@ -2,7 +2,6 @@ import { Check, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchI
 import * as React from "react";
 
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
-import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 import {
   expectedReleaseTime,
   formatFileSize,
@@ -253,7 +252,6 @@ function EpisodeRow({
           }`}>
             {available ? "Available" : "Missing"}
           </span>
-          {available && <MediaBadges media={episode.file?.media} max={4} className="hidden md:inline-flex" />}
           <InfoPopover episode={episode} />
         </span>
       )}

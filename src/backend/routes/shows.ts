@@ -12,7 +12,8 @@ import type { RouteReq } from "./_shared";
 import { json, errorResponse, loadConfig, isProviderType, serializeRelease, toIsoUtc } from "./_shared";
 import { describeReasonCode } from "../core/pipeline/reason_codes";
 import { cleanReleaseName } from "../parser";
-import { buildEpisodeFileName, type NamingConfig } from "../core/episode_naming";
+import { buildEpisodeFileName, formatForSeriesType, type NamingConfig } from "../core/episode_naming";
+import { Oracle } from "../parser/oracle";
 
 /**
  * Resolve the show's own folder on disk so a folder-rename targets the right
@@ -497,6 +498,71 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    "/api/shows/:id/organize-preview": {
+      async GET(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const show = db.getShow(showId);
+          if (!show) return errorResponse("Show not found", 404);
+
+          const config = loadConfig();
+          const fileMap = db.getCurrentEpisodeFilesByShow(showId);
+          const episodes = db.listAllEpisodes(showId);
+          const oracle = new Oracle();
+          const seriesType = (show as any).series_type ?? 'standard';
+          const showLike = { title: show.title, metadata: { seriesType } } as any;
+          const rootFolder = db.getShowRootFolder(showId);
+
+          const namingConfig = {
+            ...(config as Record<string, unknown> & Partial<NamingConfig>),
+            seriesType,
+          };
+
+          const items: {
+            season: number;
+            episode: number;
+            currentPath: string | null;
+            targetPath: string;
+            action: 'correct' | 'move';
+          }[] = [];
+
+          for (const ep of episodes) {
+            if (!ep.file_path) continue;
+            const file = fileMap.get(`${ep.season_number}:${ep.episode_number}`);
+            const rel = oracle.buildProposedPath(
+              showLike,
+              [{
+                season: ep.season_number,
+                episode: ep.episode_number,
+                absoluteNumber: ep.absolute_number ?? undefined,
+                title: ep.title ?? undefined,
+                airDate: ep.air_date ?? undefined,
+              }],
+              file?.original_name ?? ep.file_path,
+              namingConfig,
+            );
+            const targetPath = rootFolder ? path.join(rootFolder, rel) : path.join(path.dirname(ep.file_path), path.basename(rel));
+            items.push({
+              season: ep.season_number,
+              episode: ep.episode_number,
+              currentPath: ep.file_path,
+              targetPath,
+              action: path.resolve(targetPath) === path.resolve(ep.file_path) ? 'correct' : 'move',
+            });
+          }
+
+          return json({
+            showId,
+            namingPattern: `${(config as any).seasonFolderFormat || 'Season {season}'} → ${formatForSeriesType(seriesType, config as any)}`,
+            items,
+            wouldChange: items.some(i => i.action === 'move'),
+          });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id/organize": {
       async POST(req: RouteReq) {
         try {
@@ -506,61 +572,82 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
 
           const config = loadConfig();
           const fileMap = db.getCurrentEpisodeFilesByShow(showId);
-          const episodes = db.listShowEpisodes(showId);
-          const results: { season: number; episode: number; ok: boolean; skipped?: boolean; error?: string }[] = [];
+          const episodes = db.listAllEpisodes(showId);
+          const oracle = new Oracle();
+          const seriesType = (show as any).series_type ?? 'standard';
+          const showLike = { title: show.title, metadata: { seriesType } } as any;
+          const rootFolder = db.getShowRootFolder(showId);
+          const namingConfig = {
+            ...(config as Record<string, unknown> & Partial<NamingConfig>),
+            seriesType,
+          };
+
+          const results: {
+            season: number;
+            episode: number;
+            ok: boolean;
+            skipped?: boolean;
+            moved?: boolean;
+            from?: string;
+            to?: string;
+            error?: string;
+          }[] = [];
 
           for (const ep of episodes) {
             if (!ep.file_path) continue;
-            const ext = path.extname(ep.file_path);
-            const dir = path.dirname(ep.file_path);
             const file = fileMap.get(`${ep.season_number}:${ep.episode_number}`);
-            const namingInput = {
-              seriesTitle: show.title,
-              seriesType: (show as any).series_type ?? 'standard',
-              episodes: [{
+            const rel = oracle.buildProposedPath(
+              showLike,
+              [{
                 season: ep.season_number,
                 episode: ep.episode_number,
-                absoluteNumber: undefined,
-                title: undefined,
-                airDate: undefined,
+                absoluteNumber: ep.absolute_number ?? undefined,
+                title: ep.title ?? undefined,
+                airDate: ep.air_date ?? undefined,
               }],
-              originalFilename: file?.original_name ?? null,
-              media: file
-                ? {
-                    height: file.video_height,
-                    codec: file.video_codec,
-                    hdr: !!file.hdr,
-                    audioCodec: file.audio_codec,
-                    audioChannels: file.audio_channels,
-                    container: file.container,
-                  }
-                : null,
-              config: (config as Record<string, unknown> & Partial<NamingConfig>),
-            };
-            const newName = buildEpisodeFileName(namingInput, ext) ?? path.basename(ep.file_path);
-            const newPath = path.join(dir, newName);
+              file?.original_name ?? ep.file_path,
+              namingConfig,
+            );
+            const targetPath = rootFolder ? path.join(rootFolder, rel) : path.join(path.dirname(ep.file_path), path.basename(rel));
 
-            if (newPath === ep.file_path) {
+            if (path.resolve(targetPath) === path.resolve(ep.file_path)) {
               results.push({ season: ep.season_number, episode: ep.episode_number, ok: true, skipped: true });
               continue;
             }
 
             try {
-              await fs.promises.rename(ep.file_path, newPath);
-              db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, newPath);
-              results.push({ season: ep.season_number, episode: ep.episode_number, ok: true });
+              await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+              try {
+                await fs.promises.rename(ep.file_path, targetPath);
+              } catch (err: any) {
+                if (err.code === 'EXDEV') {
+                  await fs.promises.copyFile(ep.file_path, targetPath);
+                  await fs.promises.unlink(ep.file_path);
+                } else {
+                  throw err;
+                }
+              }
+              db.updateEpisodeFilePath(showId, ep.season_number, ep.episode_number, targetPath);
+              if (file?.id) db.updateEpisodeFileRowPath(file.id, targetPath);
+              results.push({ season: ep.season_number, episode: ep.episode_number, ok: true, moved: true, from: ep.file_path, to: targetPath });
             } catch (err: any) {
               results.push({ season: ep.season_number, episode: ep.episode_number, ok: false, error: err.message });
             }
           }
 
           if (show) {
-            const renamedCount = results.filter(r => r.ok && !r.skipped).length;
-            const skippedCount = results.filter(r => r.skipped).length;
+            const movedCount = results.filter(r => r.ok && r.moved).length;
+            const skippedCount = results.filter(r => r.ok && r.skipped).length;
             const failedCount = results.filter(r => !r.ok).length;
-            db.logEvent({ type: 'organize', entityType: 'show', entityId: showId, message: `Organized "${show.title}": ${renamedCount} renamed, ${skippedCount} skipped, ${failedCount} failed` });
+            db.logEvent({ type: 'organize', entityType: 'show', entityId: showId, message: `Organized "${show.title}": ${movedCount} moved, ${skippedCount} already correct, ${failedCount} failed` });
           }
-          return json({ ok: true, renamed: results.filter(r => r.ok && !r.skipped).length, skipped: results.filter(r => r.skipped).length, failed: results.filter(r => !r.ok).length, results });
+          return json({
+            ok: true,
+            moved: results.filter(r => r.ok && r.moved).length,
+            skipped: results.filter(r => r.ok && r.skipped).length,
+            failed: results.filter(r => !r.ok).length,
+            results,
+          });
         } catch (err) {
           return errorResponse(err, 500);
         }
@@ -574,6 +661,74 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           if (!show) return errorResponse("Show not found.", 404);
           await new SyncManager(loadConfig()).syncShow(req.params.id!);
           return json({ ok: true });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    // ---- Duplicate detection & merge --------------------------------------
+    // Duplicate shows (the same series stored twice with slightly different
+    // titles - "HELL MODE - The Hardcore..." vs "HELL MODE: The Hardcore...")
+    // also produce macOS/SMB 8.3 short-name garbling in Finder. Detecting them
+    // and merging keeps one canonical folder per show.
+
+    "/api/shows/duplicates": {
+      async GET() {
+        try {
+          const { detectDuplicateShows } = await import("../core/show_merge");
+          return json({ groups: detectDuplicateShows(db) });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/merge": {
+      async POST(req: RouteReq) {
+        try {
+          const targetId = req.params.id!;
+          const body = (await req.json()) as { sourceShowId?: string };
+          const sourceId = body.sourceShowId;
+          if (!sourceId) return errorResponse("sourceShowId is required", 400);
+          if (sourceId === targetId) return errorResponse("Cannot merge a show into itself", 400);
+          if (!db.getShow(targetId)) return errorResponse("Target show not found", 404);
+          if (!db.getShow(sourceId)) return errorResponse("Source show not found", 404);
+          const { mergeShows } = await import("../core/show_merge");
+          const result = await mergeShows(db, targetId, sourceId);
+          return json({ ok: true, ...result });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/duplicates/merge-safe": {
+      async POST() {
+        try {
+          const { detectDuplicateShows, mergeShows } = await import("../core/show_merge");
+          const groups = detectDuplicateShows(db).filter(g => g.confidence === "high");
+          const merged: { targetId: string; sourceId: string }[] = [];
+          for (const group of groups) {
+            const shows = group.shows;
+            // Keep the show with the most current files (most complete), else
+            // the first one.
+            const keeper = [...shows].sort((a, b) =>
+              b.currentFileCount - a.currentFileCount ||
+              b.episodeCount - a.episodeCount
+            )[0];
+            if (!keeper) continue;
+            for (const dup of shows) {
+              if (dup.id === keeper.id) continue;
+              try {
+                await mergeShows(db, keeper.id, dup.id);
+                merged.push({ targetId: keeper.id, sourceId: dup.id });
+              } catch (err: any) {
+                console.error(`[merge] failed ${dup.id} -> ${keeper.id}:`, err.message);
+              }
+            }
+          }
+          return json({ ok: true, merged });
         } catch (err) {
           return errorResponse(err, 500);
         }

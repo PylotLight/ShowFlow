@@ -188,6 +188,20 @@ export function updateEpisodeFileMedia(self: DatabaseManager, rowId: number, med
 }
 
 /**
+ * Update the on-disk path of an episode_files row (used when a file is
+ * renamed/moved in place by organize). The original_name is preserved - that
+ * is the *release* name, which should not change just because the file was
+ * relocated.
+ */
+export function updateEpisodeFileRowPath(self: DatabaseManager, rowId: number, filePath: string) {
+  return self.drizz
+    .update(schema.episodeFiles)
+    .set({ file_path: filePath })
+    .where(eq(schema.episodeFiles.id, rowId))
+    .run();
+}
+
+/**
  * Rows on disk that have never been probed (media columns null) but carry a
  * file path - the backfill target after the probe feature ships. Ordered by
  * show so the backfill can be chunked per show if needed.

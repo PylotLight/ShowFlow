@@ -82,6 +82,12 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [grabTarget, setGrabTarget] = React.useState<GrabTarget>(null);
   const [relocating, setRelocating] = React.useState(false);
   const [organizing, setOrganizing] = React.useState(false);
+  const [organizePreview, setOrganizePreview] = React.useState<{
+    namingPattern: string;
+    items: { season: number; episode: number; currentPath: string; targetPath: string; action: 'correct' | 'move' }[];
+    wouldChange: boolean;
+  } | null>(null);
+  const [organizeApplying, setOrganizeApplying] = React.useState(false);
   const [renamingFolder, setRenamingFolder] = React.useState(false);
   const [renamePreview, setRenamePreview] = React.useState<{
     currentFolderPath: string;
@@ -308,18 +314,42 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   async function handleOrganize() {
     setOrganizing(true);
     try {
+      const res = await fetch(`/api/shows/${show.id}/organize-preview`);
+      if (!res.ok) throw new Error("Failed to load organize preview");
+      const data = await res.json();
+      setOrganizePreview({
+        namingPattern: data.namingPattern ?? "",
+        items: data.items ?? [],
+        wouldChange: data.wouldChange ?? false,
+      });
+    } catch (err: any) {
+      flashStatus(err.message ?? "Failed to load organize preview.", false);
+    } finally {
+      setOrganizing(false);
+    }
+  }
+
+  async function handleOrganizeApply() {
+    if (!organizePreview) return;
+    setOrganizeApplying(true);
+    try {
       const res = await fetch(`/api/shows/${show.id}/organize`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to organize files");
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "Failed to organize files");
+      }
       const data = await res.json();
       const parts: string[] = [];
-      if (data.renamed > 0) parts.push(`Renamed ${data.renamed} file${data.renamed !== 1 ? "s" : ""}`);
+      if (data.moved > 0) parts.push(`Moved ${data.moved} file${data.moved !== 1 ? "s" : ""} into the show folder`);
       if (data.skipped > 0) parts.push(`${data.skipped} already correct`);
-      flashStatus(parts.length > 0 ? parts.join(", ") + "." : "No files to rename.");
-      if (data.renamed > 0) loadEpisodes();
+      if (data.failed > 0) parts.push(`${data.failed} failed`);
+      flashStatus(parts.length > 0 ? parts.join(", ") + "." : "No files to move.");
+      setOrganizePreview(null);
+      if (data.moved > 0) loadEpisodes();
     } catch (err: any) {
       flashStatus(err.message ?? "Failed to organize files.", false);
     } finally {
-      setOrganizing(false);
+      setOrganizeApplying(false);
     }
   }
 
@@ -902,6 +932,83 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             });
         }}
       />
+
+      {organizePreview && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+          <div className="w-full max-w-xl rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
+            style={{ backdropFilter: "blur(16px)" }}>
+            <h3 className="font-display text-lg font-semibold text-white/90">Organize episodes?</h3>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Files will be moved into the show's proper folder structure with your naming pattern. All paths relative to the show's library root.
+            </p>
+
+            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Naming pattern</div>
+              <code className="text-signal text-xs break-all">{organizePreview.namingPattern}</code>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-black/20 divide-y divide-white/[0.04]">
+              {organizePreview.items.length === 0 && (
+                <p className="px-3 py-3 text-xs text-muted-foreground">No episode files on disk to organize.</p>
+              )}
+              {organizePreview.items.map((item, idx) => {
+                const move = item.action === 'move';
+                return (
+                  <div key={idx} className="px-3 py-2 text-xs space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-muted-foreground shrink-0">S{item.season}E{item.episode}</span>
+                      <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${move ? "bg-amber-500/15 text-amber-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+                        {move ? "move" : "correct"}
+                      </span>
+                    </div>
+                    {move && (
+                      <>
+                        <div className="text-muted-foreground/60 truncate" title={item.currentPath}>{item.currentPath}</div>
+                        <div className="text-muted-foreground/40 font-mono text-[10px]">↓</div>
+                        <div className="text-signal truncate" title={item.targetPath}>{item.targetPath}</div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {!organizePreview.wouldChange ? (
+              <p className="text-xs text-muted-foreground">
+                All files already sit at their target paths — nothing to do.
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-400/80 border border-amber-500/30 rounded px-2 py-1.5 bg-amber-500/5">
+                Plex/Jellyfin libraries will need a scan after the move.
+              </p>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setOrganizePreview(null)}
+                className="flex-1 rounded-md border border-white/10 text-muted-foreground text-sm font-medium py-2 hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={organizeApplying || !organizePreview.wouldChange}
+                onClick={handleOrganizeApply}
+                className="flex-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 text-sm font-medium py-2 transition-colors disabled:opacity-50"
+              >
+                {organizeApplying ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2Icon className="size-3.5 animate-spin" /> Organizing...
+                  </span>
+                ) : (
+                  "Move Files"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {renamePreview && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>

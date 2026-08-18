@@ -4,6 +4,7 @@ import * as React from "react";
 import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
 import { PosterCard, type ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { BulkUpdateDialog } from "@frontend/components/showflow/BulkUpdateDialog";
+import { DuplicatesDialog } from "@frontend/components/showflow/DuplicatesDialog";
 import { cn } from "@frontend/lib/utils";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
@@ -44,6 +45,7 @@ export function Library({
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [removing, setRemoving] = React.useState(false);
   const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = React.useState(false);
 
   const [sortBy, setSortBy] = React.useState<'title' | 'added' | 'updated' | 'tracked' | 'grabbed'>('title');
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('asc');
@@ -318,6 +320,15 @@ export function Library({
                     {filtered && filtered.length > 0 && filtered.every(s => selectedIds.has(s.id)) ? 'Deselect All' : 'Select All'}
                   </button>
 
+                  {/* Duplicates */}
+                  <button
+                    onClick={() => setDuplicatesOpen(true)}
+                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                  >
+                    <ListFilter className="size-3" />
+                    Duplicates
+                  </button>
+
                   {/* Poster size slider */}
                   <div className="flex items-center gap-2">
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -432,6 +443,12 @@ export function Library({
           loadShows();
           setSelectedIds(new Set());
         }}
+      />
+
+      <DuplicatesDialog
+        open={duplicatesOpen}
+        onOpenChange={setDuplicatesOpen}
+        onMerged={loadShows}
       />
     </>
   );

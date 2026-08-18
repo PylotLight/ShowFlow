@@ -5,7 +5,7 @@ import type { DatabaseManager } from './index';
 
 // ---- Title normalization ----
 
-function normalizeShowTitle(title: string): string {
+export function normalizeShowTitle(title: string): string {
   return title
     .normalize('NFKC')
     .replace(/[._]+/g, ' ')
