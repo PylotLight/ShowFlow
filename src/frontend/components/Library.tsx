@@ -326,7 +326,7 @@ export function Library({
                     className="flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
                   >
                     <ListFilter className="size-3" />
-                    Duplicates
+                    Overlaps
                   </button>
 
                   {/* Poster size slider */}

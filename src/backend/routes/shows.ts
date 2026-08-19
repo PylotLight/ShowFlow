@@ -667,17 +667,35 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
-    // ---- Duplicate detection & merge --------------------------------------
-    // Duplicate shows (the same series stored twice with slightly different
-    // titles - "HELL MODE - The Hardcore..." vs "HELL MODE: The Hardcore...")
-    // also produce macOS/SMB 8.3 short-name garbling in Finder. Detecting them
-    // and merging keeps one canonical folder per show.
+    // ---- Overlapping-folder detection & consolidation ----------------------
+    // Duplicate *folders* in a library root (the same series stored under two
+    // near-identical names - "HELL MODE - The Hardcore..." vs "HELL MODE: The
+    // Hardcore...") produce macOS/SMB 8.3 short-name garbling in Finder and
+    // split a show's files across two places. Detection groups folders whose
+    // normalized names collide; consolidation moves files into the canonical
+    // folder (per-group approval from the UI) and rewrites DB paths.
 
     "/api/shows/duplicates": {
       async GET() {
         try {
-          const { detectDuplicateShows } = await import("../core/show_merge");
-          return json({ groups: detectDuplicateShows(db) });
+          const { detectOverlappingFolders } = await import("../core/folder_dedup");
+          return json({ groups: await detectOverlappingFolders(db) });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/duplicates/consolidate": {
+      async POST(req: RouteReq) {
+        try {
+          const body = (await req.json()) as { rootFolder?: string; key?: string };
+          if (!body.rootFolder || !body.key) {
+            return errorResponse("rootFolder and key are required", 400);
+          }
+          const { consolidateOverlappingFolders } = await import("../core/folder_dedup");
+          const result = await consolidateOverlappingFolders(db, body.rootFolder, body.key);
+          return json({ ok: true, ...result });
         } catch (err) {
           return errorResponse(err, 500);
         }
@@ -697,38 +715,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const { mergeShows } = await import("../core/show_merge");
           const result = await mergeShows(db, targetId, sourceId);
           return json({ ok: true, ...result });
-        } catch (err) {
-          return errorResponse(err, 500);
-        }
-      },
-    },
-
-    "/api/shows/duplicates/merge-safe": {
-      async POST() {
-        try {
-          const { detectDuplicateShows, mergeShows } = await import("../core/show_merge");
-          const groups = detectDuplicateShows(db).filter(g => g.confidence === "high");
-          const merged: { targetId: string; sourceId: string }[] = [];
-          for (const group of groups) {
-            const shows = group.shows;
-            // Keep the show with the most current files (most complete), else
-            // the first one.
-            const keeper = [...shows].sort((a, b) =>
-              b.currentFileCount - a.currentFileCount ||
-              b.episodeCount - a.episodeCount
-            )[0];
-            if (!keeper) continue;
-            for (const dup of shows) {
-              if (dup.id === keeper.id) continue;
-              try {
-                await mergeShows(db, keeper.id, dup.id);
-                merged.push({ targetId: keeper.id, sourceId: dup.id });
-              } catch (err: any) {
-                console.error(`[merge] failed ${dup.id} -> ${keeper.id}:`, err.message);
-              }
-            }
-          }
-          return json({ ok: true, merged });
         } catch (err) {
           return errorResponse(err, 500);
         }

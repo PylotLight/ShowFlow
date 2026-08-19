@@ -1,12 +1,18 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DatabaseManager } from "./index";
-import { detectDuplicateShows, mergeShows } from "../core/show_merge";
-import { test, expect, afterAll } from "bun:test";
+import { mergeShows } from "../core/show_merge";
+import { detectOverlappingFolders, consolidateOverlappingFolders } from "../core/folder_dedup";
+import { test, expect, afterAll, beforeEach } from "bun:test";
 
-const db = new DatabaseManager("/tmp/opencode/merge-test.db");
+const db = new DatabaseManager("/tmp/opencode/folder-dedup-test.db");
+let tmpRoot = "";
 
 afterAll(() => {
   db.close();
-  require("node:fs").rmSync("/tmp/opencode/merge-test.db", { force: true });
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+  fs.rmSync("/tmp/opencode/folder-dedup-test.db", { force: true });
 });
 
 function makeShow(title: string, i: number, seriesType = "standard") {
@@ -22,22 +28,15 @@ function makeShow(title: string, i: number, seriesType = "standard") {
   return db.getShow(uuid) as any;
 }
 
-test("detects identical normalized titles as duplicates", () => {
-  const a = makeShow("HELL MODE - The Hardcore Gamer Dominates in Another World with Garbage Balancing", 1);
-  const b = makeShow("HELL MODE: The Hardcore Gamer Dominates in Another World with Garbage Balancing", 2);
-  const c = makeShow("A Completely Different Show", 3);
+function makeFolder(name: string): string {
+  const dir = path.join(tmpRoot, name);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
-  const groups = detectDuplicateShows(db);
-  const high = groups.filter(g => g.confidence === "high");
-  expect(high.length).toBe(1);
-  const top = high[0]!;
-  expect(top.shows.length).toBe(2);
-  expect(top.shows.map(s => s.title).sort()).toEqual(
-    [a.title, b.title].sort()
-  );
-
-  const ids = new Set(groups.flatMap(g => g.shows.map(s => s.id)));
-  expect(ids.has(c.id)).toBe(false);
+beforeEach(() => {
+  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-folder-dedup-"));
+  db.saveShowProfile("lib-anime", "Anime", tmpRoot);
 });
 
 test("merge folds episodes and providers into target", async () => {
@@ -57,4 +56,51 @@ test("merge folds episodes and providers into target", async () => {
   const aEpisodes = db.listAllEpisodes(a.id);
   expect(aEpisodes.length).toBe(2);
   expect(db.getShow(b.id)).toBeNull();
+});
+
+test("detects overlapping folders that normalize to the same key", async () => {
+  const show = makeShow("HELL MODE: The Hardcore Gamer Dominates in Another World with Garbage Balancing", 1);
+  makeShow("A Completely Different Show", 2);
+
+  const f1 = makeFolder("HELL MODE - The Hardcore Gamer Dominates in Another World with Garbage Balancing");
+  const f2 = makeFolder("HELL MODE: The Hardcore Gamer Dominates in Another World with Garbage Balancing");
+  makeFolder("A Completely Different Show");
+
+  fs.writeFileSync(path.join(f1, "S01E01.mkv"), "a");
+  fs.writeFileSync(path.join(f2, "S01E02.mkv"), "b");
+
+  const groups = await detectOverlappingFolders(db);
+  expect(groups.length).toBe(1);
+  const group = groups[0]!;
+  expect(group.folders.length).toBe(2);
+  expect(group.canonicalFolder).toBe(f2);
+  expect(group.wouldMove.length).toBe(1);
+  expect(group.wouldMove[0]!.from).toBe(path.join(f1, "S01E01.mkv"));
+  expect(group.wouldMove[0]!.to).toBe(path.join(f2, "S01E01.mkv"));
+});
+
+test("consolidation moves files into the canonical folder and removes the other", async () => {
+  makeShow("HELL MODE: The Hardcore Gamer Dominates in Another World with Garbage Balancing", 1);
+  makeShow("A Completely Different Show", 2);
+
+  const f1 = makeFolder("HELL MODE - The Hardcore Gamer Dominates in Another World with Garbage Balancing");
+  const f2 = makeFolder("HELL MODE: The Hardcore Gamer Dominates in Another World with Garbage Balancing");
+  makeFolder("A Completely Different Show");
+
+  fs.writeFileSync(path.join(f1, "S01E01.mkv"), "a");
+  fs.writeFileSync(path.join(f1, "S01E02.mkv"), "b");
+
+  const groups = await detectOverlappingFolders(db);
+  const group = groups[0]!;
+  const result = await consolidateOverlappingFolders(db, tmpRoot, group.key);
+
+  expect(result.moved).toBe(2);
+  expect(result.removedFolders).toEqual([f1]);
+  expect(fs.existsSync(path.join(f2, "S01E01.mkv"))).toBe(true);
+  expect(fs.existsSync(path.join(f2, "S01E02.mkv"))).toBe(true);
+  expect(fs.existsSync(f1)).toBe(false);
+
+  // After consolidation no groups remain.
+  const remaining = await detectOverlappingFolders(db);
+  expect(remaining.length).toBe(0);
 });
