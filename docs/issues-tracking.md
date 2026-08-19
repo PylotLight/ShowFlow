@@ -199,6 +199,8 @@ UNIQUE(show_id, scene_season, scene_episode)
 - [ ] Manual rename on a show with existing episodes.
 - [ ] Decide whether `Organize` should respect any future per-`library_type` `series_folder_format` template (currently hardcoded `show - S01E01.ext`).
 
+**Amendment (2026-08-19):** Colons are now stripped too. macOS/APFS cannot represent `:` and Samba exposes such folders to Finder as 8.3 mangled names (e.g. `REJ1JG~5`), so keeping colons verbatim broke SMB shares. Existing colon-named folders/files were renamed and DB paths rewritten in-place.
+
 ---
 
 ## Backlog / Unprioritised

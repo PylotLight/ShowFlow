@@ -930,11 +930,11 @@ export class Oracle {
   }
 
   private sanitize(value: string): string {
-    // Only strip characters that are illegal on the filesystems ShowFlow
-    // targets (NTFS/SMB and POSIX). Colons in particular are kept verbatim so
-    // folders like "Mushoku Tensei: Jobless Reincarnation" match Sonarr's
-    // preferred format and what anime fans expect. See issues-tracking.md #5.
-    return value.replace(/[<>"/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    // Strip characters that are illegal on the filesystems ShowFlow targets
+    // (NTFS/SMB and POSIX). Colons are stripped too: they are legal on POSIX
+    // but illegal on macOS/APFS and in SMB, so a colon in a folder name makes
+    // Samba expose an 8.3 mangled name (e.g. "REJ1JG~5") to Mac Finder.
+    return value.replace(/[<>":/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
   }
 
   /**

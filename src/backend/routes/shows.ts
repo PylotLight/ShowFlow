@@ -26,7 +26,7 @@ import { Oracle } from "../parser/oracle";
  */
 function resolveShowFolder(show: any, rootFolder: string, episodes: any[]) {
   const sanitizedTitle = (show.title || '')
-    .replace(/[<>"/\\|?*]/g, '')
+    .replace(/[<>":/\\|?*]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 

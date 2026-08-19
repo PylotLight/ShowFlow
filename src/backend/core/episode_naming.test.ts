@@ -93,6 +93,16 @@ describe("renderEpisodeName", () => {
     expect(out).not.toContain(":");
   });
 
+  test("strips colons from the series title (Samba/macOS 8.3 mangling)", () => {
+    const out = renderEpisodeName({
+      ...baseInput,
+      seriesTitle: "HELL MODE: The Hardcore Gamer Dominates in Another World",
+      episodes: [{ season: 1, episode: 1, title: "Episode Title" }],
+    }, "{Series Clean Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}");
+    expect(out).not.toContain(":");
+    expect(out).toContain("HELL MODE The Hardcore Gamer");
+  });
+
   test("supports {MediaInfo} tokens", () => {
     const out = renderEpisodeName({
       ...baseInput,
