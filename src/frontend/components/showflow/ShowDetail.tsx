@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, Columns2, DownloadIcon, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
+import { Check, ChevronLeft, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -6,6 +6,7 @@ import { EpisodeRow, type EpisodeData, type ColumnDef } from "@frontend/componen
 import { ManageSourcesDialog } from "@frontend/components/showflow/ManageSourcesDialog";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
 import { EpisodeMappingDialog } from "@frontend/components/showflow/EpisodeMappingDialog";
+import { EpisodeDuplicatesDialog } from "@frontend/components/showflow/EpisodeDuplicatesDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { formatDelayMinutes } from "@frontend/lib/airtime";
@@ -78,6 +79,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [releaseDelayMinutes, setReleaseDelayMinutes] = React.useState<number | null>(null);
 
   const [manageSourcesOpen, setManageSourcesOpen] = React.useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = React.useState(false);
   const [searchTarget, setSearchTarget] = React.useState<SearchTarget | null>(null);
   const [grabTarget, setGrabTarget] = React.useState<GrabTarget>(null);
   const [relocating, setRelocating] = React.useState(false);
@@ -89,6 +91,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   } | null>(null);
   const [organizeApplying, setOrganizeApplying] = React.useState(false);
   const [renamingFolder, setRenamingFolder] = React.useState(false);
+  const [renameSeriesOpen, setRenameSeriesOpen] = React.useState(false);
+  const [renameSeriesTitle, setRenameSeriesTitle] = React.useState("");
+  const [renamingSeries, setRenamingSeries] = React.useState(false);
   const [renamePreview, setRenamePreview] = React.useState<{
     currentFolderPath: string;
     currentFolderName: string;
@@ -392,6 +397,37 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     }
   }
 
+  async function handleRenameSeries() {
+    const title = renameSeriesTitle.trim();
+    if (!title) return;
+    setRenamingSeries(true);
+    try {
+      const res = await fetch(`/api/shows/${show.id}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Rename failed");
+      setRenameSeriesOpen(false);
+      flashStatus(
+        `Renamed to "${data.to}".` +
+        (data.folderRenamed ? ` Folder moved (${data.episodesUpdated} episode path${data.episodesUpdated !== 1 ? "s" : ""} updated).` : "") +
+        (data.folderError ? ` ${data.folderError}.` : ""),
+        !data.folderError,
+      );
+      // Title + folder changed; the show list needs a refresh so the new
+      // title/poster path is picked up.
+      if (onToggleExpand) onToggleExpand();
+      window.dispatchEvent(new CustomEvent("showflow-refresh-shows", { detail: { showId: show.id, title: data.to } }));
+      if (activeSeason != null) loadEpisodes();
+    } catch (err: any) {
+      flashStatus(err.message ?? "Failed to rename series.", false);
+    } finally {
+      setRenamingSeries(false);
+    }
+  }
+
   async function autoGrabEpisode(episode: EpisodeData) {
     setGrabTarget(episode.episode);
     try {
@@ -563,6 +599,10 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           <button onClick={handleScanDir} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
             <FolderSearch className="size-3.5" />
             Scan
+          </button>
+          <button onClick={() => setDuplicatesOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
+            <FolderArchive className="size-3.5" />
+            Dedupe
           </button>
           <button onClick={removeShow} className="text-muted-foreground hover:text-red-400 text-sub font-mono tracking-wider uppercase transition-colors">
             Remove
@@ -815,6 +855,15 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
                       <FolderSearch className="size-3" />
                     )}
                     Rename Folder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRenameSeriesTitle(show.title); setRenameSeriesOpen(true); }}
+                    title="Rename the series title (matches how Sonarr renames a series)"
+                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
+                  >
+                    <PencilIcon className="size-3" />
+                    Rename Series
                   </button>
                 </div>
               )}
@@ -1100,6 +1149,53 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         </div>
       )}
 
+      {renameSeriesOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+          <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4"
+            style={{ backdropFilter: "blur(16px)" }}>
+            <h3 className="font-display text-lg font-semibold text-white/90">Rename series</h3>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Changes the series title everywhere: the library display name, episode naming, and the on-disk
+              folder (which is renamed to match the new title, with episode paths updated). The old title stays
+              registered as an alias so files already on disk keep matching.
+            </p>
+            <label className="block space-y-1.5">
+              <span className="text-caption font-mono uppercase tracking-wider text-muted-foreground/70">Title</span>
+              <input
+                value={renameSeriesTitle}
+                onChange={(e) => setRenameSeriesTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && renameSeriesTitle.trim()) handleRenameSeries(); }}
+                autoFocus
+                className="w-full rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-foreground outline-none focus:border-signal/50 focus:ring-1 focus:ring-signal/30"
+              />
+            </label>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenameSeriesOpen(false)}
+                className="flex-1 rounded-md border border-white/10 text-muted-foreground text-sm font-medium py-2 hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={renamingSeries || !renameSeriesTitle.trim()}
+                onClick={handleRenameSeries}
+                className="flex-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 text-sm font-medium py-2 transition-colors disabled:opacity-50"
+              >
+                {renamingSeries ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2Icon className="size-3.5 animate-spin" /> Renaming...
+                  </span>
+                ) : (
+                  "Rename Series"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <EpisodeMappingDialog
         showId={show.id}
         showTitle={show.title}
@@ -1110,6 +1206,13 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             setMappingHealth(data.config?.episodeMapping?.health ?? 'none');
           }).catch(() => {});
         }}
+      />
+
+      <EpisodeDuplicatesDialog
+        showId={show.id}
+        open={duplicatesOpen}
+        onOpenChange={setDuplicatesOpen}
+        onResolved={() => loadEpisodes()}
       />
 
       {moveDialog && (

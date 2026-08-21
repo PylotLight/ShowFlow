@@ -76,6 +76,20 @@ export function App() {
     }
   }
 
+  // Refresh the library grid + show detail after data-changing actions
+  // (e.g. renaming a series from the detail modal) fire this event.
+  React.useEffect(() => {
+    const onRefresh = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { showId?: string; title?: string } | undefined;
+      if (detail?.showId && detail?.title) {
+        setSelected(prev => prev && prev.id === detail.showId ? { ...prev, title: detail.title } : prev);
+      }
+      setRefreshKey(k => k + 1);
+    };
+    window.addEventListener("showflow-refresh-shows", onRefresh);
+    return () => window.removeEventListener("showflow-refresh-shows", onRefresh);
+  }, []);
+
   function reRunWizard() {
     localStorage.removeItem("showflow-onboarding");
     wizardManual.current = true;

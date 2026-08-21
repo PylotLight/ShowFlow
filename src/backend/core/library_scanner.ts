@@ -1,4 +1,5 @@
 import { db, type Config } from '../db';
+import { normalizeShowTitle } from '../db/shows';
 import { FilenameParser } from '../parser';
 import { debugLog } from './debug';
 import { probeMediaFile, mediaFromStoredRow } from './media_probe';
@@ -131,16 +132,41 @@ export class LibraryScanner {
         continue;
       }
 
-      // Try to find the show in the DB by name
-      const shows = db.getShowByName(parsed.show);
+      // Try to find the show in the DB by name. `getShowByName` does a raw
+      // LIKE against the exact parsed title, which misses on-title variants
+      // (e.g. "Re - ZERO, ..." on disk vs "Re: ZERO, ..." in the DB) — that
+      // leaves on-disk files permanently unmapped/unreconciled. Fall back to
+      // the normalized show_titles index (same matching the per-show scan
+      // uses) so variant-titled files still get picked up and reconciled.
+      let shows = db.getShowByName(parsed.show);
+      if (shows.length === 0) {
+        const normalized = normalizeShowTitle(parsed.show);
+        const normalizedHits = db.findShowsByNormalizedTitle(normalized) ?? [];
+        // Normalized lookups return a different shape (showId/showTitle); map
+        // to the same shape getShowByName returns so the rest of scan() is
+        // agnostic.
+        shows = normalizedHits.map((r: any) => ({
+          ...r,
+          id: r.showId,
+          title: r.showTitle,
+          original_title: r.showOriginalTitle,
+        }));
+      }
       if (shows.length === 0) {
         debugLog(`Show not found in database: ${parsed.show} (${filename})`);
         unknownCount++;
         continue;
       }
 
-      // Use the first match
-      const show = shows[0];
+      // Verify the match actually covers the parsed title (the LIKE path can
+      // hit substring false-positives); otherwise skip so we never map a
+      // file to the wrong show.
+      const show = shows.find((s: any) => this.titleMatchesShow(parsed.show, s.title, s)) ?? shows[0];
+      if (!show) {
+        debugLog(`Show not found in database: ${parsed.show} (${filename})`);
+        unknownCount++;
+        continue;
+      }
       const showId = show.id;
 
       if (parsed.season !== undefined && parsed.episodes) {

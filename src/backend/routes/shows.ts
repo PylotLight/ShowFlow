@@ -498,6 +498,82 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
     },
 
+    "/api/shows/:id/rename": {
+      async POST(req: RouteReq) {
+        try {
+          const body = await req.json() as { title?: string };
+          const newTitle = body?.title?.trim();
+          if (!newTitle) return errorResponse("A title is required.", 400);
+
+          const showId = req.params.id!;
+          const show = db.getShow(showId);
+          if (!show) return errorResponse("Show not found", 404);
+
+          const result = db.renameShow(showId, newTitle);
+          if (!result.renamed) {
+            if (result.reason === 'unchanged') return json({ ok: true, renamed: false, message: 'Title is unchanged.' });
+            if (result.reason === 'not-found') return errorResponse("Show not found", 404);
+            return errorResponse("Could not rename show.", 400);
+          }
+
+          const rootFolder = db.getShowRootFolder(showId);
+          const episodes = db.listShowEpisodes(showId);
+          // Refetch so the folder target derives from the NEW title.
+          const renamedShow = db.getShow(showId);
+          let folderRenamed = false;
+          let episodesUpdated = 0;
+          let folderError: string | undefined;
+
+          if (rootFolder && renamedShow) {
+            const { currentFolderPath, targetFolderPath, wouldChange } =
+              resolveShowFolder(renamedShow, rootFolder, episodes);
+            if (wouldChange && fs.existsSync(currentFolderPath) && !fs.existsSync(targetFolderPath)) {
+              const pathUpdates: { season: number; episode: number; newPath: string }[] = [];
+              for (const ep of episodes) {
+                if (!ep.file_path) continue;
+                if (!ep.file_path.startsWith(currentFolderPath)) continue;
+                const relative = ep.file_path.slice(currentFolderPath.length).replace(/^[/\\]/, '');
+                pathUpdates.push({ season: ep.season_number, episode: ep.episode_number, newPath: path.join(targetFolderPath, relative) });
+              }
+              await fs.promises.rename(currentFolderPath, targetFolderPath);
+              for (const u of pathUpdates) {
+                db.updateEpisodeFilePath(showId, u.season, u.episode, u.newPath);
+                episodesUpdated++;
+              }
+              folderRenamed = true;
+            } else if (wouldChange) {
+              folderError = fs.existsSync(targetFolderPath)
+                ? `Target folder already exists: ${targetFolderPath}`
+                : `Source folder does not exist: ${currentFolderPath}`;
+            }
+          }
+
+          // Re-scan so any files that used the old title variant on disk get
+          // re-mapped (and duplicates reconciled) under the new title.
+          await systemManager.scanShow(showId);
+
+          db.logEvent({
+            type: 'organize',
+            entityType: 'show',
+            entityId: showId,
+            message: `Renamed show "${result.oldTitle}" → "${result.newTitle}"${folderRenamed ? `, folder moved to ${path.basename(targetFolderPath)} (${episodesUpdated} episode paths updated)` : ''}`,
+          });
+
+          return json({
+            ok: true,
+            renamed: true,
+            from: result.oldTitle,
+            to: result.newTitle,
+            folderRenamed,
+            episodesUpdated,
+            folderError,
+          });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/shows/:id/organize-preview": {
       async GET(req: RouteReq) {
         try {
@@ -512,6 +588,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const seriesType = (show as any).series_type ?? 'standard';
           const showLike = { title: show.title, metadata: { seriesType } } as any;
           const rootFolder = db.getShowRootFolder(showId);
+          // Target the folder the show's files actually live in (which may
+          // differ from sanitize(title) when the folder was renamed by Sonarr
+          // or a manual edit) so organizing never scatters files into a new
+          // variant folder.
+          const { currentFolderPath } = rootFolder
+            ? resolveShowFolder(show, rootFolder, episodes)
+            : { currentFolderPath: null as string | null };
 
           const namingConfig = {
             ...(config as Record<string, unknown> & Partial<NamingConfig>),
@@ -541,7 +624,14 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               file?.original_name ?? ep.file_path,
               namingConfig,
             );
-            const targetPath = rootFolder ? path.join(rootFolder, rel) : path.join(path.dirname(ep.file_path), path.basename(rel));
+            // Swap the sanitized-title folder component of `rel` for the
+            // folder the files actually live in, keeping the Season XX/
+            // structure underneath it.
+            const targetPath = currentFolderPath
+              ? path.join(currentFolderPath, ...rel.split('/').slice(1))
+              : rootFolder
+                ? path.join(rootFolder, rel)
+                : path.join(path.dirname(ep.file_path), path.basename(rel));
             items.push({
               season: ep.season_number,
               episode: ep.episode_number,
@@ -577,6 +667,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const seriesType = (show as any).series_type ?? 'standard';
           const showLike = { title: show.title, metadata: { seriesType } } as any;
           const rootFolder = db.getShowRootFolder(showId);
+          // Target the folder the show's files actually live in (may differ
+          // from sanitize(title) after a Sonarr/manual folder rename) so
+          // organizing fixes naming without scattering files into a new
+          // variant folder.
+          const { currentFolderPath } = rootFolder
+            ? resolveShowFolder(show, rootFolder, episodes)
+            : { currentFolderPath: null as string | null };
           const namingConfig = {
             ...(config as Record<string, unknown> & Partial<NamingConfig>),
             seriesType,
@@ -608,7 +705,11 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               file?.original_name ?? ep.file_path,
               namingConfig,
             );
-            const targetPath = rootFolder ? path.join(rootFolder, rel) : path.join(path.dirname(ep.file_path), path.basename(rel));
+            const targetPath = currentFolderPath
+              ? path.join(currentFolderPath, ...rel.split('/').slice(1))
+              : rootFolder
+                ? path.join(rootFolder, rel)
+                : path.join(path.dirname(ep.file_path), path.basename(rel));
 
             if (path.resolve(targetPath) === path.resolve(ep.file_path)) {
               results.push({ season: ep.season_number, episode: ep.episode_number, ok: true, skipped: true });
@@ -695,6 +796,42 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           }
           const { consolidateOverlappingFolders } = await import("../core/folder_dedup");
           const result = await consolidateOverlappingFolders(db, body.rootFolder, body.key);
+          return json({ ok: true, ...result });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    // ---- Episode-level duplicate detection & resolution ---------------------
+    // Multiple on-disk copies of the same (season, episode) - usually the same
+    // episode at different qualities sitting side by side, where the DB tracks
+    // the smaller/worse one. Detection scans the show's folder(s), parses each
+    // file, and scores candidates with the quality engine; resolution keeps the
+    // chosen file, deletes the losers, and reconciles episodes/episode_files.
+
+    "/api/shows/:id/episode-duplicates": {
+      async GET(req: RouteReq) {
+        try {
+          const { detectEpisodeDuplicates } = await import("../core/episode_dedup");
+          const groups = await detectEpisodeDuplicates(db, req.params.id!);
+          return json({ groups });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/:id/episode-duplicates/resolve": {
+      async POST(req: RouteReq) {
+        try {
+          const showId = req.params.id!;
+          const body = (await req.json()) as { season?: number; episode?: number; keepPath?: string };
+          if (body.season == null || body.episode == null || !body.keepPath) {
+            return errorResponse("season, episode and keepPath are required", 400);
+          }
+          const { resolveEpisodeDuplicate } = await import("../core/episode_dedup");
+          const result = await resolveEpisodeDuplicate(db, showId, body.season, body.episode, body.keepPath);
           return json({ ok: true, ...result });
         } catch (err) {
           return errorResponse(err, 500);

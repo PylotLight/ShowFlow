@@ -6,13 +6,15 @@ import { mergeShows } from "../core/show_merge";
 import { detectOverlappingFolders, consolidateOverlappingFolders } from "../core/folder_dedup";
 import { test, expect, afterAll, beforeEach } from "bun:test";
 
-const db = new DatabaseManager("/tmp/opencode/folder-dedup-test.db");
+// Own temp dir (not a shared fixed path) so the suite works for any user.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-merge-db-"));
+const db = new DatabaseManager(path.join(tmpDir, "folder-dedup-test.db"));
 let tmpRoot = "";
 
 afterAll(() => {
   db.close();
   fs.rmSync(tmpRoot, { recursive: true, force: true });
-  fs.rmSync("/tmp/opencode/folder-dedup-test.db", { force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 function makeShow(title: string, i: number, seriesType = "standard") {

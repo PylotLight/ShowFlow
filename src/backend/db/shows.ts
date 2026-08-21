@@ -408,7 +408,11 @@ export function updateShowSyncData(self: DatabaseManager, showId: string, provid
   metadata?: any;
 }) {
   const showSet: Record<string, any> = { last_updated: sql`(datetime('now'))` };
-  if (data.title !== undefined) showSet.title = data.title;
+  // A user rename wins over provider title refreshes: keep the title the user
+  // chose even when the metadata provider reports its own canonical title.
+  // The user-chosen title is indexed as a `user` show_title row by renameShow.
+  const titleOverridden = hasUserTitleOverride(self, showId);
+  if (data.title !== undefined && !titleOverridden) showSet.title = data.title;
   if (data.year !== undefined) showSet.year = data.year;
   if (data.originalTitle !== undefined) showSet.original_title = data.originalTitle;
 
@@ -1027,6 +1031,56 @@ export function setShowTracking(self: DatabaseManager, showId: string, tracked: 
   self.drizz.update(schema.episodes).set({ is_tracked: tracked ? 1 : 0 })
     .where(eq(schema.episodes.show_id, showId)).run();
 }
+
+/** True when a user has renamed the show (a `user`-typed show_title row exists). */
+export function hasUserTitleOverride(self: DatabaseManager, showId: string): boolean {
+  const row = self.drizz.select({ id: schema.showTitles.id })
+    .from(schema.showTitles)
+    .where(and(
+      eq(schema.showTitles.show_id, showId),
+      eq(schema.showTitles.title_type, 'user'),
+    ))
+    .get();
+  return !!row;
+}
+
+/**
+ * Rename a show to a user-chosen title. Updates shows.title and records the
+ * new title as a `user` show_title row so (a) the new name resolves on the
+ * normalized show_titles index and (b) provider metadata syncs stop clobbering
+ * the rename (updateShowSyncData checks hasUserTitleOverride). The old title's
+ * existing canonical/alias rows are left in place so files on disk that still
+ * use the old name keep matching.
+ */
+export function renameShow(self: DatabaseManager, showId: string, newTitle: string) {
+  const title = newTitle.trim();
+  if (!title) return { renamed: false, reason: 'empty-title' };
+
+  const current = getShow(self, showId);
+  if (!current) return { renamed: false, reason: 'not-found' };
+  // Compare raw (trimmed) titles, not normalized ones: two spellings can
+  // normalize identically yet the user still wants the on-disk title/folder
+  // renamed (e.g. "Re: ZERO..." → "Re - ZERO..." to match what Sonarr or a
+  // manual edit produced on disk).
+  if (title === current.title) {
+    return { renamed: false, reason: 'unchanged' };
+  }
+
+  self.drizz.update(schema.shows)
+    .set({ title, last_updated: sql`(datetime('now'))` })
+    .where(eq(schema.shows.id, showId))
+    .run();
+
+  upsertShowTitle(self, {
+    showId,
+    title,
+    titleType: 'user',
+    providerType: 'local',
+  });
+
+  return { renamed: true, oldTitle: current.title, newTitle: title };
+}
+
 
 export function bulkUpdateShows(self: DatabaseManager, ids: string[], updates: Partial<{
   profile: string;
