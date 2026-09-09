@@ -1,4 +1,4 @@
-import { eq, and, like, sql, asc, inArray } from 'drizzle-orm';
+import { eq, and, or, like, sql, asc, inArray } from 'drizzle-orm';
 import * as schema from './schema';
 import { extractShowTitleCandidates } from '../core/show_titles';
 import type { DatabaseManager } from './index';
@@ -625,7 +625,15 @@ export function hasUpcomingEpisodes(self: DatabaseManager, showId: string) {
     .from(schema.episodes)
     .where(and(
       eq(schema.episodes.show_id, showId),
-      sql`air_date > datetime('now')`,
+      or(
+        sql`air_date > datetime('now')`,
+        // Tracked episodes with no known air date still need frequent
+        // metadata refreshes — the date may appear at any time. Without
+        // this a show whose next episode is TBA falls back to the 30-day
+        // maintenance cadence and its date never gets picked up.
+        sql`air_date IS NULL`,
+        sql`air_date = ''`,
+      ),
     ))
     .limit(1)
     .get();
@@ -783,6 +791,11 @@ export function saveEpisode(self: DatabaseManager, episode: {
   airDate?: string;
   airTime?: string;
 }) {
+  // Providers use "" for "no date announced yet" — normalize to NULL so
+  // date queries (IS NOT NULL / range comparisons) treat it as unscheduled
+  // instead of a value that silently matches neither.
+  const airDate = episode.airDate?.trim() ? episode.airDate : null;
+  const airTime = episode.airTime?.trim() ? episode.airTime : null;
   self.drizz.insert(schema.episodes).values({
     show_id: episode.showId,
     season_number: episode.seasonNumber,
@@ -790,14 +803,16 @@ export function saveEpisode(self: DatabaseManager, episode: {
     absolute_number: episode.absoluteNumber ?? 0,
     title: episode.title ?? '',
     file_path: episode.filePath ?? '',
-    air_date: episode.airDate ?? null,
+    air_date: airDate,
+    air_time: airTime,
   }).onConflictDoUpdate({
     target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
     set: {
       title: episode.title ?? '',
       absolute_number: episode.absoluteNumber ?? 0,
       file_path: episode.filePath ?? '',
-      air_date: episode.airDate ?? null,
+      air_date: airDate,
+      air_time: airTime,
       last_updated: sql`(datetime('now'))`,
     },
   }).run();
@@ -811,23 +826,35 @@ export function syncEpisodes(self: DatabaseManager, showId: string, episodes: {
   airDate?: string;
   airTime?: string;
 }[]) {
+  // Preserve previously-known values when the provider returns nothing for
+  // a field. Providers routinely return null/"" air dates for TBA episodes
+  // (or drop air times TMDB never had); blindly overwriting with NULL wipes
+  // the good date from a prior sync and the episode vanishes from the
+  // calendar/dashboard (which filter on air_date IS NOT NULL).
+  const existing = self.drizz.select().from(schema.episodes)
+    .where(eq(schema.episodes.show_id, showId)).all() as any[];
+  const existingByKey = new Map(existing.map(e => [`${e.season_number}:${e.episode_number}`, e]));
+
   const transaction = self.db.transaction((eps: typeof episodes) => {
     for (const ep of eps) {
+      const prev = existingByKey.get(`${ep.seasonNumber}:${ep.episodeNumber}`);
+      const incomingAirDate = ep.airDate?.trim() ? ep.airDate : null;
+      const incomingAirTime = ep.airTime?.trim() ? ep.airTime : null;
       self.drizz.insert(schema.episodes).values({
         show_id: showId,
         season_number: ep.seasonNumber,
         episode_number: ep.episodeNumber,
-        absolute_number: ep.absoluteNumber ?? 0,
-        title: ep.title ?? '',
-        air_date: ep.airDate ?? null,
-        air_time: ep.airTime ?? null,
+        absolute_number: ep.absoluteNumber ?? prev?.absolute_number ?? 0,
+        title: ep.title?.trim() ? ep.title : (prev?.title ?? ''),
+        air_date: incomingAirDate ?? prev?.air_date ?? null,
+        air_time: incomingAirTime ?? prev?.air_time ?? null,
       }).onConflictDoUpdate({
         target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
         set: {
-          title: ep.title ?? '',
-          absolute_number: ep.absoluteNumber ?? 0,
-          air_date: ep.airDate ?? null,
-          air_time: ep.airTime ?? null,
+          title: ep.title?.trim() ? ep.title : (prev?.title ?? ''),
+          absolute_number: ep.absoluteNumber ?? prev?.absolute_number ?? 0,
+          air_date: incomingAirDate ?? prev?.air_date ?? null,
+          air_time: incomingAirTime ?? prev?.air_time ?? null,
           last_updated: sql`(datetime('now'))`,
         },
       }).run();
@@ -875,10 +902,40 @@ export function listUpcomingEpisodes(self: DatabaseManager, futureDays: number, 
     .where(and(
       eq(schema.episodes.is_tracked, 1),
       sql`${schema.episodes.air_date} IS NOT NULL`,
+      sql`${schema.episodes.air_date} != ''`,
       sql`${schema.episodes.air_date} >= ${start}`,
       sql`${schema.episodes.air_date} <= ${end}`,
     ))
     .orderBy(asc(schema.episodes.air_date))
+    .all();
+
+  return result.map(r => ({
+    ...r.episode,
+    show_title: r.show_title,
+  })) as any[];
+}
+
+/**
+ * Tracked episodes with no known air date (NULL or provider ""), which the
+ * date-windowed calendar/missing queries exclude. Surfaced separately so
+ * shows whose next episode is TBA don't silently disappear from the
+ * dashboard — they render under a "Date TBA" group instead.
+ */
+export function listUnscheduledEpisodes(self: DatabaseManager) {
+  const result = self.drizz.select({
+    episode: schema.episodes,
+    show_title: schema.shows.title,
+  })
+    .from(schema.episodes)
+    .leftJoin(schema.shows, eq(schema.episodes.show_id, schema.shows.id))
+    .where(and(
+      eq(schema.episodes.is_tracked, 1),
+      or(
+        sql`${schema.episodes.air_date} IS NULL`,
+        sql`${schema.episodes.air_date} = ''`,
+      ),
+    ))
+    .orderBy(asc(schema.episodes.show_id), asc(schema.episodes.season_number), asc(schema.episodes.episode_number))
     .all();
 
   return result.map(r => ({
@@ -897,6 +954,7 @@ export function listMissingEpisodes(self: DatabaseManager) {
     .where(and(
       eq(schema.episodes.is_tracked, 1),
       sql`${schema.episodes.air_date} IS NOT NULL`,
+      sql`${schema.episodes.air_date} != ''`,
       sql`${schema.episodes.air_date} <= datetime('now')`,
       sql`(${schema.episodes.file_path} IS NULL OR ${schema.episodes.file_path} = '')`,
     ))

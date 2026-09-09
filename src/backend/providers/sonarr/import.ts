@@ -297,7 +297,7 @@ export class SonarrImporter {
           absoluteNumber: ep.absoluteEpisodeNumber ?? undefined,
           title: ep.title ?? undefined,
           filePath: ep.episodeFile?.path ?? undefined,
-          airDate: ep.airDateUtc ?? ep.airDate ?? undefined,
+          airDate: ep.airDateUtc || ep.airDate || undefined,
         });
 
         // Record on-disk provenance when Sonarr already has the file stored.

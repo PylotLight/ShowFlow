@@ -16,7 +16,7 @@ interface UpcomingEpisode {
   episodeTitle?: string;
   season: number;
   episode: number;
-  airDate: string;
+  airDate: string | null;
   showId: string;
   filePath: string | null;
   expectedReleaseAt?: string | null;
@@ -24,7 +24,7 @@ interface UpcomingEpisode {
 }
 
 function key(ep: UpcomingEpisode) {
-  return `${ep.showTitle}-${ep.season}-${ep.episode}-${ep.airDate}`;
+  return `${ep.showTitle}-${ep.season}-${ep.episode}-${ep.airDate ?? "tba"}`;
 }
 
 /** Clock label for an episode - prefers the learned release forecast, falls
@@ -171,6 +171,9 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
   const monthEpisodes = React.useMemo(() => {
     const map = new Map<string, UpcomingEpisode[]>();
     for (const ep of episodes) {
+      // Unscheduled (TBA) episodes have no date to place on the grid —
+      // they surface in the dashboard's TBA group and the show detail view.
+      if (!ep.airDate) continue;
       if (ep.airDate.startsWith(monthKey)) {
         const key_ = ep.airDate.slice(0, 10);
         if (!map.has(key_)) map.set(key_, []);

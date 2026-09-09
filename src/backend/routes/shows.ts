@@ -1318,21 +1318,27 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const days = parseInt(url.searchParams.get("days") ?? "7", 10);
           const past = parseInt(url.searchParams.get("past") ?? "0", 10);
           const episodes = db.listUpcomingEpisodes(Number.isNaN(days) ? 7 : days, Number.isNaN(past) ? 0 : past);
+          // Tracked episodes with no known air date are excluded from the
+          // windowed query above (no date to place on a calendar). Append
+          // them so shows whose next episode is TBA don't silently disappear
+          // from the dashboard — clients render them under a "Date TBA" group.
+          const unscheduled = db.listUnscheduledEpisodes();
+          const all = [...episodes, ...unscheduled];
           // One extra pass to attach the live file/release detail per episode
           // (used by the dashboard "available" chip + calendar).
           const filesByShow = new Map<string, Map<string, any>>();
-          for (const ep of episodes) {
+          for (const ep of all) {
             const showId = ep.show_id;
             if (!filesByShow.has(showId)) filesByShow.set(showId, db.getCurrentEpisodeFilesByShow(showId));
           }
           return json(
-            episodes.map((ep: any) => ({
+            all.map((ep: any) => ({
               showId: ep.show_id,
               showTitle: ep.show_title,
               episodeTitle: ep.title,
               season: ep.season_number,
               episode: ep.episode_number,
-              airDate: ep.air_date,
+              airDate: ep.air_date || null,
               airTime: ep.air_time,
               expectedReleaseAt: ep.expected_release_at,
               filePath: ep.file_path ?? null,
@@ -1367,7 +1373,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               episodeTitle: ep.title,
               season: ep.season_number,
               episode: ep.episode_number,
-              airDate: ep.air_date,
+              airDate: ep.air_date || null,
               searchMode: ep.search_mode || 'auto',
             })),
           );

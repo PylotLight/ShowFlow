@@ -36,14 +36,19 @@ export function buildAirDateTime(
   airTime: string | null | undefined,
 ): Date | null {
   if (!airDate) return null;
-  const d = new Date(airDate);
-  if (!Number.isNaN(d.getTime())) return d;
 
-  // Date-only "YYYY-MM-DD" plus a known air time "HH:MM" -> local datetime.
+  // Date-only "YYYY-MM-DD" plus a known air time "HH:MM" -> combine first.
+  // (Checked before the generic parse: `new Date("2026-09-02")` is valid on
+  // its own, so a naive "parse then combine" order would return midnight UTC
+  // and silently drop the air time.)
   if (/^\d{4}-\d{2}-\d{2}$/.test(airDate) && airTime) {
     const local = new Date(`${airDate}T${airTime}`);
     if (!Number.isNaN(local.getTime())) return local;
   }
+
+  const d = new Date(airDate);
+  if (!Number.isNaN(d.getTime())) return d;
+
   return null;
 }
 

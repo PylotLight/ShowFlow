@@ -190,6 +190,7 @@ export class DatabaseManager {
   listEpisodes(showId: string, seasonNumber: number) { return shows.listEpisodes(this, showId, seasonNumber); }
   listAllEpisodes(showId: string) { return shows.listAllEpisodes(this, showId); }
   listUpcomingEpisodes(futureDays: number, pastDays?: number) { return shows.listUpcomingEpisodes(this, futureDays, pastDays); }
+  listUnscheduledEpisodes() { return shows.listUnscheduledEpisodes(this); }
   listMissingEpisodes() { return shows.listMissingEpisodes(this); }
   setTracked(showId: string, seasonNumber: number, episodeNumber: number, tracked: boolean) { return shows.setTracked(this, showId, seasonNumber, episodeNumber, tracked); }
   updateEpisodeFilePath(showId: string, seasonNumber: number, episodeNumber: number, filePath: string) { return shows.updateEpisodeFilePath(this, showId, seasonNumber, episodeNumber, filePath); }

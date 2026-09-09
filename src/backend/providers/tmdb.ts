@@ -60,7 +60,9 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
         episode: e.episode_number,
         absoluteNumber: undefined,
         title: e.name,
-        airDate: e.air_date,
+        // TMDB uses "" for unannounced dates — normalize to undefined so
+        // the DB layer stores NULL (unscheduled) instead of "".
+        airDate: e.air_date || undefined,
         metadata: e,
       })));
     }
@@ -94,7 +96,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
       episode,
       absoluteNumber: undefined,
       title: data.name,
-      airDate: data.air_date,
+      airDate: data.air_date || undefined,
       metadata: data
     };
   }
@@ -126,7 +128,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
           episode: ep.episode_number,
           absoluteNumber: absolute,
           title: ep.name,
-          airDate: ep.air_date,
+          airDate: ep.air_date || undefined,
           metadata: ep
         };
       }

@@ -20,14 +20,17 @@ interface UpcomingEpisode {
   episodeTitle?: string;
   season: number;
   episode: number;
-  airDate: string;
+  airDate: string | null;
   filePath: string | null;
   expectedReleaseAt?: string | null;
   file?: EpisodeFileInfo | null;
 }
 
-function formatAirTime(airDate: string) {
-  if (!airDate.includes("T")) return null;
+/** Sentinel date-group for tracked episodes with no known air date. */
+const TBA_DATE_KEY = "tba";
+
+function formatAirTime(airDate: string | null) {
+  if (!airDate || !airDate.includes("T")) return null;
   const d = new Date(airDate);
   if (isNaN(d.getTime())) return null;
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
@@ -40,20 +43,25 @@ function clockLabel(ep: UpcomingEpisode): string | null {
 }
 
 /** Basis timestamp for any "when" logic - the learned release forecast wins
- *  over the raw air date, so dashboards show true expected availability. */
-function whenBasis(ep: UpcomingEpisode): string {
-  return ep.expectedReleaseAt || ep.airDate;
+ *  over the raw air date, so dashboards show true expected availability.
+ *  Null when the episode is unscheduled (TBA). */
+function whenBasis(ep: UpcomingEpisode): string | null {
+  return ep.expectedReleaseAt || ep.airDate || null;
 }
 
-function getLocalDateKey(airDate: string): string {
+function getLocalDateKey(airDate: string | null): string {
+  if (!airDate) return TBA_DATE_KEY;
   const d = new Date(airDate);
+  if (isNaN(d.getTime())) return TBA_DATE_KEY;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function getRelativeDayLabel(airDate: string): string {
+function getRelativeDayLabel(airDate: string | null): string {
+  if (!airDate) return "Date TBA";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const d = new Date(airDate);
+  if (isNaN(d.getTime())) return "Date TBA";
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -64,10 +72,12 @@ function getRelativeDayLabel(airDate: string): string {
   return target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-function getCompactDate(airDate: string): string {
+function getCompactDate(airDate: string | null): string {
+  if (!airDate) return "TBA";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const d = new Date(airDate);
+  if (isNaN(d.getTime())) return "TBA";
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -83,17 +93,21 @@ function getCompactDate(airDate: string): string {
   return label;
 }
 
-function isPast(airDate: string): boolean {
-  return new Date(airDate).getTime() <= Date.now();
+function isPast(airDate: string | null): boolean {
+  if (!airDate) return false;
+  const t = new Date(airDate).getTime();
+  return !isNaN(t) && t <= Date.now();
 }
 
 function formatNowTime(): string {
   return new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-function getRowProximity(airDate: string): { color: string; dot: string } {
+function getRowProximity(airDate: string | null): { color: string; dot: string } {
+  if (!airDate) return { color: "text-white/50", dot: "bg-white/30" };
   const now = new Date();
   const target = new Date(airDate);
+  if (isNaN(target.getTime())) return { color: "text-white/50", dot: "bg-white/30" };
   const diffTime = target.getTime() - now.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -287,24 +301,37 @@ function Dashboard({
       groups[dateKey].push(ep);
     });
     return Object.entries(groups).map(([dateKey, items]) => {
-      const sample = items[0]?.airDate ?? dateKey;
+      const sample = items[0]?.airDate ?? null;
       return {
         dateKey,
         label: getRelativeDayLabel(sample),
-        items: [...items].sort((a, b) => new Date(a.airDate).getTime() - new Date(b.airDate).getTime()),
+        items: [...items].sort((a, b) => {
+          const at = a.airDate ? new Date(a.airDate).getTime() : NaN;
+          const bt = b.airDate ? new Date(b.airDate).getTime() : NaN;
+          if (isNaN(at) && isNaN(bt)) return a.season - b.season || a.episode - b.episode;
+          if (isNaN(at)) return 1;
+          if (isNaN(bt)) return -1;
+          return at - bt;
+        }),
       };
     });
   }, [upcoming]);
 
-  // Split: past days → collapsible history; Today + future → primary agenda.
+  // Split: past days → collapsible history; Today + future (+ TBA, last) →
+  // primary agenda. Unscheduled episodes previously vanished from the agenda
+  // entirely; they now render under their own "Date TBA" group.
   const todayKey = getLocalDateKey(new Date().toISOString());
   const storyGroups = React.useMemo(() => ({
     history: groupedEpisodes
-      .filter((g) => g.dateKey < todayKey)
+      .filter((g) => g.dateKey !== TBA_DATE_KEY && g.dateKey < todayKey)
       .sort((a, b) => (a.dateKey > b.dateKey ? -1 : 1)), // newest first
     upcoming: groupedEpisodes
-      .filter((g) => g.dateKey >= todayKey)
-      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // chronologically
+      .filter((g) => g.dateKey === TBA_DATE_KEY || g.dateKey >= todayKey)
+      .sort((a, b) => { // chronologically, TBA group last
+        if (a.dateKey === TBA_DATE_KEY) return 1;
+        if (b.dateKey === TBA_DATE_KEY) return -1;
+        return a.dateKey < b.dateKey ? -1 : 1;
+      }),
   }), [groupedEpisodes, todayKey]);
 
   // Calendar strip day-click filters the upcoming list (toggle: click again to clear).
