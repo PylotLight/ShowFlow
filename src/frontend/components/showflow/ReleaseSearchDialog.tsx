@@ -339,9 +339,9 @@ function ReleaseSearchDialog({
           </Button>
         </Panel>
 
-        <Panel className="flex-1 min-h-0 mt-3 rounded-lg border border-white/10">
-          <ScrollArea className="h-full">
-            <div className="flex flex-col divide-y divide-white/5">
+        <Panel className="flex-1 min-h-0 min-w-0 mt-3 rounded-lg border border-white/10">
+          <ScrollArea className="h-full w-full">
+            <div className="flex flex-col divide-y divide-white/5 w-full min-w-0">
             {loading && (
               <div className="text-muted-foreground flex items-center gap-2 p-6 text-sm">
                 <Loader2Icon className="size-4 animate-spin" /> Searching indexers...
@@ -366,13 +366,13 @@ function ReleaseSearchDialog({
                 return (
                   <div
                     key={`${release.indexerId}-${release.guid}`}
-                    className={cn("flex items-start gap-3 p-3", blocked && "opacity-60")}
+                    className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 p-3 min-w-0", blocked && "opacity-60")}
                   >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-snug text-foreground/90" title={release.title}>
+                    <div className="min-w-0 overflow-hidden">
+                      <p className="truncate max-w-full overflow-hidden text-sm font-medium leading-snug text-foreground/90" title={release.title}>
                         {release.title}
                       </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-caption text-muted-foreground">
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-caption text-muted-foreground min-w-0 max-w-full overflow-hidden">
                         <Badge variant="outline" className="uppercase">
                           {release.protocol}
                         </Badge>
@@ -385,7 +385,7 @@ function ReleaseSearchDialog({
                           <Badge variant="muted">{release.score.qualityName}</Badge>
                         )}
                         {release.score.matchedTags && release.score.matchedTags.length > 0 && (
-                          <span className="text-muted-foreground/50 text-[10px] font-mono truncate max-w-[200px]">
+                          <span className="text-muted-foreground/50 text-[10px] font-mono truncate min-w-0 max-w-[200px]" title={release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}>
                             {release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}
                           </span>
                         )}
@@ -401,7 +401,7 @@ function ReleaseSearchDialog({
                           <span>{release.grabs} grabs</span>
                         )}
                         <span>{formatAge(release.ageHours)} ago</span>
-                        <span className="truncate">{release.indexerName}</span>
+                        <span className="truncate min-w-0 max-w-[160px]" title={release.indexerName}>{release.indexerName}</span>
                       </div>
                     </div>
                     <Button

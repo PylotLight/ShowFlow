@@ -171,8 +171,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
   const monthEpisodes = React.useMemo(() => {
     const map = new Map<string, UpcomingEpisode[]>();
     for (const ep of episodes) {
-      // Unscheduled (TBA) episodes have no date to place on the grid —
-      // they surface in the dashboard's TBA group and the show detail view.
+      // Unscheduled (TBA) episodes have no date to place on the grid — skip them.
       if (!ep.airDate) continue;
       if (ep.airDate.startsWith(monthKey)) {
         const key_ = ep.airDate.slice(0, 10);

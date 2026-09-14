@@ -26,8 +26,11 @@ interface UpcomingEpisode {
   file?: EpisodeFileInfo | null;
 }
 
-/** Sentinel date-group for tracked episodes with no known air date. */
-const TBA_DATE_KEY = "tba";
+/** Returns true when the episode has a usable air date (TBA episodes don't). */
+function hasKnownAirDate(airDate: string | null): boolean {
+  if (!airDate) return false;
+  return !isNaN(new Date(airDate).getTime());
+}
 
 function formatAirTime(airDate: string | null) {
   if (!airDate || !airDate.includes("T")) return null;
@@ -50,18 +53,16 @@ function whenBasis(ep: UpcomingEpisode): string | null {
 }
 
 function getLocalDateKey(airDate: string | null): string {
-  if (!airDate) return TBA_DATE_KEY;
-  const d = new Date(airDate);
-  if (isNaN(d.getTime())) return TBA_DATE_KEY;
+  const d = new Date(airDate ?? "");
+  if (isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function getRelativeDayLabel(airDate: string | null): string {
-  if (!airDate) return "Date TBA";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const d = new Date(airDate);
-  if (isNaN(d.getTime())) return "Date TBA";
+  const d = new Date(airDate ?? "");
+  if (isNaN(d.getTime())) return "";
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -73,11 +74,10 @@ function getRelativeDayLabel(airDate: string | null): string {
 }
 
 function getCompactDate(airDate: string | null): string {
-  if (!airDate) return "TBA";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const d = new Date(airDate);
-  if (isNaN(d.getTime())) return "TBA";
+  const d = new Date(airDate ?? "");
+  if (isNaN(d.getTime())) return "";
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -292,11 +292,19 @@ function Dashboard({
     return () => clearInterval(id);
   }, []);
 
+  // Dated episodes only — unscheduled (TBA) episodes are excluded from the
+  // dashboard entirely.
+  const datedUpcoming = React.useMemo(() => {
+    if (!upcoming) return null;
+    return upcoming.filter((ep) => hasKnownAirDate(ep.airDate));
+  }, [upcoming]);
+
   const groupedEpisodes = React.useMemo(() => {
-    if (!upcoming) return [];
+    if (!datedUpcoming) return [];
     const groups: { [key: string]: UpcomingEpisode[] } = {};
-    upcoming.forEach((ep) => {
+    datedUpcoming.forEach((ep) => {
       const dateKey = getLocalDateKey(ep.airDate);
+      if (!dateKey) return;
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(ep);
     });
@@ -306,32 +314,23 @@ function Dashboard({
         dateKey,
         label: getRelativeDayLabel(sample),
         items: [...items].sort((a, b) => {
-          const at = a.airDate ? new Date(a.airDate).getTime() : NaN;
-          const bt = b.airDate ? new Date(b.airDate).getTime() : NaN;
-          if (isNaN(at) && isNaN(bt)) return a.season - b.season || a.episode - b.episode;
-          if (isNaN(at)) return 1;
-          if (isNaN(bt)) return -1;
+          const at = new Date(a.airDate ?? "").getTime();
+          const bt = new Date(b.airDate ?? "").getTime();
           return at - bt;
         }),
       };
     });
-  }, [upcoming]);
+  }, [datedUpcoming]);
 
-  // Split: past days → collapsible history; Today + future (+ TBA, last) →
-  // primary agenda. Unscheduled episodes previously vanished from the agenda
-  // entirely; they now render under their own "Date TBA" group.
+  // Split: past days → collapsible history; Today + future → primary agenda.
   const todayKey = getLocalDateKey(new Date().toISOString());
   const storyGroups = React.useMemo(() => ({
     history: groupedEpisodes
-      .filter((g) => g.dateKey !== TBA_DATE_KEY && g.dateKey < todayKey)
+      .filter((g) => g.dateKey < todayKey)
       .sort((a, b) => (a.dateKey > b.dateKey ? -1 : 1)), // newest first
     upcoming: groupedEpisodes
-      .filter((g) => g.dateKey === TBA_DATE_KEY || g.dateKey >= todayKey)
-      .sort((a, b) => { // chronologically, TBA group last
-        if (a.dateKey === TBA_DATE_KEY) return 1;
-        if (b.dateKey === TBA_DATE_KEY) return -1;
-        return a.dateKey < b.dateKey ? -1 : 1;
-      }),
+      .filter((g) => g.dateKey >= todayKey)
+      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // chronologically
   }), [groupedEpisodes, todayKey]);
 
   // Calendar strip day-click filters the upcoming list (toggle: click again to clear).
@@ -342,9 +341,9 @@ function Dashboard({
   ), [storyGroups, selectedDay]);
 
   const uniqueShowsCount = React.useMemo(() => {
-    if (!upcoming) return 0;
-    return new Set(upcoming.map((ep) => ep.showTitle)).size;
-  }, [upcoming]);
+    if (!datedUpcoming) return 0;
+    return new Set(datedUpcoming.map((ep) => ep.showTitle)).size;
+  }, [datedUpcoming]);
 
   const getMatchingShow = (title: string) =>
     shows?.find((s) => s.title.toLowerCase() === title.toLowerCase());
@@ -360,14 +359,15 @@ function Dashboard({
 
   const episodesByDate = React.useMemo(() => {
     const map = new Map<string, UpcomingEpisode[]>();
-    if (!upcoming) return map;
-    upcoming.forEach((ep) => {
+    if (!datedUpcoming) return map;
+    datedUpcoming.forEach((ep) => {
       const dateStr = getLocalDateKey(ep.airDate);
+      if (!dateStr) return;
       const list = map.get(dateStr);
       if (list) list.push(ep); else map.set(dateStr, [ep]);
     });
     return map;
-  }, [upcoming]);
+  }, [datedUpcoming]);
 
   return (
     <div className="h-full flex flex-col gap-6">
@@ -439,10 +439,10 @@ function Dashboard({
                   Upcoming
                 </h2>
               </div>
-              {upcoming && (
+              {datedUpcoming && (
                 <div className="text-right font-mono text-xs text-muted-foreground">
-                  <span className="text-white font-semibold">{upcoming.length}</span>
-                  {" "}episode{upcoming.length !== 1 && "s"}
+                  <span className="text-white font-semibold">{datedUpcoming.length}</span>
+                  {" "}episode{datedUpcoming.length !== 1 && "s"}
                   <span className="text-white/20 mx-1.5">|</span>
                   <span className="text-white font-semibold">{uniqueShowsCount}</span>
                   {" "}series
@@ -497,9 +497,9 @@ function Dashboard({
 
           {/* Dense Episode List */}
           <div className="flex-1 overflow-y-auto px-5 py-3">
-            {upcoming === null ? (
+            {datedUpcoming === null ? (
               <DashboardSkeleton />
-            ) : upcoming.length === 0 ? (
+            ) : datedUpcoming.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground text-xs font-mono">
                 NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.
               </div>
@@ -711,7 +711,7 @@ function Dashboard({
           </div>
 
           {/* Calendar View Footer */}
-          {upcoming && upcoming.length > 0 && (
+          {datedUpcoming && datedUpcoming.length > 0 && (
             <div className="border-t border-white/5 px-5 py-2.5">
               <button
                 onClick={onShowCalendar}
