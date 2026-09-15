@@ -11,13 +11,14 @@ import {
   FolderOpen,
   ExternalLink,
   Heart,
+  Search,
 } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
 import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "sources" | "settings" | "manual-import" | "health";
+export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "search" | "sources" | "settings" | "manual-import" | "health";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -101,6 +102,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   const collectionNavs = [
     { id: "library" as NavItem, label: "Library", icon: Library },
     { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount },
+    { id: "search" as NavItem, label: "Indexer Search", icon: Search },
   ];
 
   const manageNavs = [

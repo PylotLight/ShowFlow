@@ -49,6 +49,136 @@ export function searchRoutes(systemManager: SystemManager) {
       },
     },
 
+    "/api/search/adhoc": {
+      /**
+       * Adhoc indexer search, disconnected from shows/releases.
+       * Query params:
+       *   q         free-text query (required)
+       *   limit     max merged results (default 50)
+       *   type      search | tvsearch | movie | music | book (default search)
+       *   category  Newznab category id, repeatable (absent = all)
+       *   indexer   Prowlarr indexer id, repeatable (absent = all Prowlarr indexers,
+       *             searched in one call and reported as a single entry)
+       *   native    native indexer id (nyaa, knaben, ...), repeatable
+       *             (absent = all enabled natives, each reported separately)
+       * Response: { results, indexers: [{ key, kind, name, ok, ms, count, error? }], total }
+       */
+      async GET(req: Request & { params: Record<string, string> }) {
+        try {
+          const url = new URL(req.url);
+          const query = url.searchParams.get("q");
+          if (!query || query.trim().length === 0) {
+            return json({ results: [], indexers: [], total: 0 });
+          }
+
+          const limit = parseInt(url.searchParams.get("limit") ?? "50", 10);
+          const categories = url.searchParams.getAll("category").map(c => parseInt(c, 10)).filter(c => !Number.isNaN(c));
+          const type = (url.searchParams.get("type") as "search" | "tvsearch" | "movie" | "music" | "book" | null) ?? "search";
+          const indexerIds = url.searchParams.getAll("indexer").map(c => parseInt(c, 10)).filter(c => !Number.isNaN(c));
+          const nativeIds = url.searchParams.getAll("native");
+
+          const allResults: any[] = [];
+          const stats: { key: string; kind: string; name: string; ok: boolean; ms: number; count: number; error?: string }[] = [];
+
+          async function timed<T>(fn: () => Promise<T>): Promise<{ value?: T; ms: number; error?: string }> {
+            const start = Date.now();
+            try {
+              const value = await fn();
+              return { value, ms: Date.now() - start };
+            } catch (e) {
+              return { ms: Date.now() - start, error: e instanceof Error ? e.message : String(e) };
+            }
+          }
+
+          const jobs: Promise<void>[] = [];
+
+          const prowlarr = getProwlarrIndexer();
+          if (prowlarr) {
+            // Map Prowlarr indexer ids to names for the stats entries (best-effort).
+            const indexersById = new Map<number, string>();
+            try {
+              const list = await prowlarr.listIndexers();
+              for (const i of list) indexersById.set(i.id, i.name);
+            } catch {
+              // Name lookup is cosmetic; the search below still runs.
+            }
+            if (indexerIds.length > 0) {
+              // One call per selected indexer so stats are truly per-indexer.
+              for (const id of indexerIds) {
+                jobs.push((async () => {
+                  const r = await timed(() => prowlarr.search(query, {
+                    categories: categories.length ? categories : undefined,
+                    type,
+                    indexerIds: [id],
+                  }));
+                  const results = r.value ?? [];
+                  allResults.push(...results);
+                  stats.push({
+                    key: `prowlarr:${id}`,
+                    kind: "prowlarr",
+                    name: indexersById.get(id) ?? `Prowlarr #${id}`,
+                    ok: !r.error,
+                    ms: r.ms,
+                    count: results.length,
+                    ...(r.error ? { error: r.error } : {}),
+                  });
+                })());
+              }
+            } else {
+              jobs.push((async () => {
+                const r = await timed(() => prowlarr.search(query, {
+                  categories: categories.length ? categories : undefined,
+                  type,
+                }));
+                const results = r.value ?? [];
+                allResults.push(...results);
+                stats.push({
+                  key: "prowlarr:all",
+                  kind: "prowlarr",
+                  name: "Prowlarr (all)",
+                  ok: !r.error,
+                  ms: r.ms,
+                  count: results.length,
+                  ...(r.error ? { error: r.error } : {}),
+                });
+              })());
+            }
+          }
+
+          const natives = getNativeIndexers().filter(({ config }) =>
+            nativeIds.length === 0 || nativeIds.includes(config.id)
+          );
+          for (const { config, instance } of natives) {
+            jobs.push((async () => {
+              const r = await timed(() => instance.search(query, {
+                categories: categories.length ? categories : undefined,
+                type,
+              }));
+              const results = r.value ?? [];
+              allResults.push(...results);
+              stats.push({
+                key: `native:${config.id}`,
+                kind: "native",
+                name: instance.name,
+                ok: !r.error,
+                ms: r.ms,
+                count: results.length,
+                ...(r.error ? { error: r.error } : {}),
+              });
+            })());
+          }
+
+          await Promise.all(jobs);
+          stats.sort((a, b) => a.name.localeCompare(b.name));
+
+          const sliced = allResults.slice(0, Number.isNaN(limit) ? 50 : limit);
+          return json({ results: sliced, indexers: stats, total: allResults.length });
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
     "/api/search/grab": {
       async POST(req: Request & { params: Record<string, string> }) {
         try {

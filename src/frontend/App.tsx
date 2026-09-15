@@ -14,6 +14,7 @@ import { QueuePage } from "@frontend/components/showflow/QueuePage";
 import { PipelineKanban } from "@frontend/components/showflow/PipelineKanban";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { ManualImport } from "@frontend/components/showflow/ManualImport";
+import { IndexerSearch } from "@frontend/components/showflow/IndexerSearch";
 import { HealthDashboard } from "@frontend/components/showflow/HealthDashboard";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
@@ -147,7 +148,7 @@ export function App() {
         <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
           <div className="flex items-center gap-4 shrink-0">
             <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
-              {activeNav === "agenda" ? "Calendar" : activeNav}
+              {activeNav === "agenda" ? "Calendar" : activeNav === "search" ? "Indexer Search" : activeNav}
             </h1>
           </div>
 
@@ -234,6 +235,14 @@ export function App() {
             />
           ) : activeNav === "manual-import" ? (
             <ManualImport />
+          ) : activeNav === "search" ? (
+            <IndexerSearch
+              onOpenSettings={() => {
+                setSettingsInitialTab("indexers");
+                setActiveNav("settings");
+                setSelected(null);
+              }}
+            />
           ) : (
             <div className="glass-plane rounded-xl p-8 text-center text-muted-foreground">
               <h3 className="font-display text-lg font-bold text-white mb-2 uppercase">
