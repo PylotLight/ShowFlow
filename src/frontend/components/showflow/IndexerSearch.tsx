@@ -357,7 +357,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
     <div className="space-y-4">
       <GlassPanel className="p-5">
         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Indexer Search</span>
-        <h2 className="font-display text-2xl font-bold text-white mb-1">Ad hoc search</h2>
+        <h2 className="font-display text-2xl font-bold text-white mb-1">Indexer Search</h2>
         <p className="text-muted-foreground text-sm mb-4">
           Query any configured indexer directly — no show or release attached. Grab sends the release to your download client.
         </p>

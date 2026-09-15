@@ -200,7 +200,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         return next;
       });
       const buckets: Record<number, EpisodeData[]> = {};
-      for (const s of ordered) buckets[s.seasonNumber] = s.episodes ?? [];
+      // Episodes within a season run newest-first (finale on top), matching
+      // the seasons' latest-first order.
+      for (const s of ordered) {
+        buckets[s.seasonNumber] = [...(s.episodes ?? [])].sort((a, b) => b.episode - a.episode);
+      }
       setEpisodesBySeason(buckets);
     } catch {
       // Keep previous state on failure; the list simply doesn't refresh.
@@ -602,6 +606,38 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           </span>
         )}
 
+        {/* Episode availability + file-state filter live in the top bar so
+            the list below gets the full height. Compact pills keep it slim. */}
+        {overallTotal > 0 && (
+          <div className="hidden md:flex items-center gap-2 ml-3 pl-3 border-l border-white/10 shrink-0">
+            <span className="font-mono text-xs whitespace-nowrap" title={`${overallAvailable} of ${overallTotal} episodes available`}>
+              <span className="text-signal">{overallAvailable}</span>
+              <span className="text-muted-foreground">/{overallTotal}</span>
+            </span>
+            <div className="w-16 h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-signal transition-all duration-300"
+                style={{ width: `${(overallAvailable / overallTotal) * 100}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-full p-0.5 border border-white/5">
+              {(["all", "available", "missing"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-all ${
+                    filter === f
+                      ? "bg-signal/15 text-signal font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="ml-auto flex items-center gap-2.5">
           <button onClick={handleScanDir} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
             <FolderSearch className="size-3.5" />
@@ -704,6 +740,41 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             )}
           </div>
 
+          {/* Column visibility lives up here now that the episode toolbar
+              row is gone; the dropdown anchors to this wrapper. */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setShowColumnMenu(v => !v)}
+              className="text-muted-foreground hover:text-foreground transition-colors flex items-center"
+              aria-label="Column settings"
+            >
+              <Columns2 className="size-4" />
+            </button>
+
+            {showColumnMenu && (
+              <div className="absolute right-0 top-full mt-1.5 z-30 w-44 rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-1.5"
+                style={{ backdropFilter: "blur(16px)" }}>
+                <div className="px-2 py-1 text-caption font-mono uppercase tracking-wider text-muted-foreground/60">
+                  Columns
+                </div>
+                {columnConfig.map(col => (
+                  <label
+                    key={col.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] cursor-pointer text-sm text-foreground/80"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={col.visible}
+                      onChange={() => toggleColumn(col.id)}
+                      className="size-3.5 rounded border-white/20 bg-white/5 accent-signal"
+                    />
+                    {col.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           {onToggleExpand && (
             <button onClick={onToggleExpand} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors" title={expanded ? "Minimize" : "Expand"}>
               {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -782,68 +853,31 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           </GlassPanel>
         ) : (
           <div className="flex flex-col min-h-0 gap-4">
-            {/* Episode toolbar */}
-            <div className="flex flex-wrap items-center gap-3 shrink-0">
-              <h2 className="font-display text-base font-semibold tracking-wide text-white/80">Episodes</h2>
-              <span className="font-mono text-xs">
-                <span className="text-signal">{overallAvailable}</span>
-                <span className="text-muted-foreground">/{overallTotal} available</span>
-              </span>
-              <div className="w-28 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-signal transition-all duration-300"
-                  style={{ width: overallTotal ? `${(overallAvailable / overallTotal) * 100}%` : "0%" }}
-                />
+            {/* Mobile only: the availability summary + filter live in the
+                top bar on md+ screens, so this slim row covers small ones. */}
+            {overallTotal > 0 && (
+              <div className="flex md:hidden items-center gap-2 shrink-0">
+                <span className="font-mono text-xs whitespace-nowrap">
+                  <span className="text-signal">{overallAvailable}</span>
+                  <span className="text-muted-foreground">/{overallTotal} available</span>
+                </span>
+                <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-full p-0.5 border border-white/5 ml-auto">
+                  {(["all", "available", "missing"] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setFilter(f)}
+                      className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-all ${
+                        filter === f
+                          ? "bg-signal/15 text-signal font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-full p-0.5 border border-white/5">
-                {(["all", "available", "missing"] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`rounded-full px-3 py-1 font-mono text-caption uppercase tracking-wider transition-all ${
-                      filter === f
-                        ? "bg-signal/15 text-signal font-semibold"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-
-              <div className="ml-auto relative" ref={menuRef}>
-                <button
-                  onClick={() => setShowColumnMenu(v => !v)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Column settings"
-                >
-                  <Columns2 className="size-4" />
-                </button>
-
-                {showColumnMenu && (
-                  <div className="absolute right-0 top-full mt-1.5 z-30 w-44 rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-1.5"
-                    style={{ backdropFilter: "blur(16px)" }}>
-                    <div className="px-2 py-1 text-caption font-mono uppercase tracking-wider text-muted-foreground/60">
-                      Columns
-                    </div>
-                    {columnConfig.map(col => (
-                      <label
-                        key={col.id}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] cursor-pointer text-sm text-foreground/80"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={col.visible}
-                          onChange={() => toggleColumn(col.id)}
-                          className="size-3.5 rounded border-white/20 bg-white/5 accent-signal"
-                        />
-                        {col.label}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
 
             {/* Unified episode list: all seasons, latest first, collapsible */}
             <GlassPanel className="flex-1 overflow-hidden min-h-0 flex flex-col">

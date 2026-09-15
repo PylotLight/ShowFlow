@@ -287,6 +287,19 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 
 **Fix:** `scanShow` narrows to the show's own folder via `resolveShowScanDir` (episode paths → sanitized-title fallback → full root). Full `scan()` unchanged.
 
+### 15. Episode airtimes randomly lost after import
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (S04E06/E07 dates blank despite present before)
+
+**Root cause:** the import path calls `db.saveEpisode` with only file info, and its upsert blindly overwrote `air_date`/`air_time` with NULL — every (re)import erased the synced airtime.
+**Fix:** `saveEpisode` preserves previously-known values when the caller passes nothing (same guard `syncEpisodes` had). Covered by `save_episode.test.ts`. Already-lost dates need one metadata refresh to repopulate.
+
+### 16. Show detail toolbar ate vertical space; search page misnamed
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15
+
+**Fix:** availability count + filter pills moved into the top bar (compact), columns button docked in the header cluster, toolbar row removed (slim fallback on small screens). Page header renamed to match the sidebar: **Indexer Search**.
+
 ---
 
 ## Backlog / Unprioritised
@@ -318,6 +331,8 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 12 | Ad hoc newest-first with missing age | 2026-09-15 (pending release) |
 | 13 | TorBox dark fetch phase + lost grabs on restart | 2026-09-15 (pending release) |
 | 14 | Per-show scan walked whole library | 2026-09-15 (pending release) |
+| 15 | Import wiped episode airtimes | 2026-09-15 (pending release) |
+| 16 | Toolbar space + Indexer Search name | 2026-09-15 (pending release) |
 
 ---
 

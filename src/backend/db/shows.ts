@@ -794,23 +794,38 @@ export function saveEpisode(self: DatabaseManager, episode: {
   // Providers use "" for "no date announced yet" — normalize to NULL so
   // date queries (IS NOT NULL / range comparisons) treat it as unscheduled
   // instead of a value that silently matches neither.
-  const airDate = episode.airDate?.trim() ? episode.airDate : null;
-  const airTime = episode.airTime?.trim() ? episode.airTime : null;
+  //
+  // Preserve previously-known values when the caller passes nothing for a
+  // field: the import path (blackhole) calls this with only the file info,
+  // and blindly overwriting air_date with NULL wiped good airtimes from a
+  // prior metadata sync every time an episode was (re)imported. Clearing
+  // file_path goes through updateEpisodeFilePath, never here, so preserving
+  // on absent is safe for all fields.
+  const prev = self.drizz.select().from(schema.episodes).where(and(
+    eq(schema.episodes.show_id, episode.showId),
+    eq(schema.episodes.season_number, episode.seasonNumber),
+    eq(schema.episodes.episode_number, episode.episodeNumber),
+  )).get() as any | undefined;
+  const airDate = episode.airDate?.trim() ? episode.airDate : (prev?.air_date ?? null);
+  const airTime = episode.airTime?.trim() ? episode.airTime : (prev?.air_time ?? null);
+  const title = episode.title?.trim() ? episode.title : (prev?.title ?? '');
+  const absoluteNumber = episode.absoluteNumber ?? prev?.absolute_number ?? 0;
+  const filePath = episode.filePath?.trim() ? episode.filePath : (prev?.file_path ?? '');
   self.drizz.insert(schema.episodes).values({
     show_id: episode.showId,
     season_number: episode.seasonNumber,
     episode_number: episode.episodeNumber,
-    absolute_number: episode.absoluteNumber ?? 0,
-    title: episode.title ?? '',
-    file_path: episode.filePath ?? '',
+    absolute_number: absoluteNumber,
+    title,
+    file_path: filePath,
     air_date: airDate,
     air_time: airTime,
   }).onConflictDoUpdate({
     target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
     set: {
-      title: episode.title ?? '',
-      absolute_number: episode.absoluteNumber ?? 0,
-      file_path: episode.filePath ?? '',
+      title,
+      absolute_number: absoluteNumber,
+      file_path: filePath,
       air_date: airDate,
       air_time: airTime,
       last_updated: sql`(datetime('now'))`,
