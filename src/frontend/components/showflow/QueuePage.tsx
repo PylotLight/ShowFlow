@@ -165,7 +165,7 @@ function QueuePage() {
       <GlassPanel className="overflow-hidden">
         <div className="px-5 py-3.5 border-b border-white/5">
           <h3 className="font-display text-base font-semibold text-white">Processing Now</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Files currently being matched and imported from the watch folder</p>
+          <p className="text-muted-foreground text-xs mt-0.5">TorBox downloads, plus watch-folder files being matched and imported</p>
         </div>
         {processing === null ? (
           <div className="flex items-center justify-center py-10">
@@ -197,7 +197,7 @@ function QueuePage() {
                         "h-full rounded-full transition-[width] duration-500",
                         item.client === "torbox" ? "bg-signal" : "bg-accent-amber"
                       )}
-                      style={{ width: `${item.progress ?? 100}%` }}
+                      style={{ width: `${item.progress ?? 0}%` }}
                     />
                   </div>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">

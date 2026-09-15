@@ -69,8 +69,7 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
   }
 }
 
-async function probeToMediaColumns(file: string): Promise<FileMediaColumns | null> {
-  const probe = await probeMediaFile(file);
+async function probeToMediaColumns(file: string): Promise<FileMediaColumns | null> {  const probe = await probeMediaFile(file);
   if (!probe) return null;
   return {
     container: probe.container,
@@ -84,6 +83,29 @@ async function probeToMediaColumns(file: string): Promise<FileMediaColumns | nul
     duration_seconds: probe.durationSeconds ? Math.round(probe.durationSeconds) : null,
     bitrate_kbps: probe.overallBitrate ? Math.round(probe.overallBitrate / 1000) : null,
   };
+}
+
+/**
+ * Narrow a show scan to the show's own folder instead of the whole library
+ * root. Derived from the show's existing episode paths (all of one show's
+ * files share a single direct child of the root); falls back to the
+ * sanitized title folder. The caller verifies the candidate exists and
+ * falls back to the full root walk otherwise.
+ */
+export function resolveShowScanDir(rootFolder: string, title: string, episodePaths: (string | null | undefined)[]): string {
+  const sanitized = (title || '')
+    .replace(/[<>":/\\|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const childNames = new Set<string>();
+  for (const p of episodePaths) {
+    if (!p || !p.startsWith(rootFolder)) continue;
+    const rel = p.slice(rootFolder.length).replace(/^[/\\]+/, '');
+    const first = rel.split(/[/\\]/)[0];
+    if (first) childNames.add(first);
+  }
+  const folderName = childNames.size === 1 ? [...childNames][0]! : sanitized;
+  return path.join(rootFolder, folderName);
 }
 
 export class LibraryScanner {
@@ -331,11 +353,22 @@ export class LibraryScanner {
       return;
     }
 
-    console.log(`Scanning show "${show.title}" in ${rootFolder}`);
+    // Narrow to the show's own folder (derived from its episode paths)
+    // instead of walking the whole library root — a show scan for Reacher
+    // must not stat every file of every other show. Falls back to the
+    // full root when the show has no files on disk yet.
+    let scanDir = rootFolder;
+    try {
+      const ownedPaths = db.listAllEpisodes(showId)
+        .map((e: any) => e.file_path)
+        .filter((p: any): p is string => typeof p === 'string' && p.length > 0);
+      const candidate = resolveShowScanDir(rootFolder, show.title, ownedPaths);
+      if ((await fs.promises.stat(candidate)).isDirectory()) scanDir = candidate;
+    } catch {}
+    console.log(`Scanning show "${show.title}" in ${scanDir}`);
     let foundCount = 0;
     let quarantinedCount = 0;
     const quarantineDir = resolveQuarantineDir(this.config);
-
     // Group candidate files per (season, episode) so that after mapping we can
     // find and clean up duplicate copies of the same episode on disk (the
     // Reacher S04E01 case where both a 1080p WEBRip and a 2160p sat side by
@@ -351,7 +384,7 @@ export class LibraryScanner {
     };
 
     try {
-      const files = this.walk(rootFolder);
+      const files = this.walk(scanDir);
       for (const file of files) {
         const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
         if (junkOutcome) {
@@ -405,7 +438,7 @@ export class LibraryScanner {
       }
     } catch (e: any) {
       if (e?.code === 'ENOENT') {
-        console.log(`Root folder not found for "${show.title}": ${rootFolder}`);
+        console.log(`Scan folder not found for "${show.title}": ${scanDir}`);
       } else {
         console.warn(`Error scanning show "${show.title}":`, e);
       }

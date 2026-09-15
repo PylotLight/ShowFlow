@@ -266,6 +266,29 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 
 ---
 
+### 12. Ad hoc search newest-first broken when indexers omit age
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (search results not latest-first)
+
+**Root cause:** "Newest" sorted on `ageHours` alone; native indexers often omit it, scattering new releases.
+**Fix:** `effectiveAgeHours` falls back to `publishDate`, unknown dates sink to the bottom; displayed ages use the same fallback.
+
+### 13. TorBox grabs went dark then disappeared
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (Reacher S04E07: job at "cached 100%", then gone; episode briefly still MISSING)
+
+**Findings:** the import itself succeeded end to end (file on disk, DB `file_path` set, API correct) — the MISSING badge was stale pre-import UI. Two real gaps fixed:
+- The HTTP file-fetch phase buffered silently at "cached 100%": now streams with live `Fetching file i/n — % (amounts, speed)` detail.
+- The pod restarted (v0.1.41 rollout) mid-download, killing the in-memory waiter with no trace: in-flight TorBox downloads now persist (`torbox.inflight`) and resume on boot; finished jobs retained 24h (capped).
+
+### 14. Per-show scan walked the entire library
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 ("scan checks every file?" — Reacher scan skipping 24's files)
+
+**Fix:** `scanShow` narrows to the show's own folder via `resolveShowScanDir` (episode paths → sanitized-title fallback → full root). Full `scan()` unchanged.
+
+---
+
 ## Backlog / Unprioritised
 
 | # | Issue | Notes |
@@ -292,6 +315,9 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 9 | Adhoc indexer search page + presets | 2026-09-15 (pending release) |
 | 10 | Show detail unified list + condensed header | 2026-09-15 (pending release) |
 | 11 | Season Browse/Auto cross-season leak | 2026-09-15 (pending release) |
+| 12 | Ad hoc newest-first with missing age | 2026-09-15 (pending release) |
+| 13 | TorBox dark fetch phase + lost grabs on restart | 2026-09-15 (pending release) |
+| 14 | Per-show scan walked whole library | 2026-09-15 (pending release) |
 
 ---
 

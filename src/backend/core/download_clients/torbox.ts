@@ -1,5 +1,6 @@
 import { watch } from 'node:fs';
 import { mkdir, readdir, unlink } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { db } from '../../db';
@@ -14,6 +15,52 @@ export interface TorboxClientConfig {
   inputFolder?: string;
   outputFolder?: string;
   concurrency?: number;
+}
+
+/** Downloads that were mid-flight when the process exited, so boot can
+ *  re-attach waiters instead of silently dropping grabs on restarts. */
+export interface InflightDownload {
+  torrentId: string;
+  title: string;
+}
+
+export const TORBOX_INFLIGHT_KEY = 'torbox.inflight';
+
+export function parseInflight(raw: unknown): InflightDownload[] {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(val)) return [];
+    return val.filter(
+      (v: any): v is InflightDownload =>
+        !!v && typeof v.torrentId === 'string' && typeof v.title === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function formatBytesShort(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+/** Human progress line for the file-fetch phase, e.g.
+ *  "Fetching file 2/3 — 35% (1.2 GiB of 3.4 GiB, 8.5 MiB/s)". */
+export function formatFetchDetail(
+  fileIdx: number,
+  fileTotal: number,
+  downloaded: number,
+  total: number,
+  speedBps: number,
+): string {
+  const pct = total > 0 ? ` — ${Math.min(100, Math.round((downloaded / total) * 100))}%` : '';
+  const amounts = total > 0
+    ? `${formatBytesShort(downloaded)} of ${formatBytesShort(total)}`
+    : formatBytesShort(downloaded);
+  const speed = speedBps > 0 ? `, ${formatBytesShort(speedBps)}/s` : '';
+  return `Fetching file ${fileIdx}/${fileTotal}${pct} (${amounts}${speed})`;
 }
 
 export function resolveTorboxConfig(config: Config): Config {
@@ -102,6 +149,16 @@ export class TorboxDownloadClient implements DownloadClient {
     }
 
     console.log(`[${this.name}] Running.`);
+
+    // Re-attach to downloads that were in flight when the process last
+    // exited (rollouts restart the pod mid-download). The TorBox-side
+    // torrent is untouched by our restart, so waiting resumes where the
+    // polling left off instead of the grab silently disappearing.
+    for (const entry of this.readInflight()) {
+      if (this.activeTitles.has(entry.title)) continue;
+      console.log(`[${this.name}] Resuming in-flight download "${entry.title}" (torrent ${entry.torrentId})`);
+      this.trackDownload(entry.torrentId, entry.title);
+    }
   }
 
   async stop() {
@@ -210,8 +267,18 @@ export class TorboxDownloadClient implements DownloadClient {
       return { ok: false, message: `TorBox returned no torrent ID for "${title}"` };
     }
 
-    this.activeTitles.add(title);
+    this.trackDownload(torrentId, title);
 
+    return { ok: true, message: `Submitted "${title}" to TorBox` };
+  }
+
+  /**
+   * Fire-and-forget waiter with outcome logging: the single funnel for
+   * fresh submissions and post-restart resumes, so a grab always ends in
+   * a visible event + finished job instead of vanishing.
+   */
+  trackDownload(torrentId: string, title: string): void {
+    this.activeTitles.add(title);
     this.waitForDownload(torrentId, title)
       .then((ok) => {
         db.logEvent({
@@ -232,11 +299,93 @@ export class TorboxDownloadClient implements DownloadClient {
       .finally(() => {
         this.activeTitles.delete(title);
       });
+  }
 
-    return { ok: true, message: `Submitted "${title}" to TorBox` };
+  private readInflight(): InflightDownload[] {
+    try {
+      return parseInflight(db.getSetting(TORBOX_INFLIGHT_KEY));
+    } catch {
+      return [];
+    }
+  }
+
+  private markInflight(entry: InflightDownload): void {
+    try {
+      const list = this.readInflight().filter(e => e.torrentId !== entry.torrentId);
+      list.push(entry);
+      db.setSetting(TORBOX_INFLIGHT_KEY, list);
+    } catch {}
+  }
+
+  private clearInflight(torrentId: string): void {
+    try {
+      db.setSetting(
+        TORBOX_INFLIGHT_KEY,
+        this.readInflight().filter(e => e.torrentId !== torrentId),
+      );
+    } catch {}
   }
 
   private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
+    this.markInflight({ torrentId, title: label });
+    try {
+      return await this.waitForDownloadInner(torrentId, label);
+    } finally {
+      this.clearInflight(torrentId);
+    }
+  }
+
+  /**
+   * Stream a fetch response to disk, reporting downloaded bytes, total
+   * (when the server sends Content-Length), and rolling speed. Throttled
+   * to ~1 update per 1.5s so the job registry isn't spammed per chunk.
+   */
+  private async fetchToFile(
+    res: Response,
+    outputPath: string,
+    onProgress: (downloaded: number, total: number, speedBps: number) => void,
+  ): Promise<void> {
+    if (!res.body) throw new Error('Empty response body');
+    const total = Number(res.headers.get('content-length')) || 0;
+    const reader = res.body.getReader();
+    let downloaded = 0;
+    let lastEmit = 0;
+    let windowBytes = 0;
+    let windowStart = Date.now();
+    await new Promise<void>((resolve, reject) => {
+      const stream = createWriteStream(outputPath);
+      stream.on('error', reject);
+      stream.on('finish', () => resolve());
+      (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            downloaded += value.byteLength;
+            windowBytes += value.byteLength;
+            if (!stream.write(value)) {
+              await new Promise<void>((r) => stream.once('drain', () => r()));
+            }
+            const now = Date.now();
+            if (now - lastEmit > 1500) {
+              const dt = (now - windowStart) / 1000;
+              onProgress(downloaded, total, dt > 0 ? windowBytes / dt : 0);
+              lastEmit = now;
+              windowBytes = 0;
+              windowStart = now;
+            }
+          }
+          stream.end();
+        } catch (e) {
+          stream.destroy(e as Error);
+          reject(e);
+        }
+      })();
+    });
+    onProgress(downloaded, total, 0);
+  }
+
+  private async waitForDownloadInner(torrentId: string, label: string): Promise<boolean> {
     console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
 
     // Expose this download in the header popover + queue as a live job.
@@ -352,7 +501,8 @@ export class TorboxDownloadClient implements DownloadClient {
           }
 
           let anyDownloaded = false;
-          for (const file of files) {
+          for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+            const file = files[fileIdx]!;
             const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
             if (!dl.success) {
               const errText = JSON.stringify(dl.error);
@@ -385,8 +535,15 @@ export class TorboxDownloadClient implements DownloadClient {
                 });
                 continue;
               }
-              const data = await res.arrayBuffer();
-              await Bun.write(outputPath, data);
+              // Stream to disk with live progress — previously this phase
+              // buffered the whole file silently while the job sat at
+              // "cached 100%", looking dead for multi-GB downloads.
+              await this.fetchToFile(res, outputPath, (downloaded, total, speedBps) => {
+                const detail = formatFetchDetail(fileIdx + 1, files.length, downloaded, total, speedBps);
+                const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
+                this.activeDetails.set(label, { state: detail, progress: pct });
+                backgroundJobs.update(jobId, { total: 100, completed: pct ?? 0, detail });
+              });
               console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
               anyDownloaded = true;
             } catch (fetchErr) {

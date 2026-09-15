@@ -11,6 +11,11 @@
  * In-memory is intentional (per the brief: "doesn't need to survive a
  * restart") - this is a single-process app, and a job that was running at
  * the moment of a restart wasn't going to resume cleanly anyway.
+ * (TorBox downloads are the exception: their in-flight torrent IDs persist
+ * in settings and the waiter re-attaches on boot.)
+ *
+ * Finished jobs are retained for 24h (capped) so a completed/failed grab
+ * can always be traced to its outcome instead of vanishing.
  *
  * This is a registry, not a feature built once per task type - the whole
  * point is that future long-running features get a progress UI for free
@@ -46,11 +51,12 @@ export interface BackgroundJob {
 
 type Listener = (jobs: BackgroundJob[]) => void;
 
-class BackgroundJobRegistry {
-  private jobs = new Map<string, BackgroundJob>();
+export class BackgroundJobRegistry {  private jobs = new Map<string, BackgroundJob>();
   private listeners = new Set<Listener>();
   /** How long a finished (done/error) job stays visible before eviction. */
-  private static RETENTION_MS = 5 * 60 * 1000;
+  private static RETENTION_MS = 24 * 60 * 60 * 1000;
+  /** Cap on retained finished jobs — oldest go first, running jobs exempt. */
+  private static MAX_FINISHED = 200;
 
   register(input: { id: string; type: string; label: string; total?: number; link?: string }): BackgroundJob {
     const job: BackgroundJob = {
@@ -63,6 +69,7 @@ class BackgroundJobRegistry {
       startedAt: new Date().toISOString(),
     };
     this.jobs.set(job.id, job);
+    this.pruneFinished();
     this.notify();
     return job;
   }
@@ -80,6 +87,7 @@ class BackgroundJobRegistry {
     job.status = 'done';
     job.finishedAt = new Date().toISOString();
     if (detail) job.progress.detail = detail;
+    this.pruneFinished();
     this.notify();
     this.scheduleEviction(id);
   }
@@ -90,6 +98,7 @@ class BackgroundJobRegistry {
     job.status = 'error';
     job.error = error;
     job.finishedAt = new Date().toISOString();
+    this.pruneFinished();
     this.notify();
     this.scheduleEviction(id);
   }
@@ -118,6 +127,16 @@ class BackgroundJobRegistry {
 
   private scheduleEviction(id: string): void {
     setTimeout(() => this.jobs.delete(id), BackgroundJobRegistry.RETENTION_MS);
+  }
+
+  private pruneFinished(): void {
+    const finished = this.list().filter((j) => j.status !== 'running');
+    const over = finished.length - BackgroundJobRegistry.MAX_FINISHED;
+    if (over <= 0) return;
+    finished
+      .sort((a, b) => (a.finishedAt ?? a.startedAt).localeCompare(b.finishedAt ?? b.startedAt))
+      .slice(0, over)
+      .forEach((j) => this.jobs.delete(j.id));
   }
 }
 

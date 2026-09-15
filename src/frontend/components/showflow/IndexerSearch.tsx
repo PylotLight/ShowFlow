@@ -86,6 +86,19 @@ function formatBytes(bytes: number): string {
   return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
 }
 
+// Effective age in hours for "newest first": reported ageHours wins when
+// sane, otherwise fall back to publishDate, otherwise sink to the bottom.
+// (Native indexers often omit ageHours, which used to leave new releases
+// scattered through the list.)
+function effectiveAgeHours(r: { ageHours: number; publishDate: string }): number {
+  if (Number.isFinite(r.ageHours) && r.ageHours >= 0) return r.ageHours;
+  if (r.publishDate) {
+    const t = new Date(r.publishDate).getTime();
+    if (!Number.isNaN(t)) return Math.max(0, (Date.now() - t) / 3_600_000);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function formatAge(hours: number): string {
   const h = Number.isFinite(hours) && hours > 0 ? hours : 0;
   const totalMinutes = Math.round(h * 60);
@@ -313,7 +326,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
         sorted.sort((a, b) => b.size - a.size);
         break;
       default:
-        sorted.sort((a, b) => a.ageHours - b.ageHours);
+        sorted.sort((a, b) => effectiveAgeHours(a) - effectiveAgeHours(b));
     }
     return sorted;
   }, [releases, protocol, indexerFilter, minSeeders, sortBy, textFilter]);
@@ -344,7 +357,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
     <div className="space-y-4">
       <GlassPanel className="p-5">
         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Indexer Search</span>
-        <h2 className="font-display text-2xl font-bold text-white mb-1">Adhoc search</h2>
+        <h2 className="font-display text-2xl font-bold text-white mb-1">Ad hoc search</h2>
         <p className="text-muted-foreground text-sm mb-4">
           Query any configured indexer directly — no show or release attached. Grab sends the release to your download client.
         </p>
@@ -641,7 +654,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
                       ) : (
                         <span>{release.grabs} grabs</span>
                       )}
-                      <span>{formatAge(release.ageHours)} ago</span>
+                      <span>{formatAge(effectiveAgeHours(release))} ago</span>
                       <span className="truncate min-w-0 max-w-[160px]" title={release.indexerName}>{release.indexerName}</span>
                     </div>
                   </div>
