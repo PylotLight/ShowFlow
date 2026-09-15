@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -16,6 +16,10 @@ interface SeasonStat {
   seasonNumber: number;
   episodeCount: number;
   trackedCount: number;
+}
+
+interface SeasonWithEpisodes extends SeasonStat {
+  episodes: EpisodeData[];
 }
 
 interface Profile {
@@ -46,9 +50,9 @@ function saveColumns(cols: ColumnDef[]) {
 }
 
 // Which release search/grab is currently in flight - used to disable/spin
-// the right button without a big lookup table. 'season' covers the
-// season-level auto-grab; a number covers that episode's auto-grab.
-type GrabTarget = 'season' | number | null;
+// the right button without a big lookup table. `season:{n}` covers a
+// season-level auto-grab; `ep:{season}:{episode}` covers one episode.
+type GrabTarget = string | null;
 
 // What the ReleaseSearchDialog is currently showing - undefined episode
 // means a season-level (pack) search.
@@ -59,15 +63,19 @@ interface SearchTarget {
 
 function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: { show: ShowSummary; onBack: () => void; modal?: boolean; onToggleExpand?: () => void; expanded?: boolean }) {
   const [seasons, setSeasons] = React.useState<SeasonStat[] | null>(null);
-  const [activeSeason, setActiveSeason] = React.useState<number | null>(null);
-  const [episodes, setEpisodes] = React.useState<EpisodeData[] | null>(null);
+  // All seasons' episodes, keyed by season number. One unified list, latest
+  // season first (specials last) — no season tabs.
+  const [episodesBySeason, setEpisodesBySeason] = React.useState<Record<number, EpisodeData[]>>({});
+  const [collapsed, setCollapsed] = React.useState<Record<number, boolean>>({});
   const [loadingEpisodes, setLoadingEpisodes] = React.useState(false);
   const [filter, setFilter] = React.useState<"all" | "available" | "missing">("all");
   const [columnConfig, setColumnConfig] = React.useState<ColumnDef[]>(loadColumns);
   const [showColumnMenu, setShowColumnMenu] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
-  const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
-  const headerMenuRef = React.useRef<HTMLDivElement>(null);
+  // Single options menu shared by desktop + mobile: config, organize and
+  // danger actions with descriptions, instead of split top/bottom buttons.
+  const [optionsOpen, setOptionsOpen] = React.useState(false);
+  const optionsMenuRef = React.useRef<HTMLDivElement>(null);
 
   const [profiles, setProfiles] = React.useState<Profile[]>([]);
   const [profile, setProfile] = React.useState<string>(show.profile || "standard");
@@ -155,51 +163,89 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowColumnMenu(false);
       }
-      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) {
-        setHeaderMenuOpen(false);
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target as Node)) {
+        setOptionsOpen(false);
       }
     }
-    if (showColumnMenu || headerMenuOpen) document.addEventListener('mousedown', handleClick);
+    if (showColumnMenu || optionsOpen) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [showColumnMenu, headerMenuOpen]);
+  }, [showColumnMenu, optionsOpen]);
+
+  // Seasons display order: latest first, specials (season 0) last.
+  function orderSeasons<T extends SeasonStat>(list: T[]): T[] {
+    return [...list].sort((a, b) => {
+      if (a.seasonNumber === 0) return 1;
+      if (b.seasonNumber === 0) return -1;
+      return b.seasonNumber - a.seasonNumber;
+    });
+  }
+
+  function seasonLabel(n: number): string {
+    return n === 0 ? "Specials" : `Season ${n}`;
+  }
+
+  async function loadAllEpisodes() {
+    setLoadingEpisodes(true);
+    try {
+      const r = await fetch(`/api/shows/${show.id}/episodes`);
+      const data: { seasons: SeasonWithEpisodes[] } = await r.json();
+      const list = Array.isArray(data.seasons) ? data.seasons : [];
+      const ordered = orderSeasons(list);
+      setSeasons(ordered.map(({ episodes: _e, ...stats }) => stats));
+      setCollapsed((prev) => {
+        // Preserve the user's collapse choices across refreshes; new
+        // seasons default to collapsed unless they're the latest.
+        const next: Record<number, boolean> = {};
+        ordered.forEach((s, i) => { next[s.seasonNumber] = prev[s.seasonNumber] ?? i !== 0; });
+        return next;
+      });
+      const buckets: Record<number, EpisodeData[]> = {};
+      for (const s of ordered) buckets[s.seasonNumber] = s.episodes ?? [];
+      setEpisodesBySeason(buckets);
+    } catch {
+      // Keep previous state on failure; the list simply doesn't refresh.
+    } finally {
+      setLoadingEpisodes(false);
+    }
+  }
 
   React.useEffect(() => {
     setSeasons(null);
-    setActiveSeason(null);
-    setEpisodes(null);
-    fetch(`/api/shows/${show.id}/seasons`)
-      .then((r) => r.json())
-      .then((data: SeasonStat[]) => {
-        setSeasons(data);
-        const first = data[0];
-        if (first) setActiveSeason(first.seasonNumber);
-      });
+    setEpisodesBySeason({});
+    setCollapsed({});
+    loadAllEpisodes();
   }, [show.id]);
 
-  function loadEpisodes() {
-    if (activeSeason === null) return;
-    setLoadingEpisodes(true);
-    fetch(`/api/shows/${show.id}/seasons/${activeSeason}/episodes`)
-      .then((r) => r.json())
-      .then((data: EpisodeData[]) => setEpisodes(data))
-      .finally(() => setLoadingEpisodes(false));
+  const orderedSeasons = React.useMemo(() => (seasons ? orderSeasons(seasons) : []), [seasons]);
+
+  const episodesLoaded = Object.keys(episodesBySeason).length > 0;
+
+  // Per-season filtered episodes for the unified list. While a
+  // file-state filter is active every section is force-expanded so matches
+  // are never hidden inside a collapsed season.
+  const forceExpand = filter !== "all";
+  const sections = React.useMemo(() => {
+    const hasFile = (ep: EpisodeData) => !!ep.filePath;
+    return orderedSeasons.map((s) => {
+      const all = episodesBySeason[s.seasonNumber] ?? [];
+      const eps = filter === "all" ? all : all.filter((ep) => (filter === "available" ? hasFile(ep) : !hasFile(ep)));
+      return { season: s, all, episodes: eps };
+    });
+  }, [orderedSeasons, episodesBySeason, filter]);
+
+  const overallAvailable = sections.reduce((a, s) => a + s.all.filter((e) => !!e.filePath).length, 0);
+  const overallTotal = sections.reduce((a, s) => a + s.all.length, 0);
+
+  function updateEpisodeBucket(season: number, fn: (eps: EpisodeData[]) => EpisodeData[]) {
+    setEpisodesBySeason((prev) => {
+      const cur = prev[season];
+      if (!cur) return prev;
+      return { ...prev, [season]: fn(cur) };
+    });
   }
 
-  React.useEffect(loadEpisodes, [show.id, activeSeason]);
-
-  const filteredEpisodes = React.useMemo(() => {
-    if (!episodes) return null;
-    if (filter === "all") return episodes;
-    const hasFile = (ep: EpisodeData) => !!ep.filePath;
-    return episodes.filter((ep) => (filter === "available" ? hasFile(ep) : !hasFile(ep)));
-  }, [episodes, filter]);
-
-  const availableCount = episodes?.filter((e) => !!e.filePath).length ?? 0;
-  const totalCount = episodes?.length ?? 0;
-  const allTracked = episodes && episodes.length > 0 && episodes.every((e) => e.tracked);
-
   async function toggleTracked(episode: EpisodeData, tracked: boolean) {
-    setEpisodes((prev) => prev?.map((e) => (e.episode === episode.episode ? { ...e, tracked } : e)) ?? prev);
+    updateEpisodeBucket(episode.season, (eps) => eps.map((e) => (e.episode === episode.episode ? { ...e, tracked } : e)));
     try {
       const res = await fetch(
         `/api/shows/${show.id}/seasons/${episode.season}/episodes/${episode.episode}/tracked`,
@@ -207,12 +253,12 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       );
       if (!res.ok) throw new Error("Failed to update");
     } catch {
-      setEpisodes((prev) => prev?.map((e) => (e.episode === episode.episode ? { ...e, tracked: !tracked } : e)) ?? prev);
+      updateEpisodeBucket(episode.season, (eps) => eps.map((e) => (e.episode === episode.episode ? { ...e, tracked: !tracked } : e)));
     }
   }
 
   async function handleSearchMode(episode: EpisodeData, mode: 'auto' | 'interactive') {
-    setEpisodes((prev) => prev?.map((e) => (e.episode === episode.episode ? { ...e, searchMode: mode } : e)) ?? prev);
+    updateEpisodeBucket(episode.season, (eps) => eps.map((e) => (e.episode === episode.episode ? { ...e, searchMode: mode } : e)));
     try {
       const res = await fetch(
         `/api/shows/${show.id}/seasons/${episode.season}/episodes/${episode.episode}/search`,
@@ -220,12 +266,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       );
       if (!res.ok) throw new Error("Failed to update");
     } catch {
-      setEpisodes((prev) => prev?.map((e) => (e.episode === episode.episode ? { ...e, searchMode: episode.searchMode === 'auto' ? 'interactive' : 'auto' } : e)) ?? prev);
+      updateEpisodeBucket(episode.season, (eps) => eps.map((e) => (e.episode === episode.episode ? { ...e, searchMode: episode.searchMode === 'auto' ? 'interactive' : 'auto' } : e)));
     }
   }
 
-  async function handleProfileChange(next: string) {
-    const prev = profile;
+  async function handleProfileChange(next: string) {    const prev = profile;
     setProfile(next);
     try {
       const res = await fetch(`/api/shows/${show.id}`, {
@@ -238,6 +283,23 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       setProfile(prev);
       flashStatus("Failed to update quality profile.", false);
     }
+  }
+
+  function handleSeriesTypeChange(v: string) {
+    const match = findProfileForType(v);
+    const body: Record<string, any> = { seriesType: v };
+    if (match && match.root_folder_path !== rootFolderPath) {
+      body.rootFolderPath = match.root_folder_path;
+    }
+    setSeriesType(v);
+    if (match && match.root_folder_path !== rootFolderPath) {
+      setRootFolderPath(match.root_folder_path);
+    }
+    fetch(`/api/shows/${show.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => r.ok && flashStatus(`Type set to "${v}".`)).catch(() => flashStatus("Failed to update.", false));
   }
 
   const matchedFolderProfileId = React.useMemo(
@@ -350,7 +412,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       if (data.failed > 0) parts.push(`${data.failed} failed`);
       flashStatus(parts.length > 0 ? parts.join(", ") + "." : "No files to move.");
       setOrganizePreview(null);
-      if (data.moved > 0) loadEpisodes();
+      if (data.moved > 0) loadAllEpisodes();
     } catch (err: any) {
       flashStatus(err.message ?? "Failed to organize files.", false);
     } finally {
@@ -420,7 +482,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       // title/poster path is picked up.
       if (onToggleExpand) onToggleExpand();
       window.dispatchEvent(new CustomEvent("showflow-refresh-shows", { detail: { showId: show.id, title: data.to } }));
-      if (activeSeason != null) loadEpisodes();
+      loadAllEpisodes();
     } catch (err: any) {
       flashStatus(err.message ?? "Failed to rename series.", false);
     } finally {
@@ -429,7 +491,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   }
 
   async function autoGrabEpisode(episode: EpisodeData) {
-    setGrabTarget(episode.episode);
+    setGrabTarget(`ep:${episode.season}:${episode.episode}`);
     try {
       const res = await fetch(
         `/api/shows/${show.id}/seasons/${episode.season}/episodes/${episode.episode}/grab`,
@@ -437,7 +499,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       );
       const data = await res.json();
       flashStatus(data.message ?? (data.success ? "Grabbed." : "Grab failed."), !!data.success);
-      if (data.success) loadEpisodes();
+      if (data.success) loadAllEpisodes();
     } catch (err: any) {
       flashStatus(err.message ?? "Grab failed.", false);
     } finally {
@@ -445,14 +507,13 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     }
   }
 
-  async function autoGrabSeason() {
-    if (activeSeason === null) return;
-    setGrabTarget('season');
+  async function autoGrabSeason(season: number) {
+    setGrabTarget(`season:${season}`);
     try {
-      const res = await fetch(`/api/shows/${show.id}/seasons/${activeSeason}/grab`, { method: "POST" });
+      const res = await fetch(`/api/shows/${show.id}/seasons/${season}/grab`, { method: "POST" });
       const data = await res.json();
       flashStatus(data.message ?? (data.success ? "Grabbed." : "Grab failed."), !!data.success);
-      if (data.success) loadEpisodes();
+      if (data.success) loadAllEpisodes();
     } catch (err: any) {
       flashStatus(err.message ?? "Grab failed.", false);
     } finally {
@@ -460,21 +521,17 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     }
   }
 
-  async function toggleSeasonTracked(tracked: boolean) {
-    if (activeSeason === null) return;
-    setEpisodes((prev) => prev?.map((e) => ({ ...e, tracked })) ?? prev);
-    setSeasons((prev) => prev?.map((s) =>
-      s.seasonNumber === activeSeason ? { ...s, trackedCount: tracked ? s.episodeCount : 0 } : s
-    ) ?? prev);
+  async function toggleSeasonTracked(season: number, tracked: boolean) {
+    updateEpisodeBucket(season, (eps) => eps.map((e) => ({ ...e, tracked })));
     try {
-      const res = await fetch(`/api/shows/${show.id}/seasons/${activeSeason}/tracked`, {
+      const res = await fetch(`/api/shows/${show.id}/seasons/${season}/tracked`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tracked }),
       });
       if (!res.ok) throw new Error("Failed to update");
     } catch {
-      loadEpisodes();
+      loadAllEpisodes();
     }
   }
 
@@ -491,7 +548,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     try {
       const res = await fetch(`/api/shows/${show.id}/scan`, { method: "POST" });
       if (!res.ok) throw new Error("Scan failed");
-      loadEpisodes();
+      loadAllEpisodes();
       flashStatus("Scan complete.");
     } catch (err) {
       flashStatus("Scan failed.", false);
@@ -545,68 +602,108 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           </span>
         )}
 
-        <div className="ml-auto items-center gap-3 hidden md:flex">
-          <button onClick={() => setManageSourcesOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors">
-            Sources
-          </button>
-          <button onClick={() => setMappingOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1.5">
-            <GitCompareArrows className="size-3.5" />
-            Mapping
-            <span className={`size-1.5 rounded-full ${mappingHealth === 'ok' ? 'bg-emerald-400' : mappingHealth === 'conflicts' ? 'bg-amber-400' : mappingHealth === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
-          </button>
-          {profiles.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Profile</span>
-              <Select value={profile} onValueChange={handleProfileChange}>
-                <SelectTrigger size="sm" className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {profiles.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Type</span>
-              <Select value={seriesType} onValueChange={v => {
-                const match = findProfileForType(v);
-                const body: Record<string, any> = { seriesType: v };
-                if (match && match.root_folder_path !== rootFolderPath) {
-                  body.rootFolderPath = match.root_folder_path;
-                }
-                setSeriesType(v);
-                if (match && match.root_folder_path !== rootFolderPath) {
-                  setRootFolderPath(match.root_folder_path);
-                }
-                fetch(`/api/shows/${show.id}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(body),
-                }).then(r => r.ok && flashStatus(`Type set to "${v}".`)).catch(() => flashStatus("Failed to update.", false));
-              }}>
-                <SelectTrigger size="sm" className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="anime">Anime</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="ml-auto flex items-center gap-2.5">
           <button onClick={handleScanDir} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
             <FolderSearch className="size-3.5" />
-            Scan
+            <span className="hidden sm:inline">Scan</span>
           </button>
-          <button onClick={() => setDuplicatesOpen(true)} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1">
-            <FolderArchive className="size-3.5" />
-            Dedupe
-          </button>
-          <button onClick={removeShow} className="text-muted-foreground hover:text-red-400 text-sub font-mono tracking-wider uppercase transition-colors">
-            Remove
-          </button>
+
+          {/* Options menu: config, organize and danger actions with
+              descriptions — one shared menu for desktop + mobile. */}
+          <div className="relative" ref={optionsMenuRef}>
+            <button
+              onClick={() => setOptionsOpen(v => !v)}
+              className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors flex items-center gap-1"
+              aria-label="Show options"
+              aria-expanded={optionsOpen}
+            >
+              <MoreHorizontal className="size-4" />
+              <span className="hidden sm:inline">Options</span>
+            </button>
+            {optionsOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-30 w-72 rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-2 space-y-0.5"
+                style={{ backdropFilter: "blur(16px)" }}>
+                <div className="px-2 pt-1 pb-0.5 font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Configure</div>
+                <button onClick={() => { setManageSourcesOpen(true); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85">Sources</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Indexers, download clients and import paths for this show</div>
+                </button>
+                <button onClick={() => { setMappingOpen(true); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85 flex items-center gap-2">
+                    <GitCompareArrows className="size-4 text-signal" />
+                    Episode Mapping
+                    <span className={`ml-auto size-1.5 rounded-full ${mappingHealth === 'ok' ? 'bg-emerald-400' : mappingHealth === 'conflicts' ? 'bg-amber-400' : mappingHealth === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Scene ↔ provider numbering overrides for anime and specials</div>
+                </button>
+                {profiles.length > 0 && (
+                  <div className="px-2 py-1.5">
+                    <div className="text-sm text-foreground/85 mb-0.5">Quality Profile</div>
+                    <div className="text-xs text-muted-foreground mb-1.5">Which quality formats to accept for this show</div>
+                    <Select value={profile} onValueChange={handleProfileChange}>
+                      <SelectTrigger size="sm" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profiles.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="px-2 py-1.5">
+                  <div className="text-sm text-foreground/85 mb-0.5">Series Type</div>
+                  <div className="text-xs text-muted-foreground mb-1.5">Standard or anime routing, plus the matching root folder</div>
+                  <Select value={seriesType} onValueChange={handleSeriesTypeChange}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="anime">Anime</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <hr className="border-white/5 my-1" />
+                <div className="px-2 pt-1 pb-0.5 font-mono text-caption uppercase tracking-wider text-muted-foreground/60">Organize</div>
+                <button onClick={() => { handleOrganize(); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85 flex items-center gap-2">
+                    {organizing ? <Loader2Icon className="size-4 animate-spin" /> : <RefreshCwIcon className="size-4 text-signal" />}
+                    Organize Files
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Rename episode files to your naming pattern</div>
+                </button>
+                <button onClick={() => { handleRenameFolderPreview(); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85 flex items-center gap-2">
+                    {renamingFolder ? <Loader2Icon className="size-4 animate-spin" /> : <FolderSearch className="size-4 text-signal" />}
+                    Rename Folder
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Match the show folder to the sanitized title</div>
+                </button>
+                <button onClick={() => { setRenameSeriesTitle(show.title); setRenameSeriesOpen(true); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85 flex items-center gap-2">
+                    <PencilIcon className="size-4 text-signal" />
+                    Rename Series
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Change the series title itself</div>
+                </button>
+                <button onClick={() => { setDuplicatesOpen(true); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] transition-colors">
+                  <div className="text-sm text-foreground/85 flex items-center gap-2">
+                    <FolderArchive className="size-4 text-signal" />
+                    Dedupe
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Find overlapping and duplicate files</div>
+                </button>
+                <hr className="border-white/5 my-1" />
+                <button onClick={() => { removeShow(); setOptionsOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-red-400/10 transition-colors">
+                  <div className="text-sm text-red-400">Remove</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Remove this show from your library</div>
+                </button>
+              </div>
+            )}
+          </div>
+
           {onToggleExpand && (
             <button onClick={onToggleExpand} className="text-muted-foreground hover:text-foreground text-sub font-mono tracking-wider uppercase transition-colors" title={expanded ? "Minimize" : "Expand"}>
               {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -618,81 +715,10 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             </button>
           )}
         </div>
-
-        {/* Mobile header menu */}
-        <div className="relative md:hidden ml-auto" ref={headerMenuRef}>
-          <button
-            onClick={() => setHeaderMenuOpen(v => !v)}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Show options"
-          >
-            <MoreHorizontal className="size-5" />
-          </button>
-          {headerMenuOpen && (
-            <div className="absolute right-0 top-full mt-1.5 z-30 w-52 rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-2 space-y-1"
-              style={{ backdropFilter: "blur(16px)" }}>
-              <button onClick={() => { setManageSourcesOpen(true); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] text-sm text-foreground/80">
-                Sources
-              </button>
-              <button onClick={() => { setMappingOpen(true); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-white/[0.04] text-sm text-foreground/80 flex items-center gap-2">
-                <GitCompareArrows className="size-4 text-signal" />
-                Episode Mapping
-                <span className={`ml-auto size-1.5 rounded-full ${mappingHealth === 'ok' ? 'bg-emerald-400' : mappingHealth === 'conflicts' ? 'bg-amber-400' : mappingHealth === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
-              </button>
-              {profiles.length > 0 && (
-                <div className="px-2 py-1.5">
-                  <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60 mb-1">Profile</div>
-                  <Select value={profile} onValueChange={handleProfileChange}>
-                    <SelectTrigger size="sm" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {profiles.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="px-2 py-1.5">
-                <div className="font-mono text-caption uppercase tracking-wider text-muted-foreground/60 mb-1">Type</div>
-                <Select value={seriesType} onValueChange={v => {
-                  const match = findProfileForType(v);
-                  const body: Record<string, any> = { seriesType: v };
-                  if (match && match.root_folder_path !== rootFolderPath) {
-                    body.rootFolderPath = match.root_folder_path;
-                  }
-                  setSeriesType(v);
-                  if (match && match.root_folder_path !== rootFolderPath) {
-                    setRootFolderPath(match.root_folder_path);
-                  }
-                  fetch(`/api/shows/${show.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                  }).then(r => r.ok && flashStatus(`Type set to "${v}".`)).catch(() => flashStatus("Failed to update.", false));
-                  setHeaderMenuOpen(false);
-                }}>
-                  <SelectTrigger size="sm" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="anime">Anime</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <hr className="border-white/5 my-1" />
-              <button onClick={() => { removeShow(); setHeaderMenuOpen(false); }} className="w-full text-left px-2 py-2 rounded-md hover:bg-red-400/10 text-sm text-red-400">
-                Remove
-              </button>
-            </div>
-          )}
-        </div>
       </header>
 
       {/* Hero Banner */}
-      <section className="relative z-10 w-full aspect-[21/8] max-h-[300px] min-h-[180px] overflow-hidden shrink-0">
+      <section className="relative z-10 w-full aspect-[21/7] max-h-[360px] min-h-[210px] overflow-hidden shrink-0">
         <img
           src={`/api/shows/${show.id}/images/backdrop`}
           alt=""
@@ -756,27 +782,19 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           </GlassPanel>
         ) : (
           <div className="flex flex-col min-h-0 gap-4">
-            {/* Season pills */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-0.5 shrink-0">
-              {seasons.map((s) => (
-                <button
-                  key={s.seasonNumber}
-                  onClick={() => { setActiveSeason(s.seasonNumber); setFilter("all"); }}
-                  className={`shrink-0 rounded-full px-4 py-1.5 font-mono text-xs transition-all ${
-                    activeSeason === s.seasonNumber
-                      ? "bg-signal/15 text-signal shadow-[inset_0_0_0_0.5px_var(--signal)] font-semibold"
-                      : "text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.07]"
-                  }`}
-                >
-                  {s.seasonNumber === 0 ? "Specials" : `S${String(s.seasonNumber).padStart(2, "0")}`}
-                  <span className="ml-1.5 opacity-50">{s.trackedCount}/{s.episodeCount}</span>
-                </button>
-              ))}
-            </div>
-
             {/* Episode toolbar */}
             <div className="flex flex-wrap items-center gap-3 shrink-0">
               <h2 className="font-display text-base font-semibold tracking-wide text-white/80">Episodes</h2>
+              <span className="font-mono text-xs">
+                <span className="text-signal">{overallAvailable}</span>
+                <span className="text-muted-foreground">/{overallTotal} available</span>
+              </span>
+              <div className="w-28 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-signal transition-all duration-300"
+                  style={{ width: overallTotal ? `${(overallAvailable / overallTotal) * 100}%` : "0%" }}
+                />
+              </div>
               <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-full p-0.5 border border-white/5">
                 {(["all", "available", "missing"] as const).map((f) => (
                   <button
@@ -792,81 +810,6 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
                   </button>
                 ))}
               </div>
-
-              {/* Season-level actions */}
-              {activeSeason !== null && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {episodes && episodes.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => toggleSeasonTracked(!allTracked)}
-                      title={allTracked ? "Stop monitoring all episodes in this season" : "Start monitoring all episodes in this season for new releases"}
-                      className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
-                    >
-                      <Check className="size-3" /> {allTracked ? "Unmonitor All" : "Monitor All"}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setSearchTarget({ season: activeSeason })}
-                    title="Browse and manually pick a release"
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
-                  >
-                    <SearchIcon className="size-3" /> Browse
-                  </button>
-                  <button
-                    type="button"
-                    onClick={autoGrabSeason}
-                    disabled={grabTarget === 'season'}
-                    title="Automatically search and download the best matching release"
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
-                  >
-                    {grabTarget === 'season' ? (
-                      <Loader2Icon className="size-3 animate-spin" />
-                    ) : (
-                      <DownloadIcon className="size-3" />
-                    )}
-                    Auto Download
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOrganize}
-                    disabled={organizing}
-                    title="Rename all episode files to a consistent naming format"
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
-                  >
-                    {organizing ? (
-                      <Loader2Icon className="size-3 animate-spin" />
-                    ) : (
-                      <RefreshCwIcon className="size-3" />
-                    )}
-                    Organize
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRenameFolderPreview}
-                    disabled={renamingFolder}
-                    title="Preview and apply a folder rename to match the sanitized show title"
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
-                  >
-                    {renamingFolder ? (
-                      <Loader2Icon className="size-3 animate-spin" />
-                    ) : (
-                      <FolderSearch className="size-3" />
-                    )}
-                    Rename Folder
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setRenameSeriesTitle(show.title); setRenameSeriesOpen(true); }}
-                    title="Rename the series title (matches how Sonarr renames a series)"
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
-                  >
-                    <PencilIcon className="size-3" />
-                    Rename Series
-                  </button>
-                </div>
-              )}
 
               <div className="ml-auto relative" ref={menuRef}>
                 <button
@@ -902,48 +845,109 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
               </div>
             </div>
 
-            {/* Season progress */}
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="font-mono text-xs text-muted-foreground">
-                Season {activeSeason}
-              </span>
-              <span className="font-mono text-xs">
-                <span className="text-signal">{availableCount}</span>
-                <span className="text-muted-foreground">/{totalCount} available</span>
-              </span>
-              <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden max-w-56">
-                <div
-                  className="h-full rounded-full bg-signal transition-all duration-300"
-                  style={{ width: totalCount ? `${(availableCount / totalCount) * 100}%` : "0%" }}
-                />
-              </div>
-            </div>
-
-            {/* Episode list */}
+            {/* Unified episode list: all seasons, latest first, collapsible */}
             <GlassPanel className="flex-1 overflow-hidden min-h-0 flex flex-col">
-              {loadingEpisodes || filteredEpisodes === null ? (
+              {loadingEpisodes || !episodesLoaded ? (
                 <div className="flex items-center gap-2 p-10 text-sm text-muted-foreground">
                   <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />
                   Loading episodes...
                 </div>
-              ) : filteredEpisodes.length === 0 ? (
+              ) : sections.every((s) => s.episodes.length === 0) ? (
                 <div className="p-10 text-center text-sm text-muted-foreground">
                   {filter === "all" ? "No episodes loaded." : filter === "available" ? "No available episodes." : "No missing episodes."}
                 </div>
               ) : (
-                <div className="divide-y divide-white/[0.04] overflow-y-auto">
-                  {filteredEpisodes.map((ep) => (
-                    <EpisodeRow
-                      key={`${ep.season}-${ep.episode}`}
-                      episode={ep}
-                      columns={columnConfig}
-                      grabbing={grabTarget === ep.episode}
-                      onToggleTracked={(tracked) => toggleTracked(ep, tracked)}
-                      onChangeSearchMode={(mode) => handleSearchMode(ep, mode)}
-                      onAutoGrab={() => autoGrabEpisode(ep)}
-                      onOpenSearch={() => setSearchTarget({ season: ep.season, episode: ep.episode })}
-                    />
-                  ))}
+                <div className="overflow-y-auto">
+                  {sections.map(({ season, all, episodes: eps }) => {
+                    const n = season.seasonNumber;
+                    const expanded = forceExpand || !collapsed[n];
+                    const avail = all.filter((e) => !!e.filePath).length;
+                    const seasonTracked = all.length > 0 && all.every((e) => e.tracked);
+                    const grabbingSeason = grabTarget === `season:${n}`;
+                    return (
+                      <div key={n} className="border-b border-white/[0.04] last:border-0">
+                        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setCollapsed((prev) => ({ ...prev, [n]: !prev[n] }))}
+                            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                            aria-expanded={expanded}
+                          >
+                            <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} />
+                            <span className="font-display text-sm font-semibold tracking-wide text-white/85 shrink-0">
+                              {seasonLabel(n)}
+                            </span>
+                            <span className="font-mono text-xs shrink-0">
+                              <span className="text-signal">{avail}</span>
+                              <span className="text-muted-foreground">/{all.length}</span>
+                            </span>
+                            <span className="hidden sm:block w-24 h-1 rounded-full bg-white/5 overflow-hidden shrink-0">
+                              <span
+                                className="block h-full rounded-full bg-signal/70"
+                                style={{ width: all.length ? `${(avail / all.length) * 100}%` : "0%" }}
+                              />
+                            </span>
+                          </button>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {all.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleSeasonTracked(n, !seasonTracked)}
+                                title={seasonTracked ? `Stop monitoring all ${seasonLabel(n).toLowerCase()} episodes` : `Monitor all ${seasonLabel(n).toLowerCase()} episodes for new releases`}
+                                className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-2.5 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
+                              >
+                                <Check className="size-3" /> {seasonTracked ? "Unmonitor" : "Monitor"}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSearchTarget({ season: n })}
+                              title={`Browse and manually pick a ${seasonLabel(n).toLowerCase()} release`}
+                              className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-2.5 py-1 font-mono text-caption uppercase tracking-wider transition-colors"
+                            >
+                              <SearchIcon className="size-3" /> Browse
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => autoGrabSeason(n)}
+                              disabled={grabbingSeason}
+                              title={`Automatically search and download the best matching ${seasonLabel(n).toLowerCase()} release`}
+                              className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-2.5 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
+                            >
+                              {grabbingSeason ? (
+                                <Loader2Icon className="size-3 animate-spin" />
+                              ) : (
+                                <DownloadIcon className="size-3" />
+                              )}
+                              Auto
+                            </button>
+                          </div>
+                        </div>
+                        {expanded && (
+                          eps.length === 0 ? (
+                            <p className="px-4 pb-3 pl-11 text-xs text-muted-foreground">
+                              {filter === "available" ? "No available episodes in this season." : "No missing episodes in this season."}
+                            </p>
+                          ) : (
+                            <div className="divide-y divide-white/[0.04]">
+                              {eps.map((ep) => (
+                                <EpisodeRow
+                                  key={`${ep.season}-${ep.episode}`}
+                                  episode={ep}
+                                  columns={columnConfig}
+                                  grabbing={grabTarget === `ep:${ep.season}:${ep.episode}`}
+                                  onToggleTracked={(tracked) => toggleTracked(ep, tracked)}
+                                  onChangeSearchMode={(mode) => handleSearchMode(ep, mode)}
+                                  onAutoGrab={() => autoGrabEpisode(ep)}
+                                  onOpenSearch={() => setSearchTarget({ season: ep.season, episode: ep.episode })}
+                                />
+                              ))}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </GlassPanel>
@@ -961,7 +965,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           episode={searchTarget.episode}
           onGrabbed={(message, success) => {
             flashStatus(message, success);
-            loadEpisodes();
+            loadAllEpisodes();
           }}
           autoCloseOnSuccess
         />
@@ -973,12 +977,8 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         open={manageSourcesOpen}
         onOpenChange={setManageSourcesOpen}
         onSourcesChanged={() => {
-          // Refresh seasons after source changes (new episodes might appear)
-          fetch(`/api/shows/${show.id}/seasons`)
-            .then(r => r.json())
-            .then((data: SeasonStat[]) => {
-              setSeasons(data);
-            });
+          // Refresh the whole list after source changes (new episodes might appear)
+          loadAllEpisodes();
         }}
       />
 
@@ -1212,7 +1212,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         showId={show.id}
         open={duplicatesOpen}
         onOpenChange={setDuplicatesOpen}
-        onResolved={() => loadEpisodes()}
+        onResolved={() => loadAllEpisodes()}
       />
 
       {moveDialog && (

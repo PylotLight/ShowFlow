@@ -1,6 +1,6 @@
 # ShowFlow — Issues & Progress Tracker
 
-**Last updated:** 2026-09-15
+**Last updated:** 2026-09-15 (evening — v0.1.41 batch)
 **Purpose:** Track all user-raised bugs, feature requests, and their resolution state.
 
 ---
@@ -236,6 +236,36 @@ UNIQUE(show_id, scene_season, scene_episode)
 
 ---
 
+### 8. Onboarding wizard flashes on every page reload
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (screenshot: "Welcome to ShowFlow" over dashboard, then disappears)
+
+**Root cause:** `wizardOpen` defaulted to `true` whenever the localStorage key was absent; the `/api/library-types` server check that closes it only ran after first paint.
+**Fix:** three-state `checking | open | closed` gate in `App.tsx` — renders nothing until the server confirms the instance is genuinely unconfigured; stamps `completed` locally so later loads resolve without a network wait.
+
+### 9. Adhoc indexer search page (no Prowlarr required)
+**Status:** [DONE — pending release]
+**Requested:** 2026-09-15
+
+New top-level **Indexer Search** page: release-disconnected search across Prowlarr sub-indexers + enabled natives (Prowlarr fully optional), type/category/limit controls, per-indexer picker, per-indexer stats strip, per-result Grab, client-side filter/sort, and server-side saved **presets** (`indexerSearch.presets`). New `GET /api/search/adhoc`; existing `/api/search` untouched.
+
+### 10. Show detail rework: unified list + condensed header
+**Status:** [DONE — pending release]
+**Requested:** 2026-09-15 (screenshot of Reacher page)
+
+- Season tabs removed; one unified collapsible list, latest season first, Specials last, latest open by default. Global all/available/missing filter force-expands matches. Per-season Monitor/Browse/Auto in section headers; per-episode search + auto-grab stay on row hover.
+- New `GET /api/shows/:id/episodes` serves stats + all episodes in one round trip (one query + one file-map), replacing N+1 per-season fetches.
+- Top bar condensed to Back/title, Scan, one shared **Options** menu (Configure / Organize / Remove, descriptions per item), expand, close. Banner grew to 21/7 max 360px.
+
+### 11. Season Browse/Auto leaked across seasons
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (season Browse "basically doing a full series search")
+
+**Root cause:** season-scoped `isRelevantMatch` only checked title words, so every season's episodes passed.
+**Fix:** season scope now requires a season identifier (`grabber_service.ts`); absolute anime keeps title-only matching. Covered by `grabber_match.test.ts`. Note: "Complete Series" packs no longer appear in season Browse (use Indexer Search for those).
+
+---
+
 ## Backlog / Unprioritised
 
 | # | Issue | Notes |
@@ -258,6 +288,10 @@ UNIQUE(show_id, scene_season, scene_episode)
 | 1 | TorBox pipeline (polling, error logging, ephemeral client, status query compat) | 2026-08-10 (pending field-test) |
 | 5 | Folder naming colon-preservation + rename preview/apply | 2026-08-10 |
 | 6 | S00 specials parsing + library junk quarantine + daily sweep | 2026-09-15 (pending release) |
+| 8 | Onboarding flash on reload | 2026-09-15 (pending release) |
+| 9 | Adhoc indexer search page + presets | 2026-09-15 (pending release) |
+| 10 | Show detail unified list + condensed header | 2026-09-15 (pending release) |
+| 11 | Season Browse/Auto cross-season leak | 2026-09-15 (pending release) |
 
 ---
 

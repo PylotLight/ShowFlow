@@ -76,6 +76,41 @@ function serializeFileMedia(f: any) {
   };
 }
 
+// One episode row with on-disk file + release provenance, as the show
+// detail list consumes it. Shared by the per-season and whole-show
+// episode endpoints so both serialize identically.
+function serializeEpisodeDetail(e: any, fileMap: Map<string, any>) {
+  const file = fileMap.get(`${e.season_number}:${e.episode_number}`);
+  return {
+    season: e.season_number,
+    episode: e.episode_number,
+    absoluteNumber: e.absolute_number,
+    title: e.title,
+    filePath: e.file_path,
+    tracked: !!e.is_tracked,
+    airDate: e.air_date || null,
+    airTime: e.air_time || null,
+    expectedReleaseAt: e.expected_release_at || null,
+    // Granular on-disk file + release provenance (features:
+    // "what file do I actually have" and "which release did it
+    // come from").
+    file: file
+      ? {
+          path: file.file_path,
+          name: cleanReleaseName(file.original_name),
+          size: file.file_size,
+          sourceKind: file.source_kind,
+          releaseTitle: file.release_title,
+          indexerName: file.indexer_name,
+          publishDate: file.publish_date,
+          importedAt: file.imported_at,
+          media: serializeFileMedia(file),
+        }
+      : null,
+    searchMode: e.search_mode || 'auto',
+  };
+}
+
 export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
   return {
 
@@ -1074,39 +1109,41 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const seasonNumber = parseInt(req.params.season!, 10);
           const episodes = db.listEpisodes(req.params.id!, seasonNumber);
           const fileMap = db.getCurrentEpisodeFilesByShow(req.params.id!);
-          return json(
-            episodes.map((e: any) => {
-              const file = fileMap.get(`${e.season_number}:${e.episode_number}`);
-              return {
-                season: e.season_number,
-                episode: e.episode_number,
-                absoluteNumber: e.absolute_number,
-                title: e.title,
-                filePath: e.file_path,
-                tracked: !!e.is_tracked,
-                airDate: e.air_date || null,
-                airTime: e.air_time || null,
-                expectedReleaseAt: e.expected_release_at || null,
-                // Granular on-disk file + release provenance (features:
-                // "what file do I actually have" and "which release did it
-                // come from").
-                file: file
-                  ? {
-                      path: file.file_path,
-                      name: cleanReleaseName(file.original_name),
-                      size: file.file_size,
-                      sourceKind: file.source_kind,
-                      releaseTitle: file.release_title,
-                      indexerName: file.indexer_name,
-                      publishDate: file.publish_date,
-                      importedAt: file.imported_at,
-                      media: serializeFileMedia(file),
-                    }
-                  : null,
-                searchMode: e.search_mode || 'auto',
-              };
-            }),
-          );
+          return json(episodes.map((e: any) => serializeEpisodeDetail(e, fileMap)));
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    // Whole-show episode list in one round trip: per-season stats plus every
+    // episode with its file/provenance detail. Powers the unified show
+    // detail list (all seasons, collapsible) without N+1 per-season
+    // fetches — one episode query + one file-map query total.
+    "/api/shows/:id/episodes": {
+      async GET(req: RouteReq) {
+        try {
+          const all = db.listAllEpisodes(req.params.id!);
+          const fileMap = db.getCurrentEpisodeFilesByShow(req.params.id!);
+          const bySeason = new Map<number, any[]>();
+          for (const e of all) {
+            const list = bySeason.get(e.season_number) ?? [];
+            list.push(serializeEpisodeDetail(e, fileMap));
+            bySeason.set(e.season_number, list);
+          }
+          const seasons = [...bySeason.entries()]
+            .sort(([a], [b]) => {
+              if (a === 0) return 1;
+              if (b === 0) return -1;
+              return a - b;
+            })
+            .map(([seasonNumber, episodes]) => ({
+              seasonNumber,
+              episodeCount: episodes.length,
+              trackedCount: episodes.filter((e: any) => e.tracked).length,
+              episodes,
+            }));
+          return json({ seasons });
         } catch (err) {
           return errorResponse(err, 500);
         }

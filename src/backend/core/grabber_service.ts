@@ -37,7 +37,18 @@ function pad(n: number) {
   return n.toString().padStart(2, '0');
 }
 
-function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number): boolean {
+// Season identifier for a season-scoped search: S03 / S3 (including the
+// S03E04 episode form), "Season 3", and 3x04. Specials match S00,
+// "Season 0", or the word "special(s)".
+function seasonIdentifier(season: number): RegExp {
+  if (season === 0) {
+    return /(?:s0*0(?:e\d|[^a-z0-9]|$)|season\s+0\b|specials?)/i;
+  }
+  const n = String(season);
+  return new RegExp(`(?:s0*${n}(?:e\\d|[^a-z0-9]|$)|season\\s+0*${n}\\b|(?:^|[^a-z0-9])0*${n}x\\d)`, 'i');
+}
+
+export function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number, opts?: { absolute?: boolean }): boolean {
   const lower = title.toLowerCase();
   const norm = lower.replace(/[._\s-]+/g, ' ');
   const showNorm = showTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
@@ -57,8 +68,13 @@ function isRelevantMatch(title: string, showTitle: string, season: number, episo
     return hasEp && enoughTitleWords;
   }
 
-  // For season-wide searches, just the title words are enough
-  return enoughTitleWords;
+  // Season-wide searches must also carry a season identifier — otherwise
+  // every other season's episodes pass the title check and a season
+  // Browse reads as a full-series search. Absolute-numbered series
+  // (anime) carry no season marker in release titles, so they keep the
+  // title-words-only behavior.
+  if (opts?.absolute) return enoughTitleWords;
+  return enoughTitleWords && seasonIdentifier(season).test(norm);
 }
 
 export class GrabberService {
@@ -161,7 +177,8 @@ export class GrabberService {
     }
 
     const beforeFilter = allReleases.length;
-    const filtered = allReleases.filter(r => isRelevantMatch(r.title, show.title, season, episode));
+    const matchOpts = { absolute: seriesType !== 'standard' };
+    const filtered = allReleases.filter(r => isRelevantMatch(r.title, show.title, season, episode, matchOpts));
     const removed = beforeFilter - filtered.length;
     if (removed > 0) {
       logDebug({
@@ -171,7 +188,7 @@ export class GrabberService {
         message: `Filtered ${removed}/${beforeFilter} results that don't match "${show.title} ${label}"`,
       });
       const filteredOutTitles = allReleases
-        .filter(r => !isRelevantMatch(r.title, show.title, season, episode))
+        .filter(r => !isRelevantMatch(r.title, show.title, season, episode, matchOpts))
         .map(r => r.title);
       db.logPipelineEvent({
         showId, seasonNumber: season, episodeNumber: episode ?? null,
