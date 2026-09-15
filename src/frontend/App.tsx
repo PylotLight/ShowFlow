@@ -31,16 +31,19 @@ export function App() {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
   const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
-  const [wizardOpen, setWizardOpen] = React.useState<boolean>(() => {
+  // Three-state gate so the wizard never flashes on reload: while "checking"
+  // we render nothing, then open only if the server is genuinely unconfigured.
+  const [wizardState, setWizardState] = React.useState<'checking' | 'open' | 'closed'>(() => {
     try {
       const raw = localStorage.getItem("showflow-onboarding");
-      if (!raw) return true;
-      const parsed = JSON.parse(raw);
-      return !parsed.completed;
-    } catch {
-      return true;
-    }
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.completed) return 'closed';
+      }
+    } catch {}
+    return 'checking';
   });
+  const wizardOpen = wizardState === 'open';
   const [wizardKey, setWizardKey] = React.useState(0);
   const wizardManual = React.useRef(false);
 
@@ -55,15 +58,30 @@ export function App() {
       wizardManual.current = false;
       return;
     }
-    if (!wizardOpen) return;
+    if (wizardState !== 'checking') return;
     (async () => {
       try {
         const res = await fetch("/api/library-types");
         if (res.ok) {
           const types = await res.json();
-          if (types.length > 0) setWizardOpen(false);
+          if (types.length > 0) {
+            // Server is configured: remember locally so the next load
+            // resolves to closed without waiting on the network.
+            try {
+              const raw = localStorage.getItem("showflow-onboarding");
+              const parsed = raw ? JSON.parse(raw) : {};
+              localStorage.setItem("showflow-onboarding", JSON.stringify({ ...parsed, completed: true }));
+            } catch {}
+            setWizardState('closed');
+          } else {
+            setWizardState('open');
+          }
+        } else {
+          setWizardState('open');
         }
-      } catch {}
+      } catch {
+        setWizardState('open');
+      }
     })();
   }, [wizardKey]);
 
@@ -94,7 +112,7 @@ export function App() {
     localStorage.removeItem("showflow-onboarding");
     wizardManual.current = true;
     setWizardKey(k => k + 1);
-    setWizardOpen(true);
+    setWizardState('open');
   }
 
   return (
@@ -238,7 +256,7 @@ export function App() {
       )}
     </div>
     {wizardOpen && (
-      <OnboardingWizard onFinish={() => { setWizardOpen(false); window.location.reload(); }} />
+      <OnboardingWizard onFinish={() => { setWizardState('closed'); window.location.reload(); }} />
     )}
     </HeaderActionsProvider>
   );
