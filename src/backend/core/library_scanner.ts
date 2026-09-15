@@ -2,6 +2,12 @@ import { db, type Config } from '../db';
 import { normalizeShowTitle } from '../db/shows';
 import { FilenameParser } from '../parser';
 import { debugLog } from './debug';
+import {
+  isQuarantinableJunk,
+  resolveQuarantineDir,
+  quarantineFile,
+  QUARANTINE_DIR_NAME,
+} from './junk_quarantine';
 import { probeMediaFile, mediaFromStoredRow } from './media_probe';
 import { qualityEngine } from './quality_engine';
 import type { FileMediaColumns } from '../db/episode_files';
@@ -83,7 +89,47 @@ async function probeToMediaColumns(file: string): Promise<FileMediaColumns | nul
 export class LibraryScanner {
   private parser = new FilenameParser();
 
+  /**
+   * Non-video sidecar/junk files (.DS_Store, .t3, download.log, .nfo, …)
+   * are skipped silently — they are not parse failures worth logging.
+   * Only actual video containers go through the filename parser.
+   */
+  private static readonly VIDEO_EXTENSIONS = new Set([
+    '.mkv', '.mp4', '.m4v', '.avi', '.mov', '.ts', '.m2ts', '.wmv', '.webm', '.mpg', '.mpeg',
+  ]);
+
+  private shouldScanFile(file: string): boolean {
+    const base = path.basename(file);
+    if (base.startsWith('.')) return false;
+    return LibraryScanner.VIDEO_EXTENSIONS.has(path.extname(base).toLowerCase());
+  }
+
   constructor(private config: Config) {}
+
+  /**
+   * Move a junk file into downloads/.quarantine (when a downloads dir is
+   * configured). Returns 'moved' when the file was relocated, 'junk' when
+   * it matched the junk predicate but was left in place (no downloads dir,
+   * dry-run, oversize, vanished), or null when it isn't junk at all.
+   */
+  private async maybeQuarantineJunk(
+    file: string,
+    quarantineDir: string | null,
+  ): Promise<'moved' | 'junk' | null> {
+    if (!isQuarantinableJunk(path.basename(file))) return null;
+    if (!quarantineDir) return 'junk'; // no downloads dir — leave in place, stay quiet
+    const outcome = await quarantineFile(file, quarantineDir, { dryRun: this.config.dryRun });
+    if (outcome === 'moved') {
+      debugLog(`Quarantined junk file ${file}`);
+      db.logEvent({
+        type: 'scan',
+        entityType: 'file',
+        message: `Quarantined junk file ${path.basename(file)} (expires after 1 day)`,
+      });
+      return 'moved';
+    }
+    return 'junk';
+  }
 
   async scan() {
     const profiles = db.listShowProfiles();
@@ -113,6 +159,8 @@ export class LibraryScanner {
     }
     let foundCount = 0;
     let unknownCount = 0;
+    let quarantinedCount = 0;
+    const quarantineDir = resolveQuarantineDir(this.config);
 
     // Per-show duplicate candidates keyed `${showId}|${season}:${episode}`.
     const candidates = new Map<string, string[]>();
@@ -124,6 +172,17 @@ export class LibraryScanner {
     };
 
     for (const file of files) {
+      // Known non-media cruft (.DS_Store, download.log, partials, …) is
+      // moved to downloads/.quarantine for the daily sweep — not deleted
+      // on sight, and never confused with media. Unparseable VIDEO files
+      // are left in place: the watch folder + Manual Import page owns those.
+      const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
+      if (junkOutcome) {
+        if (junkOutcome === 'moved') quarantinedCount++;
+        continue;
+      }
+      // Silently skip sidecars, samples metadata, dotfiles, etc.
+      if (!this.shouldScanFile(file)) continue;
       const filename = path.basename(file);
       const parsed = this.parser.parse(filename);
 
@@ -229,7 +288,7 @@ export class LibraryScanner {
       });
     }
 
-    console.log(`Scan complete. Mapped ${foundCount} episodes, deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows.`);
+    console.log(`Scan complete. Mapped ${foundCount} episodes, quarantined ${quarantinedCount} junk file(s), deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows.`);
   }
 
   private normalizeForMatch(value: string): string {
@@ -274,6 +333,8 @@ export class LibraryScanner {
 
     console.log(`Scanning show "${show.title}" in ${rootFolder}`);
     let foundCount = 0;
+    let quarantinedCount = 0;
+    const quarantineDir = resolveQuarantineDir(this.config);
 
     // Group candidate files per (season, episode) so that after mapping we can
     // find and clean up duplicate copies of the same episode on disk (the
@@ -292,6 +353,13 @@ export class LibraryScanner {
     try {
       const files = this.walk(rootFolder);
       for (const file of files) {
+        const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
+        if (junkOutcome) {
+          if (junkOutcome === 'moved') quarantinedCount++;
+          continue;
+        }
+        // Silently skip sidecars, samples metadata, dotfiles, etc.
+        if (!this.shouldScanFile(file)) continue;
         const filename = path.basename(file);
         const parsed = this.parser.parse(filename);
 
@@ -372,7 +440,7 @@ export class LibraryScanner {
     }
 
     console.log(
-      `Show scan for "${show.title}" complete. Mapped ${foundCount} episodes, cleared ${clearedCount} stale paths, deleted ${deletedDuplicates} duplicate(s).`,
+      `Show scan for "${show.title}" complete. Mapped ${foundCount} episodes, quarantined ${quarantinedCount} junk file(s), cleared ${clearedCount} stale paths, deleted ${deletedDuplicates} duplicate(s).`,
     );
   }
 
@@ -461,15 +529,47 @@ export class LibraryScanner {
     return deleted;
   }
 
-  private walk(dir: string): string[] {
-    let results: string[] = [];
-    const list = fs.readdirSync(dir);
-    for (const file of list) {
-      const fullPath = path.join(dir, file);
-      const stat = fs.statSync(fullPath);
-      if (stat && stat.isDirectory()) {
-        results = results.concat(this.walk(fullPath));
-      } else {
+  /**
+   * Recursive directory walk that never throws: per-entry errors
+   * (EACCES, broken symlinks, files vanishing mid-scan) are skipped with
+   * a debug line instead of aborting the whole library scan. Symlinked
+   * directories are followed but cycle-guarded via canonical realpaths so
+   * a symlink loop can't recurse forever and crash the process.
+   */
+  private walk(dir: string, seen?: Set<string>): string[] {
+    seen ??= new Set<string>();
+    let canonical = dir;
+    try {
+      canonical = fs.realpathSync(dir);
+    } catch {
+      // Unresolvable root (broken symlink, vanished mount) — nothing to do.
+      return [];
+    }
+    if (seen.has(canonical)) return [];
+    seen.add(canonical);
+
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch (e: any) {
+      debugLog(`Skipping unreadable directory ${dir}: ${e?.code ?? e?.message ?? e}`);
+      return [];
+    }
+    const results: string[] = [];
+    for (const entry of entries) {
+      // Never descend into quarantine dirs, even if one sits under a
+      // scanned root (e.g. downloads pointed inside a library folder).
+      if (entry === QUARANTINE_DIR_NAME) continue;
+      const fullPath = path.join(dir, entry);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        results.push(...this.walk(fullPath, seen));
+      } else if (stat.isFile()) {
         results.push(fullPath);
       }
     }

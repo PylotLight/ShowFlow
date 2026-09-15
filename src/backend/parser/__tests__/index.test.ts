@@ -122,6 +122,20 @@ describe('FilenameParser', () => {
     expect(result?.show).toBe('Some Anime');
     expect(result?.absoluteNumbers).toContain(12);
   });
+
+  test('parses Season 0 specials (S00Exx)', () => {
+    const result = parser.parse('Lord of Mysteries - S00E20 - The Marked Hunt (2) HDTV-1080p.mkv');
+    expect(result?.show).toBe('Lord of Mysteries');
+    expect(result?.season).toBe(0);
+    expect(result?.episodes).toContain(20);
+  });
+
+  test('parses S00 with trailing episode-like suffix in title', () => {
+    const result = parser.parse("Lord of Mysteries - S00E07 - Old Neil's Mysticism Class - Lesson 04 HDTV-1080p.mkv");
+    expect(result?.show).toBe('Lord of Mysteries');
+    expect(result?.season).toBe(0);
+    expect(result?.episodes).toContain(7);
+  });
 });
 
 describe('cleanReleaseName', () => {

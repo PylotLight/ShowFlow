@@ -55,10 +55,10 @@ export class FilenameParser {
       if (!match?.groups) continue;
 
       const show = this.cleanShowName(match.groups.show ?? '');
-      const season = this.parsePositiveInteger(match.groups.season);
+      const season = this.parseSeasonNumber(match.groups.season);
       const episodes = this.parseEpisodeRange(match.groups.episode ?? '');
 
-      if (!show || !season || episodes.length === 0) continue;
+      if (!show || season === undefined || episodes.length === 0) continue;
 
       return {
         show,
@@ -111,11 +111,12 @@ export class FilenameParser {
     return [...new Set(values)];
   }
 
-  private parsePositiveInteger(value: string | undefined): number | undefined {
-    if (!value) return undefined;
+  private parseSeasonNumber(value: string | undefined): number | undefined {
+    if (value === undefined || value === '') return undefined;
 
     const parsed = Number.parseInt(value, 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+    // Season 0 (specials) is valid — only reject NaN / negatives.
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
   }
 
   private cleanShowName(raw: string): string {

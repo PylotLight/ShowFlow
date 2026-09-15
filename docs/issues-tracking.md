@@ -1,6 +1,6 @@
 # ShowFlow — Issues & Progress Tracker
 
-**Last updated:** 2026-08-10
+**Last updated:** 2026-09-15
 **Purpose:** Track all user-raised bugs, feature requests, and their resolution state.
 
 ---
@@ -203,6 +203,39 @@ UNIQUE(show_id, scene_season, scene_episode)
 
 ---
 
+### 6. FilenameParser rejected Season 0 (specials) + library junk accumulated forever
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-15 (pod log review during crash-loop investigation)
+
+**Symptoms:**
+- `Could not parse filename: Lord of Mysteries - S00E20 - ...` on every library scan.
+- `Show not found in database: Lord of Mysteries - S00E07 - Old Neil's ...` — a misparse, not a missing show.
+- Non-media cruft (`.DS_Store`, `download.log`, `.t3`) re-logged on every scan with no path to resolution.
+
+**Root causes identified:**
+1. `parsePositiveInteger` required season `> 0` and the match check was `!season`, so `S00` never matched any pattern. S00 files then fell through to the absolute-number fallback, which misparsed trailing numbers (e.g. `Lesson 04` → `absoluteNumbers: [4]`) against a garbage show title.
+2. The scanner had no junk handling — every unparsable non-media file was debug-logged and left in place on every pass.
+
+**Fixes applied (2026-09-15):**
+- [x] `parser/index.ts` — `parseSeasonNumber` allows season `>= 0`; match check is `season === undefined`. S00E20/S00E07/S00E09 all resolve correctly now. Regression tests added.
+- [x] New `core/junk_quarantine.ts` — tight known-cruft predicate (exact names, `._*`, tmp/partial/log extensions; media/subtitles/nfo/artwork/dotfiles never touched). Matches move to `<downloads>/.quarantine/` (watchFolder → outputFolder → torbox outputFolder; EXDEV-safe, collision-safe, 64 MiB cap, dryRun-aware).
+- [x] `library_scanner.ts` — `scan()` + `scanShow()` quarantine junk mid-walk; unparseable/unknown-show **video stays in place** (owned by watch folder + Manual Import holds). `walk()` skips `.quarantine` dirs, never throws, cycle-guarded.
+- [x] `scheduler.ts` — new daily `quarantine-cleanup` task (enabled by default): deletes quarantined files older than 1 day; quarantined **video is never auto-deleted**.
+- [x] Full suite green (95 tests, 14 files).
+
+**Remaining verification:**
+- [ ] Pod log silence on `.DS_Store`/`download.log` after rollout; `.quarantine` populates and sweeps on the 1d cadence.
+
+---
+
+### 7. Tier-2 mapping fallback (AniDB/AniList auto-seed) not implemented
+**Status:** [OPEN]
+**Reported:** 2026-09-15 (audit of #4 against code)
+
+**Gap:** #4's signed-off design (Q2/F1) requires a self-managed fallback for shows absent from TheXem: AniDB `anime-list-master.xml` offsets + AniList alias pass into `show_titles`. Neither exists in `src/` — only the TheXem tier + manual fixes are wired. Shows missing from TheXem still require manual mapping. Scoped OUT of the next update by user decision 2026-09-15.
+
+---
+
 ## Backlog / Unprioritised
 
 | # | Issue | Notes |
@@ -224,6 +257,7 @@ UNIQUE(show_id, scene_season, scene_episode)
 | 3 | Manual season/episode override | 2026-08-10 |
 | 1 | TorBox pipeline (polling, error logging, ephemeral client, status query compat) | 2026-08-10 (pending field-test) |
 | 5 | Folder naming colon-preservation + rename preview/apply | 2026-08-10 |
+| 6 | S00 specials parsing + library junk quarantine + daily sweep | 2026-09-15 (pending release) |
 
 ---
 

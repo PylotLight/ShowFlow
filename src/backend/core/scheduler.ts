@@ -15,6 +15,7 @@ export type TaskName =
   | 'rss-scan'
   | 'housekeeping'
   | 'pipeline-cleanup'
+  | 'quarantine-cleanup'
   | 'health-check'
   | 'update-check'
   | 'watcher-monitor'
@@ -124,6 +125,24 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const result = db.cleanupOldPipelineEvents(cutoff);
       debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days`);
+    },
+  },
+  'quarantine-cleanup': {
+    name: 'quarantine-cleanup',
+    displayName: 'Quarantine Cleanup',
+    description: 'Permanently delete junk files quarantined from library roots more than 1 day ago (downloads/.quarantine) - quarantined video is never auto-deleted',
+    category: 'maintenance',
+    intervalMinutes: 1440, // Daily
+    defaultEnabled: true,
+    action: async (config) => {
+      const { resolveQuarantineDir, cleanupQuarantine } = await import('./junk_quarantine');
+      const dir = resolveQuarantineDir(config);
+      if (!dir) {
+        debugLog('Task quarantine-cleanup skipped: no downloads folder configured');
+        return;
+      }
+      const result = await cleanupQuarantine(dir);
+      debugLog(`Task quarantine-cleanup complete: deleted ${result.deleted}, kept ${result.kept} (fresh), skipped ${result.skippedVideo} video file(s)`);
     },
   },
   'health-check': {
