@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.45] - 2026-09-16
 ### Added
 - **Updates panel: collapsed history + release notes**: the Available Releases list now keeps only the current release and anything newer expanded; older releases collapse into a "Show previous releases (N)" toggle. Each row with notes gets an expandable "Release notes" view (backend passes GitHub `body` through). Release script now publishes the CHANGELOG `[Unreleased]` section as the GitHub release notes (rotating it into a versioned heading afterwards) instead of an auto compare-link.
 - **Banner backdrop cycler**: hover the show banner to flip through every backdrop the provider knows about (TVDB fanart types, TMDB voted backdrops) with a position counter; the pick persists per show. Falls back to the single metadata backdrop when no list is exposed.
