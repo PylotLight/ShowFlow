@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.48] - 2026-09-16
 - **Activate in place**: once a release is downloaded + verified, its row swaps Update for Activate Now — no more scrolling to the status card.
 
 ## [v0.1.47] - 2026-09-16
