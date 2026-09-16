@@ -1,5 +1,5 @@
 import {
-  CheckIcon, Scan, Activity, ChevronRight, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Menu,
+  CheckIcon, Scan, Activity, ChevronRight, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Menu, SearchIcon,
 } from "lucide-react";
 import * as React from "react";
 
@@ -14,6 +14,7 @@ import { cn } from "@frontend/lib/utils";
 import { expectedReleaseTime } from "@frontend/lib/airtime";
 import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
+import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -247,6 +248,10 @@ function Dashboard({
   // Offset (in days) of the calendar strip window — prev/next shift it,
   // Today snaps it back.
   const [stripOffset, setStripOffset] = React.useState(0);
+  // Release-search target for the per-episode browse button (agenda rows).
+  const [searchTarget, setSearchTarget] = React.useState<{
+    showId: string; showTitle: string; season: number; episode: number;
+  } | null>(null);
 
   const POLL_INTERVAL = 30_000;
 
@@ -347,12 +352,17 @@ function Dashboard({
       .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // chronologically
   }), [groupedEpisodes, todayKey]);
 
-  // Calendar strip day-click filters the upcoming list (toggle: click again to clear).
-  const filteredUpcomingGroups = React.useMemo(() => (
-    selectedDay
-      ? storyGroups.upcoming.filter((g) => g.dateKey === selectedDay)
-      : storyGroups.upcoming
-  ), [storyGroups, selectedDay]);
+  // Calendar strip day-click filters the list (toggle: click again to clear).
+  // A selected day searches ALL groups — past days live in history, so
+  // filtering upcoming-only rendered "No episodes" for any day with a count.
+  // The selected day renders in the same full view as today.
+  const visibleGroups = React.useMemo(() => {
+    const all = [...storyGroups.upcoming, ...storyGroups.history];
+    if (!selectedDay) return storyGroups.upcoming;
+    return all
+      .filter((g) => g.dateKey === selectedDay)
+      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1));
+  }, [storyGroups, selectedDay]);
 
   const uniqueShowsCount = React.useMemo(() => {
     if (!datedUpcoming) return 0;
@@ -499,6 +509,96 @@ function Dashboard({
             </div>
           </div>
 
+          {/* Recently Released — newest first, above the agenda;
+              collapsed by default */}
+          {storyGroups.history.length > 0 && (
+            <div className="border-b border-white/5 px-5 py-1">
+              <button
+                onClick={() => setExpandHistory(!expandHistory)}
+                className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 hover:text-white/90 transition-colors py-1 text-left"
+              >
+                {expandHistory
+                  ? <ChevronUp className="size-3 shrink-0" />
+                  : <ChevronDown className="size-3 shrink-0" />}
+                Recently Released
+                <span className="text-white/50 normal-case font-normal">
+                  ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
+                </span>
+                <span className="flex-1" />
+                {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
+                  g.items.slice(0, 2).map((ep) => (
+                    <span
+                      key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
+                      className="text-white/50 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
+                    >
+                      {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                    </span>
+                  ))
+                )}
+              </button>
+              {expandHistory && (
+                <div className="pb-1 space-y-0.5">
+                  {storyGroups.history.map((group) => (
+                    <div key={group.dateKey} className="space-y-0.5">
+                      <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/55 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
+                        {group.label}
+                      </h4>
+                      {group.items.map((ep, i) => {
+                        const showObj = getMatchingShow(ep.showTitle);
+                        return (
+                          <div
+                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
+                            onClick={() => { if (showObj) onSelectShow(showObj); }}
+                            className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                          >
+                            {showObj ? (
+                              <PosterImage
+                                showId={showObj.id}
+                                alt={ep.showTitle}
+                                className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
+                              />
+                            ) : (
+                              <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
+                                <span className="font-mono text-[5px] text-white/20">N/A</span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                              <span
+                                title={ep.showTitle}
+                                className="text-xs font-medium text-white/70 truncate transition-colors group-hover:text-white"
+                              >
+                                {ep.showTitle}
+                              </span>
+                              <span className="text-[10px] text-white/55 font-mono shrink-0">
+                                S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                              </span>
+                            </div>
+                            {ep.filePath ? (
+                              <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
+                                <CheckIcon className="size-2" strokeWidth={3} />
+                                Available
+                              </span>
+                            ) : (
+                              <span
+                                title="Aired but not yet grabbed — check Pipeline or grab manually"
+                                className="rounded-full bg-accent-amber/10 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
+                              >
+                                Awaiting release
+                              </span>
+                            )}
+                            <span className="text-[10px] font-mono text-white/60 shrink-0 leading-none">
+                              {getCompactDate(ep.airDate)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Compact Calendar Strip */}
           <div className="border-b border-white/5 px-5 py-2.5 flex items-center gap-2">
             <div className="flex items-center gap-1 shrink-0">
@@ -590,8 +690,9 @@ function Dashboard({
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Primary upcoming list: Today → Tomorrow → rest, today gets a hero accent */}
-                {filteredUpcomingGroups.map((group, gi) => {
+                {/* Primary upcoming list: Today → Tomorrow → rest, today gets a hero accent.
+                    With a day selected, that day's group renders here in full. */}
+                {visibleGroups.map((group, gi) => {
                   const isToday = group.dateKey === todayKey;
                   return (
                   <div
@@ -699,6 +800,25 @@ function Dashboard({
                                 Scheduled
                               </span>
                             )}
+                            {showObj && (
+                              <button
+                                type="button"
+                                title={`Browse releases for ${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")}`}
+                                aria-label={`Browse releases for ${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSearchTarget({
+                                    showId: showObj.id,
+                                    showTitle: ep.showTitle,
+                                    season: ep.season,
+                                    episode: ep.episode,
+                                  });
+                                }}
+                                className="flex items-center justify-center size-5 rounded text-white/35 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-signal hover:bg-signal/10 transition-all"
+                              >
+                                <SearchIcon className="size-3" />
+                              </button>
+                            )}
                             <span className="text-[11px] font-mono text-white/60 shrink-0 leading-none">
                               {getCompactDate(ep.airDate)}
                             </span>
@@ -712,8 +832,9 @@ function Dashboard({
                   );
                 })}
 
-                {/* Day-filter offset banner when a calendar day is selected */}
-                {selectedDay && filteredUpcomingGroups.length === 0 && storyGroups.upcoming.length > 0 && (
+                {/* Day-filter offset banner when a calendar day is selected
+                    but nothing aired that day */}
+                {selectedDay && visibleGroups.length === 0 && (
                   <div className="text-center py-10">
                     <p className="text-muted-foreground text-xs font-mono">No episodes on {new Date(selectedDay + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}.</p>
                     <button
@@ -722,96 +843,6 @@ function Dashboard({
                     >
                       Clear filter
                     </button>
-                  </div>
-                )}
-
-                {/* Recently Released — below the upcoming agenda so past days
-                    never compete with what's next; collapsed by default */}
-                {storyGroups.history.length > 0 && (
-                  <div className="px-2 py-1">
-                    <button
-                      onClick={() => setExpandHistory(!expandHistory)}
-                      className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 hover:text-white/90 transition-colors py-1 text-left"
-                    >
-                      {expandHistory
-                        ? <ChevronUp className="size-3 shrink-0" />
-                        : <ChevronDown className="size-3 shrink-0" />}
-                      Recently Released
-                      <span className="text-white/50 normal-case font-normal">
-                        ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
-                      </span>
-                      <span className="flex-1" />
-                      {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
-                        g.items.slice(0, 2).map((ep) => (
-                          <span
-                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
-                            className="text-white/50 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
-                          >
-                            {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
-                          </span>
-                        ))
-                      )}
-                    </button>
-                    {expandHistory && (
-                      <div className="pb-1 space-y-0.5">
-                        {storyGroups.history.map((group) => (
-                          <div key={group.dateKey} className="space-y-0.5">
-                            <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/55 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
-                              {group.label}
-                            </h4>
-                            {group.items.map((ep, i) => {
-                              const showObj = getMatchingShow(ep.showTitle);
-                              return (
-                                <div
-                                  key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
-                                  onClick={() => { if (showObj) onSelectShow(showObj); }}
-                                  className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
-                                >
-                                  {showObj ? (
-                                    <PosterImage
-                                      showId={showObj.id}
-                                      alt={ep.showTitle}
-                                      className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
-                                    />
-                                  ) : (
-                                    <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
-                                      <span className="font-mono text-[5px] text-white/20">N/A</span>
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
-                                    <span
-                                      title={ep.showTitle}
-                                      className="text-xs font-medium text-white/70 truncate transition-colors group-hover:text-white"
-                                    >
-                                      {ep.showTitle}
-                                    </span>
-                                    <span className="text-[10px] text-white/55 font-mono shrink-0">
-                                      S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
-                                    </span>
-                                  </div>
-                                  {ep.filePath ? (
-                                    <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
-                                      <CheckIcon className="size-2" strokeWidth={3} />
-                                      Available
-                                    </span>
-                                  ) : (
-                                    <span
-                                      title="Aired but not yet grabbed — check Pipeline or grab manually"
-                                      className="rounded-full bg-accent-amber/10 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
-                                    >
-                                      Awaiting release
-                                    </span>
-                                  )}
-                                  <span className="text-[10px] font-mono text-white/60 shrink-0 leading-none">
-                                    {getCompactDate(ep.airDate)}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -832,6 +863,20 @@ function Dashboard({
           )}
         </GlassPanel>
       </div>
+
+      {/* Per-episode release browser (agenda rows) — manual search with the
+          dialog's own auto-grab, scoped to the exact episode. */}
+      {searchTarget && (
+        <ReleaseSearchDialog
+          open={!!searchTarget}
+          onOpenChange={(open) => { if (!open) setSearchTarget(null); }}
+          showId={searchTarget.showId}
+          showTitle={searchTarget.showTitle}
+          season={searchTarget.season}
+          episode={searchTarget.episode}
+          onGrabbed={() => fetchShowsAndCalendar()}
+        />
+      )}
     </div>
   );
 }

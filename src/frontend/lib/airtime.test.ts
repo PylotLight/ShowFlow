@@ -47,3 +47,14 @@ test("formatFileSize", () => {
   expect(formatFileSize(1024)).toBe("1 KB");
   expect(formatFileSize(2254857830)).toBe("2.1 GB");
 });
+test("parseStoredDateTime treats naive SQLite stamps as UTC", async () => {
+  const { parseStoredDateTime } = await import("./airtime");
+  // "2026-09-16 06:13:42" is 06:13 UTC — must equal the Z-marked instant,
+  // not 06:13 browser-local.
+  expect(parseStoredDateTime("2026-09-16 06:13:42")?.getTime())
+    .toBe(Date.parse("2026-09-16T06:13:42Z"));
+  // Offset-carrying strings pass through untouched.
+  expect(parseStoredDateTime("2026-09-16T16:13:42+10:00")?.getTime())
+    .toBe(Date.parse("2026-09-16T06:13:42Z"));
+  expect(parseStoredDateTime("garbage")).toBeNull();
+});

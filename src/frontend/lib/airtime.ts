@@ -56,9 +56,23 @@ export function formatFileSize(bytes: number | null | undefined): string {
 /** Short relative date label for import/publish timestamps. */
 export function formatImportDate(iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
+  const d = parseStoredDateTime(iso);
+  if (!d) return "";
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * Parse a backend timestamp. SQLite `datetime('now')` columns store naive
+ * `"YYYY-MM-DD HH:MM:SS"` in UTC with no offset — `new Date()` would read
+ * that as browser-local and shift every displayed time by the UTC offset.
+ * Treat offset-less stamps as UTC; anything carrying an offset parses as-is.
+ */
+export function parseStoredDateTime(iso: string): Date | null {
+  const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(iso.trim())
+    ? `${iso.trim().replace(" ", "T")}Z`
+    : iso;
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** Human resolution label from a probed display height (e.g. 2160 -> "2160p",

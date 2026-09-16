@@ -108,7 +108,7 @@ function InfoPopover({ episode }: { episode: EpisodeData }) {
         <Info className="size-3.5" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-40 w-72 rounded-lg border border-white/10 bg-[#15181f] shadow-2xl shadow-black/50 p-3 text-left animate-fade-in">
+        <div className="absolute right-0 top-full mt-1.5 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[#15181f] shadow-2xl shadow-black/50 p-3 text-left animate-fade-in">
           <div className="font-mono text-[9px] font-bold uppercase tracking-widest text-signal mb-2">
             // Release provenance
           </div>
@@ -154,7 +154,9 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
   return (
     <div className="flex items-start justify-between gap-3 text-xs">
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className={`text-white/85 text-right break-all ${mono ? "font-mono text-[10px]" : "font-medium"}`} title={value}>
+      {/* min-w-0 lets the value shrink inside the flex row — without it long
+          release titles/paths overflow the card instead of wrapping. */}
+      <span className={`text-white/85 text-right break-all min-w-0 flex-1 ${mono ? "font-mono text-[10px]" : "font-medium"}`} title={value}>
         {value}
       </span>
     </div>

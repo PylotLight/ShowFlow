@@ -369,6 +369,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 23 | TorBox 524 kills download, no retry; fake 100% progress | 2026-09-16 (pending release) |
 | 24 | Mover steals in-progress .part into library mid-download | 2026-09-16 (pending release) |
 | 25 | TorBox API hang wedges link requests; View reloads page; 90s first-byte too twitchy | 2026-09-16 (pending release) |
+| 26 | Agenda: wrong tz, provenance overflow, history placement, past-day filter, per-ep search | 2026-09-16 (pending release) |
 
 ---
 
