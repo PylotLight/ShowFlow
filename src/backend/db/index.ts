@@ -164,6 +164,7 @@ export class DatabaseManager {
   syncAllShowTitles(showId: string, providerType: string, show: Parameters<typeof shows.syncAllShowTitles>[3]) { return shows.syncAllShowTitles(this, showId, providerType, show); }
   getShow(showId: string) { return shows.getShow(this, showId); }
   getShowConfig(showId: string) { return shows.getShowConfig(this, showId); }
+  getShowBackdropIndex(showId: string) { return shows.getShowBackdropIndex(this, showId); }
   getProviderForRole(showId: string, role: 'metadata' | 'airtime') { return shows.getProviderForRole(this, showId, role); }
   setProviderRole(showId: string, providerType: string, role: 'metadata' | 'airtime', active: boolean) { return shows.setProviderRole(this, showId, providerType, role, active); }
   listShowProvidersWithRoles(showId: string) { return shows.listShowProvidersWithRoles(this, showId); }

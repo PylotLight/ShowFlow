@@ -1,5 +1,22 @@
-import { Input, ALL_FORMATS, FilePathSource } from 'mediabunny';
+import { Input, ALL_FORMATS, FilePathSource, LogLevel, Logging } from 'mediabunny';
 import type { EpisodeFileRow } from '../db/episode_files';
+
+/**
+ * Mediabunny defaults to Info-level console output, printing per-track
+ * warnings (e.g. "Track #3 has an unsupported content encoding; dropping.")
+ * on every probe of an odd file and spamming pod logs. Errors-only: real
+ * failures still surface, demuxer chatter doesn't.
+ */
+Logging.level = LogLevel.Errors;
+
+/**
+ * Full-file duration scans above this size are skipped: computeDuration()
+ * reads the whole file on the single Bun thread, stalling the server for
+ * minutes on multi-GB oddities (readiness probe trips, UI hangs). Such
+ * files get a null duration instead of a hang; healthy files expose
+ * duration in metadata and never reach the fallback.
+ */
+const COMPUTE_DURATION_SIZE_CAP = 8 * 1024 * 1024 * 1024;
 
 /** The subset of MediaProbeInfo the upgrade/duplicate comparisons use. */
 export type ProbeMediaForComparison = Pick<MediaProbeInfo, 'video' | 'audio' | 'overallBitrate' | 'fileSize'>;
@@ -102,8 +119,12 @@ export async function probeMediaFile(filePath: string): Promise<MediaProbeInfo |
     const format = await input.getFormat();
     let durationSeconds: number | null = null;
     durationSeconds = await input.getDurationFromMetadata();
-    if (durationSeconds == null) {
-      durationSeconds = await input.computeDuration();
+    if (durationSeconds == null && (fileSize == null || fileSize <= COMPUTE_DURATION_SIZE_CAP)) {
+      try {
+        durationSeconds = await input.computeDuration();
+      } catch {
+        durationSeconds = null;
+      }
     }
 
     const tracks = await input.getTracks();

@@ -298,7 +298,20 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 **Status:** [DONE — pending release]
 **Reported:** 2026-09-15
 
-**Fix:** availability count + filter pills moved into the top bar (compact), columns button docked in the header cluster, toolbar row removed (slim fallback on small screens). Page header renamed to match the sidebar: **Indexer Search**.
+**Fix:** availability count + filter pills moved into the top bar (compact), columns button docked in the header cluster, toolbar row removed (slim fallback on small screens). Page header renamed to match the sidebar: **Indexer Search**. Follow-up: restored banner/list spacing (pt-4/6) after the row removal left them flush.
+
+### 17. Pod "crashing" on probe noise
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-16 (`Could not parse filename: Prisoners...` + `Track #N has an unsupported content encoding`)
+
+**Findings:** no crash ever occurred — 0 container restarts, no `crash.log`, pod `zjh87` healthy throughout (the delete hit nothing; same pod still running). The quoted lines are benign: a DEBUG parse-skip and mediabunny stderr while probing that file. The real irritant: pure-TS probing runs on the single Bun thread, and the full-file `computeDuration()` fallback on a multi-GB oddity stalls the server for minutes, tripping the 1s readiness probe (transient 0/1) and hanging the UI — that stall is what read as a crash.
+**Fix:** mediabunny's log level set to Errors-only via its public `Logging` API (verified in its source: `Logging._warn` no-ops below Warnings level); full-file `computeDuration()` skipped for files over 8 GiB (null duration instead of a hang).
+
+### 18. Banner backdrop choice
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-16 (banner crop poor, want alternates)
+
+**Fix:** banner cycler — `GET /api/shows/:id/images/backdrops` lists provider options (TVDB fanart 3+15, TMDB voted backdrops, else single metadata fallback); `?index=` selects with URL-matched cache; pick persists via `PATCH /api/shows/:id {config:{backdropIndex}}` (settings-backed, no migration); hover arrows + counter in the UI. Covered by `backdrop_options.test.ts`.
 
 ---
 
@@ -333,6 +346,8 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 14 | Per-show scan walked whole library | 2026-09-15 (pending release) |
 | 15 | Import wiped episode airtimes | 2026-09-15 (pending release) |
 | 16 | Toolbar space + Indexer Search name | 2026-09-15 (pending release) |
+| 17 | Probe noise mistaken for crash | 2026-09-16 (pending release) |
+| 18 | Banner backdrop cycling | 2026-09-16 (pending release) |
 
 ---
 

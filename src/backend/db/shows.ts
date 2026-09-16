@@ -1082,6 +1082,14 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
     });
   }
 
+  // Banner backdrop selection (detail-page cycler). Per-show setting, no
+  // schema migration needed; the images route clamps it against the live
+  // option list on read.
+  if (updates.config?.backdropIndex !== undefined) {
+    const n = Math.floor(Number(updates.config.backdropIndex));
+    self.setSetting(`backdropIndex.${showId}`, String(Number.isFinite(n) && n > 0 ? n : 0));
+  }
+
   // Apply a library type: bundles root folder + quality profile + indexers
   // (design-brief-platform-ux-systems.md §1). Resolves the identifier the
   // same way saveShow does so a bare id/name or the default type all land on
@@ -1103,6 +1111,13 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
 export function setShowTracking(self: DatabaseManager, showId: string, tracked: boolean) {
   self.drizz.update(schema.episodes).set({ is_tracked: tracked ? 1 : 0 })
     .where(eq(schema.episodes.show_id, showId)).run();
+}
+
+/** Selected banner backdrop index for a show (detail-page cycler). Defaults to 0. */
+export function getShowBackdropIndex(self: DatabaseManager, showId: string): number {
+  const raw = self.getSetting(`backdropIndex.${showId}`);
+  const n = typeof raw === 'string' ? parseInt(raw, 10) : Math.floor(Number(raw));
+  return Number.isFinite(n) && (n as number) >= 0 ? (n as number) : 0;
 }
 
 /** True when a user has renamed the show (a `user`-typed show_title row exists). */

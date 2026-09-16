@@ -140,4 +140,22 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
       `TMDBProvider: absolute episode ${absolute} exceeds the known episode count for show ${showId}`
     );
   }
+
+  /**
+   * All available backdrop images for a show, best-voted first. Powers the
+   * banner cycler: the detail page lets the user pick among these instead
+   * of being stuck with whatever single backdrop the metadata carries.
+   */
+  async getBackdrops(id: string): Promise<{ url: string; width?: number; height?: number }[]> {
+    const data = await this.fetch<any>(`/tv/${id}/images?api_key=${this.apiKey}`);
+    const backdrops = Array.isArray(data?.backdrops) ? data.backdrops : [];
+    return backdrops
+      .filter((b: any) => typeof b?.file_path === 'string' && b.file_path.length > 0)
+      .sort((a: any, b: any) => (b?.vote_average ?? 0) - (a?.vote_average ?? 0))
+      .map((b: any) => ({
+        url: `https://image.tmdb.org/t/p/w1280${b.file_path}`,
+        width: typeof b?.width === 'number' ? b.width : undefined,
+        height: typeof b?.height === 'number' ? b.height : undefined,
+      }));
+  }
 }

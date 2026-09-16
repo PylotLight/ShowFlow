@@ -1,8 +1,79 @@
 import { db } from "../db";
 import { ProviderFactory } from "../providers/factory";
 import { TVDBProvider } from "../providers/tvdb";
+import { TMDBProvider } from "../providers/tmdb";
 import type { ProviderType } from "../providers/factory";
 import { json, errorResponse, loadConfig, isProviderType, extractPosterUrl, extractBackdropUrl, NO_SIGNAL_SVG } from "./_shared";
+
+export interface BackdropOption {
+  index: number;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+/** De-duplicate provider artwork lists by URL, assigning stable indexes. */
+export function dedupeBackdropOptions(items: { url?: string | null; width?: number; height?: number }[]): BackdropOption[] {
+  const seen = new Set<string>();
+  const out: BackdropOption[] = [];
+  for (const item of items) {
+    if (!item?.url || seen.has(item.url)) continue;
+    seen.add(item.url);
+    out.push({ index: out.length, url: item.url, width: item.width, height: item.height });
+  }
+  return out;
+}
+
+/** Clamp a stored/selected index against the live option list. */
+export function clampBackdropIndex(options: BackdropOption[], stored: number): number {
+  if (options.length === 0) return 0;
+  if (!Number.isFinite(stored) || stored < 0) return 0;
+  return Math.min(Math.floor(stored), options.length - 1);
+}
+
+function isBackdropRow(a: any): boolean {
+  return (a.artwork_type === "3" || a.artwork_type === "15" || a.artwork_type === "fanart" || a.artwork_type === "background");
+}
+
+/**
+ * Every backdrop the provider knows about for a show (TVDB fanart types
+ * 3+15, TMDB voted backdrops), falling back to the single metadata
+ * backdrop when the provider exposes no list. No image bytes are fetched
+ * here — the detail route fetches on selection.
+ */
+async function listBackdropOptions(show: any, config: any): Promise<{ url: string; width?: number; height?: number }[]> {
+  try {
+    if (show.provider_type === "tvdb") {
+      const tvdb = ProviderFactory.getProvider("tvdb", config) as TVDBProvider;
+      const out: { url: string; width?: number; height?: number }[] = [];
+      for (const at of [3, 15]) {
+        const arts = await tvdb.getSeriesArtworks(show.provider_id, at);
+        for (const a of arts) {
+          if (a?.image) out.push({
+            url: a.image,
+            width: a.width ?? undefined,
+            height: a.height ?? undefined,
+          });
+        }
+      }
+      if (out.length > 0) return out;
+    } else if (show.provider_type === "tmdb") {
+      const tmdb = ProviderFactory.getProvider("tmdb", config) as TMDBProvider;
+      const backs = await tmdb.getBackdrops(show.provider_id);
+      if (backs.length > 0) return backs;
+    }
+  } catch {
+    // Fall through to the single-backdrop fallback below.
+  }
+  try {
+    const provider = ProviderFactory.getProvider(show.provider_type, config);
+    const showData = await provider.getShow(show.provider_id);
+    const url = extractBackdropUrl(show.provider_type, showData.metadata);
+    return url ? [{ url }] : [];
+  } catch {
+    return [];
+  }
+}
 
 export function imageRoutes() {
   return {
@@ -58,7 +129,36 @@ export function imageRoutes() {
           if (!show) return new Response('', { status: 404 });
 
           const cached = db.getShowArtworks(show.id) as any[];
-          const backdropArt = cached.find(a => (a.artwork_type === "3" || a.artwork_type === "15") && a.data);
+          const config = loadConfig();
+          const requestedParam = new URL(req.url).searchParams.get("index");
+          const requested = requestedParam != null ? parseInt(requestedParam, 10) : NaN;
+
+          // When the provider exposes multiple backdrops, serve the
+          // requested (or stored) selection. The cached-bytes fast path
+          // only applies when the cached row is this exact URL — otherwise
+          // a stale pick would stick after cycling.
+          const options = dedupeBackdropOptions(await listBackdropOptions(show, config));
+          if (options.length > 0) {
+            const stored = db.getShowBackdropIndex(show.id);
+            const idx = clampBackdropIndex(options, Number.isFinite(requested) ? requested : stored);
+            const picked = options[idx]!;
+            const direct = cached.find(a => isBackdropRow(a) && a.data && a.image_url === picked.url);
+            if (direct) {
+              return new Response(direct.data, {
+                headers: { "Content-Type": direct.content_type ?? "image/jpeg", "Cache-Control": "public, max-age=86400" },
+              });
+            }
+            const imgRes = await fetch(picked.url);
+            if (!imgRes.ok) return new Response('', { status: 404 });
+            const contentType = imgRes.headers.get("Content-Type") ?? "image/jpeg";
+            const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+            db.saveShowArtwork(show.id, 15, picked.url, picked.width, picked.height, undefined, imgBytes, contentType);
+            return new Response(imgBytes, {
+              headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=21600" },
+            });
+          }
+
+          const backdropArt = cached.find(a => isBackdropRow(a) && a.data);
           if (backdropArt) {
             const contentType = backdropArt.content_type ?? "image/jpeg";
             return new Response(backdropArt.data, {
@@ -66,7 +166,6 @@ export function imageRoutes() {
             });
           }
 
-          const config = loadConfig();
           const provider = ProviderFactory.getProvider(show.provider_type, config);
 
           let backdropUrl: string | null = null;
@@ -108,6 +207,19 @@ export function imageRoutes() {
           });
         } catch {
           return new Response('', { status: 404 });
+        }
+      },
+    },
+
+    "/api/shows/:id/images/backdrops": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        try {
+          const show = db.getShow(req.params.id!);
+          if (!show) return errorResponse("Show not found", 404);
+          const options = dedupeBackdropOptions(await listBackdropOptions(show, loadConfig()));
+          return json({ options, selected: clampBackdropIndex(options, db.getShowBackdropIndex(show.id)) });
+        } catch (err) {
+          return errorResponse(err);
         }
       },
     },

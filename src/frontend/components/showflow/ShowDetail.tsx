@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -114,6 +114,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
 
   const [mappingOpen, setMappingOpen] = React.useState(false);
   const [mappingHealth, setMappingHealth] = React.useState<string>("none");
+  // Banner backdrop cycler: alternate backdrops the provider knows about.
+  const [backdropOptions, setBackdropOptions] = React.useState<{ index: number; url: string }[]>([]);
+  const [backdropIndex, setBackdropIndex] = React.useState(0);
 
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const statusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,6 +139,27 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     // lets an existing show move between categories after the fact.
     fetch("/api/show-profiles").then(r => r.json()).then(data => setFolderProfiles(Array.isArray(data) ? data : [])).catch(() => setFolderProfiles([]));
   }, []);
+
+  React.useEffect(() => {
+    setBackdropOptions([]);
+    setBackdropIndex(0);
+    fetch(`/api/shows/${show.id}/images/backdrops`).then(r => r.json()).then(data => {
+      const options = Array.isArray(data.options) ? data.options : [];
+      setBackdropOptions(options);
+      setBackdropIndex(typeof data.selected === "number" ? data.selected : 0);
+    }).catch(() => {});
+  }, [show.id]);
+
+  function cycleBackdrop(dir: 1 | -1) {
+    if (backdropOptions.length < 2) return;
+    const next = (backdropIndex + dir + backdropOptions.length) % backdropOptions.length;
+    setBackdropIndex(next);
+    fetch(`/api/shows/${show.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: { backdropIndex: next } }),
+    }).catch(() => {});
+  }
 
   React.useEffect(() => {
     setRootFolderPath(null);
@@ -789,14 +813,35 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       </header>
 
       {/* Hero Banner */}
-      <section className="relative z-10 w-full aspect-[21/7] max-h-[360px] min-h-[210px] overflow-hidden shrink-0">
+      <section className="group relative z-10 w-full aspect-[21/7] max-h-[360px] min-h-[210px] overflow-hidden shrink-0">
         <img
-          src={`/api/shows/${show.id}/images/backdrop`}
+          src={`/api/shows/${show.id}/images/backdrop?index=${backdropIndex}`}
           alt=""
           aria-hidden
           className="size-full object-cover object-center"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
+        {backdropOptions.length > 1 && (
+          <>
+            <button
+              onClick={() => cycleBackdrop(-1)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 hover:text-white"
+              aria-label="Previous backdrop"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              onClick={() => cycleBackdrop(1)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 hover:text-white"
+              aria-label="Next backdrop"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+            <span className="absolute bottom-2 right-3 z-20 rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70 opacity-0 group-hover:opacity-100 transition-opacity">
+              {backdropIndex + 1}/{backdropOptions.length}
+            </span>
+          </>
+        )}
         <div className="absolute inset-0" style={{
           background: `
             radial-gradient(circle at 26% 3%, color-mix(in srgb, var(--signal) 25%, transparent), transparent 40%),
@@ -841,7 +886,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       </section>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 px-4 md:px-8 pb-4 md:pb-8 flex flex-col min-h-0">
+      <div className="relative z-10 flex-1 px-4 md:px-8 pt-4 md:pt-6 pb-4 md:pb-8 flex flex-col min-h-0">
         {seasons === null ? (
           <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
             <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />
