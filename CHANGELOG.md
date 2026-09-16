@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Search page header renamed to **Indexer Search**, matching the sidebar.
 - Restored breathing room between the banner and the episode list (top padding) after the toolbar-row removal left them flush.
 - **Banner focal point**: the 21:7 crop now anchors to the top by default (title treatments survive), with a Top/Ctr/Btm preset toggle on banner hover, persisted per show alongside the backdrop pick.
+- **Settings General tab reorder**: Available Releases sits directly under Libraries, followed by Update Status, with Defaults last.
 - **Show detail rework**: season tabs replaced with a single unified episode list (latest season first, Specials last, collapsible per season with per-season availability + progress). Latest season opens by default; the all/available/missing filter applies globally and force-expands matching sections. Per-season Monitor / Browse / Auto actions live in each section header; per-episode interactive search and auto-grab stay on the row hover actions. Top bar condensed to Back/title, Scan, one **Options** menu (shared desktop + mobile, with per-item descriptions across Configure / Organize / Remove sections), expand and close. Hero banner grew into the freed space (21/7, max 360px).
 - **Library Show Resolution Prioritization**: `Oracle` matching logic now prioritizes existing library shows and their aliases in candidate scoring before resolving to unfamiliar non-library titles, preventing false positives when downloading episodes.
 

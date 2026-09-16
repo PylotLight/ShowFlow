@@ -30,6 +30,10 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
         <LibraryTypeManager />
       </GlassPanel>
 
+      <div ref={updatesRef} id="updates">
+        <UpdatesPanel />
+      </div>
+
       <GlassPanel className="p-6 space-y-5">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Defaults</h3>
@@ -90,10 +94,6 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
           </Select>
         </FieldRow>
       </GlassPanel>
-
-      <div ref={updatesRef} id="updates">
-        <UpdatesPanel />
-      </div>
     </>
   );
 }

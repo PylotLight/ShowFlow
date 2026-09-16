@@ -517,66 +517,6 @@ export function UpdatesPanel() {
         </GlassPanel>
       )}
 
-      {/* SUPERVISOR STATUS CARD */}
-      <GlassPanel className="p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Update Status</h3>
-            <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading}>
-              <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            </Button>
-          </div>
-        </div>
-        {status && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">Active</span>
-              <p className="font-mono text-xs text-white/90 mt-0.5">{status.activeReleaseId ? status.activeReleaseId.slice(0, 12) : "—"}</p>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">Phase</span>
-              <p className="font-mono text-xs text-signal mt-0.5 capitalize">{status.phase || "—"}</p>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">App Version</span>
-              <p className="font-mono text-xs text-white/90 mt-0.5">{status.appVersion || "—"}</p>
-            </div>
-            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">lastKnownGood</span>
-              <p className="font-mono text-xs text-white/90 mt-0.5">{status.lastKnownGood ? status.lastKnownGood.slice(0, 12) : "—"}</p>
-            </div>
-          </div>
-        )}
-        {!status && !loading && (
-          <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
-            <p className="font-mono text-xs text-muted-foreground">Could not reach supervisor status</p>
-          </div>
-        )}
-        {installedReleaseId && (
-          <div className="rounded-lg bg-signal/10 border border-signal/30 p-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-signal font-medium">Release downloaded & verified</p>
-              <p className="font-mono text-[10px] text-white/60 mt-0.5">{installedReleaseId}</p>
-            </div>
-            <Button
-              variant="default"
-              size="sm"
-              disabled={actionLoading !== null}
-              onClick={() => doActivate(installedReleaseId)}
-            >
-              {actionLoading === `activate-${installedReleaseId}` ? (
-                <Loader2Icon className="size-3 animate-spin" />
-              ) : (
-                "Activate Now"
-              )}
-            </Button>
-          </div>
-        )}
-      </GlassPanel>
-
       {err && (
         <div className="rounded-lg bg-red-900/20 border border-red-500/30 p-3">
           <p className="font-mono text-xs text-red-400">{err}</p>
@@ -635,6 +575,66 @@ export function UpdatesPanel() {
                 </Button>
               </div>
             )}
+          </div>
+        )}
+      </GlassPanel>
+
+      {/* SUPERVISOR STATUS CARD */}
+      <GlassPanel className="p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Update Status</h3>
+            <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading}>
+              <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </div>
+        {status && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">Active</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.activeReleaseId ? status.activeReleaseId.slice(0, 12) : "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">Phase</span>
+              <p className="font-mono text-xs text-signal mt-0.5 capitalize">{status.phase || "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">App Version</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.appVersion || "—"}</p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
+              <span className="font-mono text-[10px] text-white/60">lastKnownGood</span>
+              <p className="font-mono text-xs text-white/90 mt-0.5">{status.lastKnownGood ? status.lastKnownGood.slice(0, 12) : "—"}</p>
+            </div>
+          </div>
+        )}
+        {!status && !loading && (
+          <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
+            <p className="font-mono text-xs text-muted-foreground">Could not reach supervisor status</p>
+          </div>
+        )}
+        {installedReleaseId && (
+          <div className="rounded-lg bg-signal/10 border border-signal/30 p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-signal font-medium">Release downloaded & verified</p>
+              <p className="font-mono text-[10px] text-white/60 mt-0.5">{installedReleaseId}</p>
+            </div>
+            <Button
+              variant="default"
+              size="sm"
+              disabled={actionLoading !== null}
+              onClick={() => doActivate(installedReleaseId)}
+            >
+              {actionLoading === `activate-${installedReleaseId}` ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                "Activate Now"
+              )}
+            </Button>
           </div>
         )}
       </GlassPanel>
