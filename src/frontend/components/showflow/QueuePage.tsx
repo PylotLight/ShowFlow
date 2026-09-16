@@ -226,7 +226,9 @@ function QueuePage() {
           <div className="divide-y divide-white/5">
             {grabEvents.map((e) => (
               <div key={e.id} className="flex items-start gap-3 px-5 py-3">
-                <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider shrink-0 mt-0.5", EVENT_BADGES[e.type] ?? "bg-white/5 text-white/60")}>
+                {/* Fixed-width centered badges so every message starts at the
+                    same x — GRAB vs DOWNLOAD vs UPGRADE no longer stagger. */}
+                <span className={cn("inline-flex w-[76px] justify-center rounded px-1 py-0.5 text-center text-[9px] font-mono uppercase tracking-wider shrink-0 mt-0.5", EVENT_BADGES[e.type] ?? "bg-white/5 text-white/60")}>
                   {e.type}
                 </span>
                 <div className="flex-1 min-w-0">

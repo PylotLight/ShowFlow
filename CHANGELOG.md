@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Layout polish**: Recent Activity badges fixed-width so messages align; calendar days roomier with Sonarr-style two-line entries and bigger text; hero banner taller with upward-biased art and a longer melt below the episode panel.
 
 ## [v0.1.52] - 2026-09-16
 - **Agenda fixes**: import/publish times parse naive SQLite stamps as UTC (no more wrong-zone times); provenance card wraps long titles/paths; Recently Released back above the agenda; selecting a past day shows its episodes in full (was "No episodes" despite the count); per-episode release-search button on agenda rows.

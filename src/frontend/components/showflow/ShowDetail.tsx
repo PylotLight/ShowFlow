@@ -818,14 +818,16 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
 
       {/* Hero Banner — Sonarr-style melt: the art dissolves into the page
           background instead of ending at a hard edge, so there is no crop
-          line and no focal anchor to fiddle with. Poster/title row below
-          stays outside the fade and renders crisp. */}
-      <section className="group relative z-10 w-full h-[340px] md:h-[440px] shrink-0">
+          line and no focal anchor to fiddle with. Tall frame with an upward
+          bias shows more of the art's top; the fade runs long and melts
+          below the poster/title row into the episode panel. Poster/title row
+          below stays outside the fade and renders crisp. */}
+      <section className="group relative z-10 w-full h-[420px] md:h-[540px] shrink-0">
         <div
           className="absolute inset-0"
           style={{
-            maskImage: "linear-gradient(to bottom, black 0%, black 52%, transparent 96%)",
-            WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 52%, transparent 96%)",
+            maskImage: "linear-gradient(to bottom, black 0%, black 62%, transparent 98%)",
+            WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 62%, transparent 98%)",
           }}
         >
           <img
@@ -833,7 +835,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             alt=""
             aria-hidden
             decoding="async"
-            className="absolute inset-0 size-full object-cover object-center blur-md scale-105"
+            className="absolute inset-0 size-full object-cover object-[center_35%] blur-md scale-105"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
           <img
@@ -844,12 +846,12 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             decoding="async"
             onLoad={() => setHeroLoaded(true)}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            className={`absolute inset-0 size-full object-cover object-center transition-opacity duration-500 ${heroLoaded ? "opacity-100" : "opacity-0"}`}
+            className={`absolute inset-0 size-full object-cover object-[center_35%] transition-opacity duration-500 ${heroLoaded ? "opacity-100" : "opacity-0"}`}
           />
           <div className="absolute inset-0" style={{
             background: `
               radial-gradient(circle at 26% 3%, color-mix(in srgb, var(--signal) 25%, transparent), transparent 40%),
-              linear-gradient(to bottom, rgba(13,16,21,.15) 0%, rgba(13,16,21,.35) 45%, rgba(13,16,21,.75) 100%)
+              linear-gradient(to bottom, rgba(13,16,21,.15) 0%, rgba(13,16,21,.35) 55%, rgba(13,16,21,.85) 100%)
             `
           }} />
         </div>
@@ -913,8 +915,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         </div>
       </section>
 
-      {/* Content */}
-      <div className="relative z-10 flex-1 px-4 md:px-8 pt-4 md:pt-6 pb-4 md:pb-8 flex flex-col min-h-0">
+      {/* Content — pulled up over the banner's fade tail so the art melts
+          below the episode panel instead of ending above it. */}
+      <div className="relative z-10 flex-1 px-4 md:px-8 pt-4 md:pt-6 pb-4 md:pb-8 flex flex-col min-h-0 -mt-10 md:-mt-14">
         {seasons === null ? (
           <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
             <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />

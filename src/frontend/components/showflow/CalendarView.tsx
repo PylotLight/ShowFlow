@@ -259,21 +259,23 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
         </div>
       </div>
 
-      {/* Full-Page Calendar Grid */}
-      <div className="flex-1 flex flex-col min-h-0">
+      {/* Full-Page Calendar Grid — days get a comfortable minimum height
+          (Sonarr-style: room for several readable two-line entries) and the
+          grid scrolls instead of crushing rows on short viewports. */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         {/* Day headers */}
-        <div className="grid grid-cols-7 gap-1 mb-1 shrink-0">
+        <div className="grid grid-cols-7 gap-1.5 mb-1 shrink-0">
           {dayNames.map((d) => (
-            <div key={d} className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground text-center py-1">
+            <div key={d} className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground text-center py-1">
               {d}
             </div>
           ))}
         </div>
 
         {/* Grid rows */}
-        <div className="flex-1 grid grid-rows-5 gap-1 min-h-0">
+        <div className="flex-1 grid grid-rows-5 gap-1.5 min-h-[720px]">
           {grid.map((row, ri) => (
-            <div key={ri} className="grid grid-cols-7 gap-1 min-h-0">
+            <div key={ri} className="grid grid-cols-7 gap-1.5 min-h-[140px]">
               {row.map((day, ci) => {
                 if (day === null) return <div key={`e-${ci}`} />;
 
@@ -314,10 +316,11 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                       )}
                     </div>
 
-                    {/* Episode list */}
+                    {/* Episode list — Sonarr-style two-line entries: show title
+                        + S/E on line one, episode title + air time on line two. */}
                     {count > 0 && (
-                      <div className="flex-1 px-1.5 pb-1.5 space-y-0.5 overflow-hidden min-h-0">
-                        {dayEps!.slice(0, 6).map((ep, i) => (
+                      <div className="flex-1 px-2 pb-2 space-y-1 overflow-hidden min-h-0">
+                        {dayEps!.slice(0, 5).map((ep, i) => (
                           <button
                             key={i}
                             onClick={(e) => {
@@ -325,28 +328,31 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                               const showObj = getMatchingShow(ep.showId);
                               if (showObj) onSelectShow(showObj);
                             }}
-                            className="group/ep w-full text-left rounded px-1 py-0.5 hover:bg-white/[0.06] transition-colors block overflow-hidden"
+                            className="group/ep w-full text-left rounded-md px-1.5 py-1 hover:bg-white/[0.06] transition-colors block overflow-hidden"
                           >
-                            <div className="flex items-center gap-1 overflow-hidden">
-                              <span className="font-mono text-[11px] text-white/90 leading-tight whitespace-nowrap overflow-hidden min-w-0">
-                                <span className="group-hover/ep:animate-[ticker_8s_linear_infinite] inline-block pr-8">
-                                  {ep.showTitle}
-                                </span>
+                            <div className="flex items-baseline gap-1.5 overflow-hidden">
+                              <span className="text-[13px] font-medium text-white/90 leading-snug truncate flex-1 min-w-0">
+                                {ep.showTitle}
                               </span>
-                              <span className="font-mono text-[9px] text-signal/80 shrink-0">
+                              <span className="font-mono text-[10px] text-signal/80 shrink-0">
                                 S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                               </span>
+                            </div>
+                            <div className="flex items-baseline gap-1.5 overflow-hidden mt-px">
+                              <span className="text-[11px] text-muted-foreground leading-snug truncate flex-1 min-w-0">
+                                {ep.episodeTitle || "TBA"}
+                              </span>
                               {clockLabel(ep) && (
-                                <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">
+                                <span className="font-mono text-[10px] text-muted-foreground/70 shrink-0">
                                   {clockLabel(ep)}
                                 </span>
                               )}
                             </div>
                           </button>
                         ))}
-                        {count > 6 && (
-                          <span className="font-mono text-[10px] text-signal font-semibold px-1 leading-none block mt-0.5">
-                            +{count - 6} more
+                        {count > 5 && (
+                          <span className="font-mono text-[11px] text-signal font-semibold px-1.5 leading-none block mt-0.5">
+                            +{count - 5} more
                           </span>
                         )}
                       </div>
