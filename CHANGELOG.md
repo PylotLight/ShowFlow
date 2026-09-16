@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.51] - 2026-09-16
 - **Downloads ride out sick edges**: TorBox API calls fail fast (60s) instead of hanging forever; first-byte budget 90s→3min for cold CDN edges on multi-GB files.
 - **Jobs View navigates in-app**: notification View buttons switch views without a full page reload.
 
