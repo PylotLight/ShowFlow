@@ -10,22 +10,24 @@ export interface BackdropOption {
   url: string;
   width?: number;
   height?: number;
+  /** Small fast variant for blur-up placeholders (TMDB w300, TVDB thumbnail). */
+  thumb?: string;
 }
 
 /** De-duplicate provider artwork lists by URL, assigning stable indexes. */
-export function dedupeBackdropOptions(items: { url?: string | null; width?: number; height?: number }[]): BackdropOption[] {
+export function dedupeBackdropOptions(items: { url?: string | null; width?: number; height?: number; thumb?: string | null }[]): BackdropOption[] {
   const seen = new Set<string>();
   const out: BackdropOption[] = [];
   for (const item of items) {
     if (!item?.url || seen.has(item.url)) continue;
     seen.add(item.url);
-    out.push({ index: out.length, url: item.url, width: item.width, height: item.height });
+    out.push({ index: out.length, url: item.url, width: item.width, height: item.height, thumb: item.thumb ?? undefined });
   }
   return out;
 }
 
 /** Clamp a stored/selected index against the live option list. */
-export function clampBackdropIndex(options: BackdropOption[], stored: number): number {
+export function clampBackdropIndex(options: { url: string }[], stored: number): number {
   if (options.length === 0) return 0;
   if (!Number.isFinite(stored) || stored < 0) return 0;
   return Math.min(Math.floor(stored), options.length - 1);
@@ -41,11 +43,11 @@ function isBackdropRow(a: any): boolean {
  * backdrop when the provider exposes no list. No image bytes are fetched
  * here — the detail route fetches on selection.
  */
-async function listBackdropOptions(show: any, config: any): Promise<{ url: string; width?: number; height?: number }[]> {
+async function listBackdropOptions(show: any, config: any): Promise<{ url: string; width?: number; height?: number; thumb?: string }[]> {
   try {
     if (show.provider_type === "tvdb") {
       const tvdb = ProviderFactory.getProvider("tvdb", config) as TVDBProvider;
-      const out: { url: string; width?: number; height?: number }[] = [];
+      const out: { url: string; width?: number; height?: number; thumb?: string }[] = [];
       for (const at of [3, 15]) {
         const arts = await tvdb.getSeriesArtworks(show.provider_id, at);
         for (const a of arts) {
@@ -53,6 +55,7 @@ async function listBackdropOptions(show: any, config: any): Promise<{ url: strin
             url: a.image,
             width: a.width ?? undefined,
             height: a.height ?? undefined,
+            thumb: typeof a.thumbnail === 'string' && a.thumbnail.length > 0 ? a.thumbnail : undefined,
           });
         }
       }
@@ -60,7 +63,11 @@ async function listBackdropOptions(show: any, config: any): Promise<{ url: strin
     } else if (show.provider_type === "tmdb") {
       const tmdb = ProviderFactory.getProvider("tmdb", config) as TMDBProvider;
       const backs = await tmdb.getBackdrops(show.provider_id);
-      if (backs.length > 0) return backs;
+      if (backs.length > 0) return backs.map((b) => ({
+        ...b,
+        // w1280 → w300: same CDN path, ~20KB instead of ~500KB.
+        thumb: b.url.includes('/t/p/w1280') ? b.url.replace('/t/p/w1280', '/t/p/w300') : undefined,
+      }));
     }
   } catch {
     // Fall through to the single-backdrop fallback below.
@@ -130,18 +137,67 @@ export function imageRoutes() {
 
           const cached = db.getShowArtworks(show.id) as any[];
           const config = loadConfig();
-          const requestedParam = new URL(req.url).searchParams.get("index");
+          const params = new URL(req.url).searchParams;
+          const requestedParam = params.get("index");
           const requested = requestedParam != null ? parseInt(requestedParam, 10) : NaN;
+          const wantThumb = params.get("thumb") === "1";
 
           // When the provider exposes multiple backdrops, serve the
           // requested (or stored) selection. The cached-bytes fast path
           // only applies when the cached row is this exact URL — otherwise
           // a stale pick would stick after cycling.
-          const options = dedupeBackdropOptions(await listBackdropOptions(show, config));
+          //
+          // Fast path first: the persisted option list resolves an index to
+          // a URL with zero network calls, so the common case (cached bytes
+          // for the selected backdrop) never waits on the provider. The
+          // provider is only hit on a cold cache, and its result is then
+          // persisted for next time.
+          let options = db.getShowBackdropOptions(show.id);
+          if (options.length === 0) {
+            options = dedupeBackdropOptions(await listBackdropOptions(show, config));
+            if (options.length > 0) db.saveShowBackdropOptions(show.id, options);
+          }
           if (options.length > 0) {
             const stored = db.getShowBackdropIndex(show.id);
             const idx = clampBackdropIndex(options, Number.isFinite(requested) ? requested : stored);
             const picked = options[idx]!;
+
+            // Blur-up path (?thumb=1): serve the tiny variant instantly from
+            // local bytes. On a cold cache the thumb itself is fetched (small
+            // and fast) while the full image is primed in the background, so
+            // the follow-up full request usually hits cached bytes.
+            // Thumb bytes live in art_type "115" rows keyed by thumb URL —
+            // no schema change, one row per show.
+            const thumbUrl = picked.thumb || (picked.url.includes('/t/p/w1280') ? picked.url.replace('/t/p/w1280', '/t/p/w300') : undefined);
+            if (wantThumb && thumbUrl) {
+              const thumbRow = cached.find(a => a.artwork_type === "115" && a.data && a.image_url === thumbUrl);
+              if (thumbRow) {
+                return new Response(thumbRow.data, {
+                  headers: { "Content-Type": thumbRow.content_type ?? "image/jpeg", "Cache-Control": "public, max-age=86400" },
+                });
+              }
+              try {
+                const thumbRes = await fetch(thumbUrl);
+                if (thumbRes.ok) {
+                  const thumbType = thumbRes.headers.get("Content-Type") ?? "image/jpeg";
+                  const thumbBytes = new Uint8Array(await thumbRes.arrayBuffer());
+                  db.saveShowArtwork(show.id, 115, thumbUrl, undefined, undefined, undefined, thumbBytes, thumbType);
+                  // Prime the full image now so it's cached when asked for.
+                  fetch(picked.url).then(async (r) => {
+                    if (!r.ok) return;
+                    const ct = r.headers.get("Content-Type") ?? "image/jpeg";
+                    const bytes = new Uint8Array(await r.arrayBuffer());
+                    db.saveShowArtwork(show.id, 15, picked.url, picked.width, picked.height, undefined, bytes, ct);
+                  }).catch(() => {});
+                  return new Response(thumbBytes, {
+                    headers: { "Content-Type": thumbType, "Cache-Control": "public, max-age=86400" },
+                  });
+                }
+              } catch {
+                // Fall through to the full-image path below.
+              }
+            }
+
             const direct = cached.find(a => isBackdropRow(a) && a.data && a.image_url === picked.url);
             if (direct) {
               return new Response(direct.data, {
@@ -216,7 +272,26 @@ export function imageRoutes() {
         try {
           const show = db.getShow(req.params.id!);
           if (!show) return errorResponse("Show not found", 404);
+          // DB first: a persisted list answers instantly. Refresh happens in
+          // the background when stale (>7 days) so opens never wait on the
+          // provider; a show with no stored list pays one live fetch.
+          const stored = db.getShowBackdropOptions(show.id);
+          const stale = Date.now() - db.getShowBackdropOptionsAt(show.id) > 7 * 24 * 3600 * 1000;
+          if (stored.length > 0) {
+            if (stale) {
+              listBackdropOptions(show, loadConfig()).then((live) => {
+                const d = dedupeBackdropOptions(live);
+                if (d.length > 0) db.saveShowBackdropOptions(show.id, d);
+              }).catch(() => {});
+            }
+            return json({
+              options: stored,
+              selected: clampBackdropIndex(stored, db.getShowBackdropIndex(show.id)),
+              position: db.getShowBackdropPosition(show.id),
+            });
+          }
           const options = dedupeBackdropOptions(await listBackdropOptions(show, loadConfig()));
+          if (options.length > 0) db.saveShowBackdropOptions(show.id, options);
           return json({
             options,
             selected: clampBackdropIndex(options, db.getShowBackdropIndex(show.id)),

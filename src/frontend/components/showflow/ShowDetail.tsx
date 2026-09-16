@@ -115,11 +115,10 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [mappingOpen, setMappingOpen] = React.useState(false);
   const [mappingHealth, setMappingHealth] = React.useState<string>("none");
   // Banner backdrop cycler: alternate backdrops the provider knows about.
-  const [backdropOptions, setBackdropOptions] = React.useState<{ index: number; url: string }[]>([]);
+  const [backdropOptions, setBackdropOptions] = React.useState<{ index: number; url: string; thumb?: string }[]>([]);
   const [backdropIndex, setBackdropIndex] = React.useState(0);
-  // Banner focal point: which edge the 21:7 crop anchors to. Top default
-  // keeps title treatments (usually top-weighted) in frame.
-  const [backdropPosition, setBackdropPosition] = React.useState<"top" | "center" | "bottom">("top");
+  // Blur-up: the full hero fades in over the tiny variant once decoded.
+  const [heroLoaded, setHeroLoaded] = React.useState(false);
 
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const statusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,12 +145,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   React.useEffect(() => {
     setBackdropOptions([]);
     setBackdropIndex(0);
-    setBackdropPosition("top");
+    setHeroLoaded(false);
     fetch(`/api/shows/${show.id}/images/backdrops`).then(r => r.json()).then(data => {
       const options = Array.isArray(data.options) ? data.options : [];
       setBackdropOptions(options);
       setBackdropIndex(typeof data.selected === "number" ? data.selected : 0);
-      if (data.position === "center" || data.position === "bottom") setBackdropPosition(data.position);
     }).catch(() => {});
   }, [show.id]);
 
@@ -159,19 +157,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     if (backdropOptions.length < 2) return;
     const next = (backdropIndex + dir + backdropOptions.length) % backdropOptions.length;
     setBackdropIndex(next);
+    setHeroLoaded(false);
     fetch(`/api/shows/${show.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ config: { backdropIndex: next } }),
-    }).catch(() => {});
-  }
-
-  function setPosition(pos: "top" | "center" | "bottom") {
-    setBackdropPosition(pos);
-    fetch(`/api/shows/${show.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config: { backdropPosition: pos } }),
     }).catch(() => {});
   }
 
@@ -826,37 +816,48 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         </div>
       </header>
 
-      {/* Hero Banner */}
-      <section className="group relative z-10 w-full aspect-[21/7] max-h-[360px] min-h-[210px] overflow-hidden shrink-0">
-        <img
-          src={`/api/shows/${show.id}/images/backdrop?index=${backdropIndex}`}
-          alt=""
-          aria-hidden
-          className={`size-full object-cover ${backdropPosition === "center" ? "object-center" : backdropPosition === "bottom" ? "object-bottom" : "object-top"}`}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-        />
-        {/* Focal-point presets: which edge the ultra-wide crop anchors to. */}
-        <div className="absolute bottom-2 right-3 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {(["top", "center", "bottom"] as const).map((pos) => (
-            <button
-              key={pos}
-              onClick={() => setPosition(pos)}
-              title={`Anchor banner crop to ${pos}`}
-              className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                backdropPosition === pos
-                  ? "bg-signal/25 text-signal font-semibold"
-                  : "bg-black/50 text-white/60 hover:text-white"
-              }`}
-            >
-              {pos === "center" ? "ctr" : pos.slice(0, 3)}
-            </button>
-          ))}
-          {backdropOptions.length > 1 && (
-            <span className="rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70">
-              {backdropIndex + 1}/{backdropOptions.length}
-            </span>
-          )}
+      {/* Hero Banner — Sonarr-style melt: the art dissolves into the page
+          background instead of ending at a hard edge, so there is no crop
+          line and no focal anchor to fiddle with. Poster/title row below
+          stays outside the fade and renders crisp. */}
+      <section className="group relative z-10 w-full h-[300px] md:h-[380px] shrink-0">
+        <div
+          className="absolute inset-0"
+          style={{
+            maskImage: "linear-gradient(to bottom, black 0%, black 52%, transparent 96%)",
+            WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 52%, transparent 96%)",
+          }}
+        >
+          <img
+            src={`/api/shows/${show.id}/images/backdrop?index=${backdropIndex}&thumb=1`}
+            alt=""
+            aria-hidden
+            decoding="async"
+            className="absolute inset-0 size-full object-cover object-center blur-md scale-105"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+          <img
+            src={`/api/shows/${show.id}/images/backdrop?index=${backdropIndex}`}
+            alt=""
+            aria-hidden
+            fetchPriority="high"
+            decoding="async"
+            onLoad={() => setHeroLoaded(true)}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            className={`absolute inset-0 size-full object-cover object-center transition-opacity duration-500 ${heroLoaded ? "opacity-100" : "opacity-0"}`}
+          />
+          <div className="absolute inset-0" style={{
+            background: `
+              radial-gradient(circle at 26% 3%, color-mix(in srgb, var(--signal) 25%, transparent), transparent 40%),
+              linear-gradient(to bottom, rgba(13,16,21,.15) 0%, rgba(13,16,21,.35) 45%, rgba(13,16,21,.75) 100%)
+            `
+          }} />
         </div>
+        {backdropOptions.length > 1 && (
+          <span className="absolute bottom-2 right-3 z-20 rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70">
+            {backdropIndex + 1}/{backdropOptions.length}
+          </span>
+        )}
         {backdropOptions.length > 1 && (
           <>
             <button
@@ -875,13 +876,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             </button>
           </>
         )}
-        <div className="absolute inset-0" style={{
-          background: `
-            radial-gradient(circle at 26% 3%, color-mix(in srgb, var(--signal) 25%, transparent), transparent 40%),
-            linear-gradient(to bottom, rgba(13,16,21,.15) 0%, rgba(13,16,21,.5) 40%, rgba(13,16,21,.95) 100%)
-          `
-        }} />
-        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-4 md:gap-6 px-4 md:px-8 pb-4 md:pb-8">
+        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-4 md:gap-6 px-4 md:px-8 pb-4 md:pb-8 [text-shadow:0_2px_12px_rgba(0,0,0,0.85)]">
           <div className="shrink-0 w-[110px] md:w-[140px] rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
             <img
               src={`/api/shows/${show.id}/images/poster`}

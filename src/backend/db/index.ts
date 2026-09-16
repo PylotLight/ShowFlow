@@ -165,6 +165,9 @@ export class DatabaseManager {
   getShow(showId: string) { return shows.getShow(this, showId); }
   getShowConfig(showId: string) { return shows.getShowConfig(this, showId); }
   getShowBackdropIndex(showId: string) { return shows.getShowBackdropIndex(this, showId); }
+  getShowBackdropOptions(showId: string) { return shows.getShowBackdropOptions(this, showId); }
+  getShowBackdropOptionsAt(showId: string) { return shows.getShowBackdropOptionsAt(this, showId); }
+  saveShowBackdropOptions(showId: string, options: shows.StoredBackdropOption[]) { return shows.saveShowBackdropOptions(this, showId, options); }
   getShowBackdropPosition(showId: string) { return shows.getShowBackdropPosition(this, showId); }
   getProviderForRole(showId: string, role: 'metadata' | 'airtime') { return shows.getProviderForRole(this, showId, role); }
   setProviderRole(showId: string, providerType: string, role: 'metadata' | 'airtime', active: boolean) { return shows.setProviderRole(this, showId, providerType, role, active); }

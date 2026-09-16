@@ -103,18 +103,29 @@ function formatNowTime(): string {
   return new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-function getRowProximity(airDate: string | null): { color: string; dot: string } {
-  if (!airDate) return { color: "text-white/50", dot: "bg-white/30" };
+/** Proximity dot for an episode row. Color lives on the dot and timestamp
+ *  only — titles stay near-white so hue never doubles as meaning. */
+function getRowDot(airDate: string | null): string {
+  if (!airDate) return "bg-white/30";
   const now = new Date();
   const target = new Date(airDate);
-  if (isNaN(target.getTime())) return { color: "text-white/50", dot: "bg-white/30" };
+  if (isNaN(target.getTime())) return "bg-white/30";
   const diffTime = target.getTime() - now.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-  if (diffDays < 0) return { color: "text-white/50", dot: "bg-white/20" };
-  if (diffDays <= 1) return { color: "text-signal", dot: "bg-signal" };
-  if (diffDays <= 3) return { color: "text-accent-amber", dot: "bg-accent-amber" };
-  return { color: "text-white/50", dot: "bg-white/30" };
+  if (diffDays < 0) return "bg-white/20";
+  if (diffDays <= 1) return "bg-signal";
+  if (diffDays <= 3) return "bg-accent-amber";
+  return "bg-white/30";
+}
+
+/** Explicit acquisition state, derived from calendar fields only:
+ *  file on disk → Available; aired with no file → Awaiting release
+ *  (aired but not yet grabbed); otherwise Scheduled. */
+function acquisition(ep: UpcomingEpisode): "available" | "awaiting" | "scheduled" {
+  if (ep.filePath) return "available";
+  if (isPast(whenBasis(ep))) return "awaiting";
+  return "scheduled";
 }
 
 function getDateKeyFor(d: Date): string {
@@ -233,6 +244,9 @@ function Dashboard({
   const [syncProgress, setSyncProgress] = React.useState<{ synced: number; total: number; errors: number } | null>(null);
   const [selectedDay, setSelectedDay] = React.useState<string | null>(null);
   const [expandHistory, setExpandHistory] = React.useState(false);
+  // Offset (in days) of the calendar strip window — prev/next shift it,
+  // Today snaps it back.
+  const [stripOffset, setStripOffset] = React.useState(0);
 
   const POLL_INTERVAL = 30_000;
 
@@ -345,6 +359,25 @@ function Dashboard({
     return new Set(datedUpcoming.map((ep) => ep.showTitle)).size;
   }, [datedUpcoming]);
 
+  // Visible window of the agenda, for the scoped header total
+  // ("14 episodes · 12 series · Sep 13 – Sep 20").
+  const agendaRange = React.useMemo(() => {
+    if (!datedUpcoming || datedUpcoming.length === 0) return null;
+    const keys = datedUpcoming
+      .map((ep) => getLocalDateKey(ep.airDate))
+      .filter(Boolean)
+      .sort();
+    if (keys.length === 0) return null;
+    const fmt = (k: string) =>
+      new Date(`${k}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const firstKey = keys[0];
+    const lastKey = keys[keys.length - 1];
+    if (!firstKey || !lastKey) return null;
+    const first = fmt(firstKey);
+    const last = fmt(lastKey);
+    return first === last ? first : `${first} – ${last}`;
+  }, [datedUpcoming]);
+
   const getMatchingShow = (title: string) =>
     shows?.find((s) => s.title.toLowerCase() === title.toLowerCase());
 
@@ -352,10 +385,22 @@ function Dashboard({
     const today = new Date();
     return Array.from({ length: 11 }, (_, i) => {
       const date = new Date(today);
-      date.setDate(today.getDate() + i - 3);
+      date.setDate(today.getDate() + i - 3 + stripOffset);
       return date;
     });
-  }, []);
+  }, [stripOffset]);
+
+  // Month(s) spanned by the visible strip window, e.g. "September" or "Sep – Oct".
+  const stripMonths = React.useMemo(() => {
+    const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short" });
+    const first = calendarDays[0];
+    const last = calendarDays[calendarDays.length - 1];
+    if (!first || !last) return null;
+    const a = fmt(first);
+    const b = fmt(last);
+    if (a === b) return first.toLocaleDateString(undefined, { month: "long" });
+    return `${a} – ${b}`;
+  }, [calendarDays]);
 
   const episodesByDate = React.useMemo(() => {
     const map = new Map<string, UpcomingEpisode[]>();
@@ -432,9 +477,6 @@ function Dashboard({
           <div className="border-b border-white/5 px-5 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">
-                  // System Agenda
-                </span>
                 <h2 className="font-display text-xl font-bold text-white mt-0.5 leading-tight">
                   Upcoming
                 </h2>
@@ -446,24 +488,67 @@ function Dashboard({
                   <span className="text-white/20 mx-1.5">|</span>
                   <span className="text-white font-semibold">{uniqueShowsCount}</span>
                   {" "}series
+                  {agendaRange && (
+                    <>
+                      <span className="text-white/20 mx-1.5">|</span>
+                      <span className="text-white/60">{agendaRange}</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
           {/* Compact Calendar Strip */}
-          <div className="border-b border-white/5 px-5 py-2.5 overflow-x-auto">
-            <div className="flex gap-1 min-w-max">
+          <div className="border-b border-white/5 px-5 py-2.5 flex items-center gap-2">
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                title="Previous days"
+                aria-label="Previous days"
+                onClick={() => setStripOffset((o) => o - 7)}
+                className="flex items-center justify-center size-6 rounded-md text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+              >
+                <ChevronRight className="size-3.5 rotate-180" />
+              </button>
+              <button
+                type="button"
+                title="Jump to today"
+                onClick={() => { setStripOffset(0); setSelectedDay(todayKey); }}
+                className="rounded-md px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-signal hover:bg-signal/10 transition-all"
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                title="Next days"
+                aria-label="Next days"
+                onClick={() => setStripOffset((o) => o + 7)}
+                className="flex items-center justify-center size-6 rounded-md text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
+              {stripMonths && (
+                <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/40">
+                  {stripMonths}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-1 min-w-0 overflow-x-auto">
               {calendarDays.map((date) => {
                 const dateStr = getDateKeyFor(date);
                 const dayEps = episodesByDate.get(dateStr) || [];
                 const count = dayEps.length;
                 const isToday = dateStr === todayKey;
                 const isSelected = selectedDay === dateStr;
+                const fullLabel = date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
                 return (
                   <button
                     key={dateStr}
                     type="button"
+                    title={`${fullLabel} · ${count} episode${count !== 1 ? "s" : ""}`}
+                    aria-label={`${fullLabel}, ${count} episodes`}
+                    aria-pressed={isSelected}
                     onClick={() => setSelectedDay(isSelected ? null : dateStr)}
                     className={cn(
                       "flex flex-col items-center rounded-md px-1 py-1 min-w-[34px] transition-all duration-150 cursor-pointer",
@@ -474,13 +559,13 @@ function Dashboard({
                       isSelected && "bg-signal/20 border-signal/50 ring-1 ring-signal/50",
                     )}
                   >
-                    <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-white/60">
                       {date.toLocaleDateString(undefined, { weekday: "short" })}
                     </span>
                     <span
                       className={cn(
                         "font-display text-xs font-bold leading-tight",
-                        count > 0 ? "text-white" : "text-white/40",
+                        count > 0 ? "text-white" : "text-white/50",
                         isToday && "text-signal",
                       )}
                     >
@@ -505,86 +590,6 @@ function Dashboard({
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Recently Released — collapsed by default so past days don't
-                    compete with the primary agenda */}
-                {storyGroups.history.length > 0 && (
-                  <div className="border border-white/5 bg-white/[0.01] rounded-md px-2 py-1">
-                    <button
-                      onClick={() => setExpandHistory(!expandHistory)}
-                      className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/40 hover:text-white/70 transition-colors py-1 text-left"
-                    >
-                      {expandHistory
-                        ? <ChevronUp className="size-3 shrink-0" />
-                        : <ChevronDown className="size-3 shrink-0" />}
-                      Recently Released
-                      <span className="text-white/25 normal-case font-normal">
-                        ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
-                      </span>
-                      <span className="flex-1" />
-                      {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
-                        g.items.slice(0, 2).map((ep) => (
-                          <span
-                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
-                            className="text-white/25 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
-                          >
-                            {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
-                          </span>
-                        ))
-                      )}
-                    </button>
-                    {expandHistory && (
-                      <div className="pb-1 space-y-0.5">
-                        {storyGroups.history.map((group) => (
-                          <div key={group.dateKey} className="space-y-0.5">
-                            <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/25 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
-                              {group.label}
-                            </h4>
-                            {group.items.map((ep, i) => {
-                              const showObj = getMatchingShow(ep.showTitle);
-                              return (
-                                <div
-                                  key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
-                                  onClick={() => { if (showObj) onSelectShow(showObj); }}
-                                  className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
-                                >
-                                  {showObj ? (
-                                    <PosterImage
-                                      showId={showObj.id}
-                                      alt={ep.showTitle}
-                                      className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
-                                    />
-                                  ) : (
-                                    <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
-                                      <span className="font-mono text-[5px] text-white/20">N/A</span>
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
-                                    <span className="text-xs font-medium text-white/45 truncate transition-colors group-hover:text-white/60">
-                                      {ep.showTitle}
-                                    </span>
-                                    <span className="text-[10px] text-white/25 font-mono shrink-0">
-                                      S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
-                                    </span>
-                                  </div>
-                                  {ep.filePath && (
-                                    <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
-                                      <CheckIcon className="size-2" strokeWidth={3} />
-                                      Available
-                                    </span>
-                                  )}
-                                  <span className="text-[10px] font-mono text-white/30 shrink-0 leading-none">
-                                    {getCompactDate(ep.airDate)}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Primary upcoming list: Today → Tomorrow → rest, today gets a hero accent */}
                 {filteredUpcomingGroups.map((group, gi) => {
                   const isToday = group.dateKey === todayKey;
@@ -601,7 +606,7 @@ function Dashboard({
                       "font-mono text-[10px] font-bold uppercase tracking-wider pb-1 mb-1 flex items-center gap-1.5",
                       isToday
                         ? "text-signal border-b border-signal/15"
-                        : "text-white/30 border-b border-white/5",
+                        : "text-white/60 border-b border-white/5",
                     )}>
                       {isToday && <span className="inline-block size-1.5 rounded-full bg-signal animate-pulse" />}
                       {group.label}
@@ -616,7 +621,8 @@ function Dashboard({
                       const hasNowLine = nowLineIdx > 0;
                       return group.items.map((ep, i) => {
                       const showObj = getMatchingShow(ep.showTitle);
-                      const prox = getRowProximity(whenBasis(ep));
+                      const dot = getRowDot(whenBasis(ep));
+                      const state = acquisition(ep);
                       const time = clockLabel(ep);
                       return (
                         <React.Fragment key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}>
@@ -650,21 +656,20 @@ function Dashboard({
                               <span className="font-mono text-[5px] text-white/20">N/A</span>
                             </div>
                           )}
-                          <span className={cn("size-1.5 shrink-0 rounded-full", prox.dot)} />
+                          <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
                           <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
-                            <span className={cn(
-                              "text-sm font-semibold truncate transition-colors",
-                              prox.color,
-                              "group-hover:text-white",
-                            )}>
+                            <span
+                              title={ep.showTitle}
+                              className="text-sm font-semibold truncate transition-colors text-white/90 group-hover:text-white"
+                            >
                               {ep.showTitle}
                             </span>
-                            <span className="text-[11px] text-white/30 font-mono shrink-0">
+                            <span className="text-[11px] text-white/55 font-mono shrink-0">
                               S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                             </span>
                             {ep.episodeTitle && (
                               <span
-                                className="text-[12px] text-white/40 truncate hidden sm:inline"
+                                className="text-[12px] text-white/60 truncate hidden sm:inline"
                                 title={ep.episodeTitle}
                               >
                                 · {ep.episodeTitle}
@@ -675,13 +680,26 @@ function Dashboard({
                             {ep.filePath && (
                               <MediaBadges media={ep.file?.media} max={3} className="hidden lg:inline-flex" />
                             )}
-                            {ep.filePath && (
+                            {state === "available" && (
                               <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />
                                 Available
                               </span>
                             )}
-                            <span className="text-[11px] font-mono text-white/40 shrink-0 leading-none">
+                            {state === "awaiting" && (
+                              <span
+                                title="Aired but not yet grabbed — check Pipeline or grab manually"
+                                className="rounded-full bg-accent-amber/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
+                              >
+                                Awaiting release
+                              </span>
+                            )}
+                            {state === "scheduled" && (
+                              <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-white/50 border border-white/10">
+                                Scheduled
+                              </span>
+                            )}
+                            <span className="text-[11px] font-mono text-white/60 shrink-0 leading-none">
                               {getCompactDate(ep.airDate)}
                             </span>
                           </div>
@@ -704,6 +722,96 @@ function Dashboard({
                     >
                       Clear filter
                     </button>
+                  </div>
+                )}
+
+                {/* Recently Released — below the upcoming agenda so past days
+                    never compete with what's next; collapsed by default */}
+                {storyGroups.history.length > 0 && (
+                  <div className="px-2 py-1">
+                    <button
+                      onClick={() => setExpandHistory(!expandHistory)}
+                      className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 hover:text-white/90 transition-colors py-1 text-left"
+                    >
+                      {expandHistory
+                        ? <ChevronUp className="size-3 shrink-0" />
+                        : <ChevronDown className="size-3 shrink-0" />}
+                      Recently Released
+                      <span className="text-white/50 normal-case font-normal">
+                        ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
+                      </span>
+                      <span className="flex-1" />
+                      {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
+                        g.items.slice(0, 2).map((ep) => (
+                          <span
+                            key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
+                            className="text-white/50 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
+                          >
+                            {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                          </span>
+                        ))
+                      )}
+                    </button>
+                    {expandHistory && (
+                      <div className="pb-1 space-y-0.5">
+                        {storyGroups.history.map((group) => (
+                          <div key={group.dateKey} className="space-y-0.5">
+                            <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/55 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
+                              {group.label}
+                            </h4>
+                            {group.items.map((ep, i) => {
+                              const showObj = getMatchingShow(ep.showTitle);
+                              return (
+                                <div
+                                  key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
+                                  onClick={() => { if (showObj) onSelectShow(showObj); }}
+                                  className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                                >
+                                  {showObj ? (
+                                    <PosterImage
+                                      showId={showObj.id}
+                                      alt={ep.showTitle}
+                                      className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
+                                    />
+                                  ) : (
+                                    <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
+                                      <span className="font-mono text-[5px] text-white/20">N/A</span>
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                                    <span
+                                      title={ep.showTitle}
+                                      className="text-xs font-medium text-white/85 truncate transition-colors group-hover:text-white"
+                                    >
+                                      {ep.showTitle}
+                                    </span>
+                                    <span className="text-[10px] text-white/55 font-mono shrink-0">
+                                      S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
+                                    </span>
+                                  </div>
+                                  {ep.filePath ? (
+                                    <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
+                                      <CheckIcon className="size-2" strokeWidth={3} />
+                                      Available
+                                    </span>
+                                  ) : (
+                                    <span
+                                      title="Aired but not yet grabbed — check Pipeline or grab manually"
+                                      className="rounded-full bg-accent-amber/10 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
+                                    >
+                                      Awaiting release
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-mono text-white/60 shrink-0 leading-none">
+                                    {getCompactDate(ep.airDate)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

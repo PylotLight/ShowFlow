@@ -25,3 +25,20 @@ test('clampBackdropIndex keeps stored picks in range', () => {
   expect(clampBackdropIndex(opts, NaN)).toBe(0);
   expect(clampBackdropIndex([], 0)).toBe(0);
 });
+
+test('dedupeBackdropOptions passes thumb variants through', () => {
+  const out = dedupeBackdropOptions([
+    { url: 'https://x/a.jpg', thumb: 'https://x/a-small.jpg' },
+    { url: 'https://x/b.jpg', thumb: null },
+  ]);
+  expect(out).toEqual([
+    { index: 0, url: 'https://x/a.jpg', width: undefined, height: undefined, thumb: 'https://x/a-small.jpg' },
+    { index: 1, url: 'https://x/b.jpg', width: undefined, height: undefined, thumb: undefined },
+  ]);
+});
+
+test('clampBackdropIndex accepts stored options without indexes', () => {
+  const stored = [{ url: 'a', thumb: 'a-t' }, { url: 'b' }];
+  expect(clampBackdropIndex(stored, 1)).toBe(1);
+  expect(clampBackdropIndex(stored, 99)).toBe(1);
+});

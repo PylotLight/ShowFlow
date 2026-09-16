@@ -96,18 +96,18 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   const mainNavs = [
     { id: "dashboard" as NavItem, label: "Dashboard", icon: LayoutDashboard },
     { id: "agenda" as NavItem, label: "Calendar", icon: Calendar },
-    { id: "queue" as NavItem, label: "Queue", icon: Download, badge: queueCount },
+    { id: "queue" as NavItem, label: "Queue", icon: Download, badge: queueCount, badgeHint: "active downloads" },
   ];
 
   const collectionNavs = [
     { id: "library" as NavItem, label: "Library", icon: Library },
-    { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount },
+    { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
     { id: "search" as NavItem, label: "Indexer Search", icon: Search },
   ];
 
   const manageNavs = [
     { id: "health" as NavItem, label: "Health", icon: Heart },
-    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount },
+    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount, badgeHint: "files awaiting import" },
     { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
     { id: "settings" as NavItem, label: "Settings", icon: Settings },
   ];
@@ -167,6 +167,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
                 {nav.badge !== undefined && nav.badge > 0 && (
                   <span
+                    title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
                     className={cn(
                       "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none",
                       activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/60"
@@ -199,6 +200,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
                 {nav.badge !== undefined && nav.badge > 0 && (
                   <span
+                    title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
                     className={cn(
                       "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none",
                       activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-accent-amber/20 text-accent-amber"
@@ -354,7 +356,10 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
             <nav.icon className="size-4.5" />
             <span className="mt-0.5 scale-90">{nav.label}</span>
             {nav.badge !== undefined && nav.badge > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground">
+              <span
+                title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
+                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground"
+              >
                 {nav.badge}
               </span>
             )}

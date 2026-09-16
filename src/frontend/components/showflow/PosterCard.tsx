@@ -15,6 +15,20 @@ export interface ShowSummary {
   lastUpdated?: string;
 }
 
+/** Shows whose detail hero has been preloaded. Module-level so hovering the
+ *  same card twice (or a duplicate card) never refires the request. */
+const preloadedHeroes = new Set<string>();
+
+/** Warm the detail-page hero before the click lands: starts the backdrop
+ *  download (and the server-side provider fetch on a cold cache) so opening
+ *  the show feels instant. */
+function preloadHero(showId: string) {
+  if (!showId || preloadedHeroes.has(showId)) return;
+  preloadedHeroes.add(showId);
+  const img = new Image();
+  img.src = `/api/shows/${showId}/images/backdrop`;
+}
+
 function PosterCard({
   show,
   selected,
@@ -32,6 +46,8 @@ function PosterCard({
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={() => preloadHero(show.id)}
+      onFocus={() => preloadHero(show.id)}
       className={cn(
         "group relative aspect-2/3 w-full overflow-hidden rounded-lg text-left outline-none",
         "ring-1 ring-white/10 transition-all duration-200 hover:-translate-y-1 hover:ring-white/25 hover:shadow-[0_12px_30px_-8px_oklch(0_0_0/0.6)]",

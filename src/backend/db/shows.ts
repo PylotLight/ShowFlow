@@ -1138,6 +1138,42 @@ export function getShowBackdropIndex(self: DatabaseManager, showId: string): num
   return Number.isFinite(n) && (n as number) >= 0 ? (n as number) : 0;
 }
 
+/** Backdrop option URLs, persisted whenever the provider list is fetched so
+ *  the image endpoint can resolve an index to a URL (and its cached bytes)
+ *  without a network round-trip on every request. */
+export interface StoredBackdropOption { url: string; width?: number; height?: number; thumb?: string }
+
+export function getShowBackdropOptions(self: DatabaseManager, showId: string): StoredBackdropOption[] {
+  try {
+    const raw = self.getSetting(`backdropOptions.${showId}`);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((o): o is StoredBackdropOption =>
+        !!o && typeof (o as StoredBackdropOption).url === 'string')
+      .slice(0, 32);
+  } catch {
+    return [];
+  }
+}
+
+export function saveShowBackdropOptions(self: DatabaseManager, showId: string, options: StoredBackdropOption[]): void {
+  try {
+    self.setSetting(`backdropOptions.${showId}`, JSON.stringify(options.slice(0, 32)));
+    self.setSetting(`backdropOptionsAt.${showId}`, String(Date.now()));
+  } catch {
+    // Persistence is best-effort; a miss just costs one provider round-trip.
+  }
+}
+
+/** When the persisted backdrop option list was last refreshed (epoch ms, 0 if never). */
+export function getShowBackdropOptionsAt(self: DatabaseManager, showId: string): number {
+  const raw = self.getSetting(`backdropOptionsAt.${showId}`);
+  const n = raw == null ? NaN : parseInt(String(raw), 10);
+  return Number.isFinite(n) ? (n as number) : 0;
+}
+
 /** True when a user has renamed the show (a `user`-typed show_title row exists). */
 export function hasUserTitleOverride(self: DatabaseManager, showId: string): boolean {
   const row = self.drizz.select({ id: schema.showTitles.id })

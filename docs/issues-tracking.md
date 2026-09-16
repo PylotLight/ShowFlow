@@ -363,7 +363,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 17 | Probe noise mistaken for crash | 2026-09-16 (pending release) |
 | 18 | Banner backdrop cycling | 2026-09-16 (pending release) |
 | 19 | Updates list bloat + missing release notes | 2026-09-16 (pending release) |
-| 20 | Banner crop beheads title art | 2026-09-16 (pending release) |
+| 20 | Banner crop beheads title art — fixed via Sonarr-style melt, focal presets removed | 2026-09-16 (pending release) |
 | 21 | Settings order: releases under Libraries | 2026-09-16 (pending release) |
 
 ---
