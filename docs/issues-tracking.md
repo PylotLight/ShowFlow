@@ -367,6 +367,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 21 | Settings order: releases under Libraries | 2026-09-16 (pending release) |
 | 22 | Episode search empty for year-suffixed shows (Dark Matter (2024)) | 2026-09-16 (pending release) |
 | 23 | TorBox 524 kills download, no retry; fake 100% progress | 2026-09-16 (pending release) |
+| 24 | Mover steals in-progress .part into library mid-download | 2026-09-16 (pending release) |
 
 ---
 

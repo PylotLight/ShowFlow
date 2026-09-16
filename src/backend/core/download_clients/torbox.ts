@@ -422,7 +422,23 @@ export class TorboxDownloadClient implements DownloadClient {
     const { torrentId, file, fileIdx, filesTotal, label, jobId } = args;
     const fileName = file.short_name || `file_${file.id}.mkv`;
     const outputPath = path.join(this.config.outputFolder!, fileName);
-    const partPath = `${outputPath}.part`;
+    // Stage the partial download in a hidden subdir, NOT next to the final
+    // file: outputFolder IS the Blackhole watch folder, and watchers must
+    // never see a half-written file (a stalled download looks "stable").
+    // Same filesystem, so the final rename stays atomic.
+    const stagingDir = path.join(this.config.outputFolder!, '.downloading');
+    await mkdir(stagingDir, { recursive: true });
+    const partPath = path.join(stagingDir, `${fileName}.part`);
+    // v0.1.49 staged `<name>.part` next to the final file (visible to the
+    // watch-folder mover). Adopt any orphan into staging so those bytes
+    // resume instead of re-downloading from zero.
+    try {
+      const legacy = await stat(`${outputPath}.part`).catch(() => null);
+      const staged = await stat(partPath).catch(() => null);
+      if (legacy && !staged) await rename(`${outputPath}.part`, partPath);
+    } catch {
+      // Orphaned partial stays where it is — harmless, mover ignores it now.
+    }
     let lastError = 'unknown error';
 
     const publish = (detail: string, completed: number) => {

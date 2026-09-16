@@ -15,6 +15,21 @@ import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
 
+/**
+ * Suffixes that mark a file as an in-progress download artifact — ours
+ * (`*.part` staging) or any external downloader's (aria2, qBittorrent, …).
+ * The watch-folder importer must NEVER touch these: a stalled download looks
+ * "size-stable" to waitForStableFile, so without this guard the mover steals
+ * partial files mid-download (ripping the target out from under the writer
+ * and dropping truncated garbage into the library). Skipped, never deleted.
+ */
+const INCOMPLETE_SUFFIXES = ['.part', '.tmp', '.partial', '.aria2', '.!qb', '.bc!', '.crdownload'];
+
+export function isIncompleteDownloadFile(filename: string): boolean {
+  const base = path.basename(filename).toLowerCase();
+  return INCOMPLETE_SUFFIXES.some((s) => base.endsWith(s));
+}
+
 export class BlackholeClient implements DownloadClient {
   name = 'Blackhole';
   private oracle = new Oracle();
@@ -266,6 +281,12 @@ export class BlackholeClient implements DownloadClient {
   private enqueue(folder: string, filename: string) {
     const fullPath = path.join(folder, filename);
 
+    // In-progress download artifact — leave it alone (see helper above).
+    if (isIncompleteDownloadFile(filename)) {
+      debugLog(`Skipping in-progress download artifact: ${filename}`);
+      return;
+    }
+
     if (this.pendingSet.has(fullPath) || this.processingQueue.has(fullPath)) {
       return;
     }
@@ -393,7 +414,7 @@ export class BlackholeClient implements DownloadClient {
     if (!folder) return 0;
     try {
       const files = await readdir(folder);
-      return files.filter(f => !this.isIgnoredFile(f)).length;
+      return files.filter(f => !this.isIgnoredFile(f) && !isIncompleteDownloadFile(f)).length;
     } catch {
       return 0;
     }
@@ -460,6 +481,13 @@ export class BlackholeClient implements DownloadClient {
         await unlink(fullPath);
       } catch {
       }
+      return;
+    }
+
+    // In-progress download artifact: skip WITHOUT deleting — the writer
+    // still owns it. (Placed after the junk branch, before queue tracking.)
+    if (!opts?.force && isIncompleteDownloadFile(filename)) {
+      debugLog(`Skipping in-progress download artifact: ${filename}`);
       return;
     }
 

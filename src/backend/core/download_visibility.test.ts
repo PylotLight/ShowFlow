@@ -70,3 +70,13 @@ test('transient CDN failures are retryable, client errors are not', () => {
   }
   expect(MAX_FILE_ATTEMPTS).toBeGreaterThan(1);
 });
+
+test('in-progress download artifacts are never importable', async () => {
+  const { isIncompleteDownloadFile } = await import('./download_clients/blackhole');
+  for (const f of ['episode.mkv.part', 'EPISODE.MKV.PART', 'file.tmp', 'x.aria2', 'y.!qb', 'z.bc!', 'w.crdownload', 'v.partial']) {
+    expect(isIncompleteDownloadFile(f)).toBe(true);
+  }
+  for (const f of ['episode.mkv', 'episode.mkv.partialx', ' Thumb.db '.trim(), '.DS_Store']) {
+    expect(isIncompleteDownloadFile(f)).toBe(false);
+  }
+});

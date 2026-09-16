@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Watch folder ignores in-progress downloads**: `.part/.tmp/.aria2` etc. are never imported (a stalled download looks "size-stable", so the mover was stealing partials mid-download and dropping truncated files in the library). TorBox stages partials in a hidden `.downloading/` dir and adopts v0.1.49 orphans, so already-fetched bytes resume.
 
 ## [v0.1.49] - 2026-09-16
 - **TorBox downloads survive CDN hiccups**: per-file retry (5 attempts, fresh link each time, 10s→2min backoff) on transient 5xx/524s, resume via Range, 90s header timeout + 2min stall watchdog, `.part` files renamed only on success (truncated videos never reach the watch folder). Wait-phase progress no longer fakes 100% — real % only once bytes move.
