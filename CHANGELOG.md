@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.52] - 2026-09-16
+- **Agenda fixes**: import/publish times parse naive SQLite stamps as UTC (no more wrong-zone times); provenance card wraps long titles/paths; Recently Released back above the agenda; selecting a past day shows its episodes in full (was "No episodes" despite the count); per-episode release-search button on agenda rows.
+
 ## [v0.1.51] - 2026-09-16
 - **Downloads ride out sick edges**: TorBox API calls fail fast (60s) instead of hanging forever; first-byte budget 90s→3min for cold CDN edges on multi-GB files.
 - **Jobs View navigates in-app**: notification View buttons switch views without a full page reload.
