@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.46] - 2026-09-16
+### Added
+- **Show hero melt (replaces focal presets)**: the backdrop now dissolves into the page background Sonarr-style — fixed center anchor, taller hero, no crop line, no Top/Ctr/Bot buttons to fiddle with. Backdrop ‹ › cycler stays.
+- **Faster show open**: the backdrop endpoint serves cached bytes without waiting on provider round-trips (option list now persisted); hovering a poster preloads its hero, which also gets download priority on the detail page.
+- **Blur-up hero + DB-first lists**: the detail backdrop renders an instant blurred thumbnail over the melt and sharpens when the full image decodes; tiny thumb bytes are cached locally (no schema change) and the backdrop list serves stored options instantly with a weekly background refresh.
+- **Settings General tab reorder**: Available Releases sits directly under Libraries, followed by Update Status, with Defaults last.
+- **Dashboard agenda polish (Batch A)**: near-white episode titles with proximity shown on dot + timestamp only; explicit Scheduled / Awaiting release / Available pills; Today + prev/next strip controls with labeled day counts; header total scoped to its date window; Recently Released moved below the agenda; Pipeline/Queue/Manual Import badges carry scope tooltips.
+
 ## [v0.1.45] - 2026-09-16
 ### Added
 - **Updates panel: collapsed history + release notes**: the Available Releases list now keeps only the current release and anything newer expanded; older releases collapse into a "Show previous releases (N)" toggle. Each row with notes gets an expandable "Release notes" view (backend passes GitHub `body` through). Release script now publishes the CHANGELOG `[Unreleased]` section as the GitHub release notes (rotating it into a versioned heading afterwards) instead of an auto compare-link.
@@ -26,11 +34,6 @@ All notable changes to this project will be documented in this file.
 - **Show detail toolbar consolidated into the top bar**: episode availability count, progress bar, and ALL/AVAILABLE/MISSING pills moved to the header (compact), column-settings button docked in the header cluster, whole toolbar row removed so the list gets the full height (slim fallback row on small screens).
 - Search page header renamed to **Indexer Search**, matching the sidebar.
 - Restored breathing room between the banner and the episode list (top padding) after the toolbar-row removal left them flush.
-- **Show hero melt (replaces focal presets)**: the backdrop now dissolves into the page background Sonarr-style — fixed center anchor, taller hero, no crop line, no Top/Ctr/Bot buttons to fiddle with. Backdrop ‹ › cycler stays.
-- **Faster show open**: the backdrop endpoint serves cached bytes without waiting on provider round-trips (option list now persisted); hovering a poster preloads its hero, which also gets download priority on the detail page.
-- **Blur-up hero + DB-first lists**: the detail backdrop renders an instant blurred thumbnail over the melt and sharpens when the full image decodes; tiny thumb bytes are cached locally (no schema change) and the backdrop list serves stored options instantly with a weekly background refresh.
-- **Settings General tab reorder**: Available Releases sits directly under Libraries, followed by Update Status, with Defaults last.
-- **Dashboard agenda polish (Batch A)**: near-white episode titles with proximity shown on dot + timestamp only; explicit Scheduled / Awaiting release / Available pills; Today + prev/next strip controls with labeled day counts; header total scoped to its date window; Recently Released moved below the agenda; Pipeline/Queue/Manual Import badges carry scope tooltips.
 - **Show detail rework**: season tabs replaced with a single unified episode list (latest season first, Specials last, collapsible per season with per-season availability + progress). Latest season opens by default; the all/available/missing filter applies globally and force-expands matching sections. Per-season Monitor / Browse / Auto actions live in each section header; per-episode interactive search and auto-grab stay on the row hover actions. Top bar condensed to Back/title, Scan, one **Options** menu (shared desktop + mobile, with per-item descriptions across Configure / Organize / Remove sections), expand and close. Hero banner grew into the freed space (21/7, max 360px).
 - **Library Show Resolution Prioritization**: `Oracle` matching logic now prioritizes existing library shows and their aliases in candidate scoring before resolving to unfamiliar non-library titles, preventing false positives when downloading episodes.
 
