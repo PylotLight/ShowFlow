@@ -1,5 +1,5 @@
 import { watch } from 'node:fs';
-import { mkdir, readdir, unlink } from 'node:fs/promises';
+import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -45,6 +45,14 @@ export function formatBytesShort(bytes: number): string {
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
+
+/** HTTP statuses worth retrying: rate limits + transient CDN/edge failures.
+ *  TorBox sits behind Cloudflare, so 524s on multi-GB links are common. */
+export const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+export const MAX_FILE_ATTEMPTS = 5;
+const RETRY_BACKOFF_MS = [10_000, 30_000, 60_000, 120_000];
+const HEADER_TIMEOUT_MS = 90_000;
+const STALL_TIMEOUT_MS = 120_000;
 
 /** Human progress line for the file-fetch phase, e.g.
  *  "Fetching file 2/3 — 35% (1.2 GiB of 3.4 GiB, 8.5 MiB/s)". */
@@ -343,17 +351,27 @@ export class TorboxDownloadClient implements DownloadClient {
   private async fetchToFile(
     res: Response,
     outputPath: string,
+    startOffset: number,
     onProgress: (downloaded: number, total: number, speedBps: number) => void,
   ): Promise<void> {
     if (!res.body) throw new Error('Empty response body');
-    const total = Number(res.headers.get('content-length')) || 0;
+    const remaining = Number(res.headers.get('content-length')) || 0;
+    const total = startOffset + remaining;
     const reader = res.body.getReader();
-    let downloaded = 0;
+    let downloaded = startOffset;
     let lastEmit = 0;
     let windowBytes = 0;
     let windowStart = Date.now();
+    // Stall watchdog: a hung CDN connection must surface as an error (and
+    // trigger resume) instead of freezing the job with a dead progress bar.
+    let lastByteAt = Date.now();
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastByteAt > STALL_TIMEOUT_MS) {
+        reader.cancel(new Error(`No bytes received for ${STALL_TIMEOUT_MS / 1000}s (stalled connection)`)).catch(() => {});
+      }
+    }, 15_000);
     await new Promise<void>((resolve, reject) => {
-      const stream = createWriteStream(outputPath);
+      const stream = createWriteStream(outputPath, { flags: startOffset > 0 ? 'a' : 'w' });
       stream.on('error', reject);
       stream.on('finish', () => resolve());
       (async () => {
@@ -363,6 +381,7 @@ export class TorboxDownloadClient implements DownloadClient {
             if (done) break;
             downloaded += value.byteLength;
             windowBytes += value.byteLength;
+            lastByteAt = Date.now();
             if (!stream.write(value)) {
               await new Promise<void>((r) => stream.once('drain', () => r()));
             }
@@ -381,8 +400,139 @@ export class TorboxDownloadClient implements DownloadClient {
           reject(e);
         }
       })();
-    });
+    }).finally(() => clearInterval(watchdog));
     onProgress(downloaded, total, 0);
+  }
+
+  /**
+   * Download one torrent file with retries. Each attempt requests a FRESH
+   * download link (links expire; a 524 can come from a dead CDN slot),
+   * resumes a partial `.part` file via Range when the server honors it, and
+   * backs off on transient failures. Only renames into place on success, so
+   * the watch folder never sees a truncated video. Returns true on success.
+   */
+  private async downloadFileWithRetry(args: {
+    torrentId: string;
+    file: any;
+    fileIdx: number;
+    filesTotal: number;
+    label: string;
+    jobId: string;
+  }): Promise<{ ok: boolean; lastError: string }> {
+    const { torrentId, file, fileIdx, filesTotal, label, jobId } = args;
+    const fileName = file.short_name || `file_${file.id}.mkv`;
+    const outputPath = path.join(this.config.outputFolder!, fileName);
+    const partPath = `${outputPath}.part`;
+    let lastError = 'unknown error';
+
+    const publish = (detail: string, completed: number) => {
+      this.activeDetails.set(label, { state: detail, progress: completed });
+      backgroundJobs.update(jobId, { total: 100, completed, detail });
+    };
+
+    for (let attempt = 1; attempt <= MAX_FILE_ATTEMPTS; attempt++) {
+      const tag = `(attempt ${attempt}/${MAX_FILE_ATTEMPTS})`;
+      publish(`Requesting download link for file ${fileIdx}/${filesTotal} ${tag}`, 0);
+
+      // Fresh link every attempt.
+      let url: string | null = null;
+      try {
+        const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
+        if (!dl.success) {
+          lastError = `link request: ${JSON.stringify(dl.error)}`;
+        } else {
+          url = dl.result?.data || dl.result?.download_link || (typeof dl.result === 'string' ? dl.result : null);
+          if (!url) lastError = 'link request returned no URL';
+        }
+      } catch (e) {
+        lastError = `link request threw: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      if (!url) {
+        console.warn(`[${this.name}] ${tag} No download URL for ${fileName}: ${lastError}`);
+        if (attempt < MAX_FILE_ATTEMPTS) {
+          publish(`Link request failed ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
+          await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+        }
+        continue;
+      }
+
+      // Resume offset from any previous partial download.
+      let startOffset = 0;
+      try {
+        startOffset = (await stat(partPath)).size;
+      } catch { /* no partial file */ }
+
+      try {
+        const headers: Record<string, string> = startOffset > 0 ? { Range: `bytes=${startOffset}-` } : {};
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(HEADER_TIMEOUT_MS) });
+
+        if (startOffset > 0 && res.status !== 206) {
+          // Server ignored Range — restart from zero rather than corrupt.
+          console.warn(`[${this.name}] ${tag} Range ignored (HTTP ${res.status}) for ${fileName}; restarting`);
+          await unlink(partPath).catch(() => {});
+          startOffset = 0;
+          const res2 = await fetch(url, { signal: AbortSignal.timeout(HEADER_TIMEOUT_MS) });
+          if (!res2.ok) {
+            lastError = `HTTP ${res2.status} ${res2.statusText}`;
+            if (!RETRYABLE_STATUS.has(res2.status)) break;
+            console.warn(`[${this.name}] ${tag} Download failed for ${fileName}: ${lastError}`);
+            if (attempt < MAX_FILE_ATTEMPTS) {
+              publish(`${lastError} ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
+              await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+            }
+            continue;
+          }
+          await this.fetchToFile(res2, partPath, 0, (downloaded, total, speedBps) => {
+            const detail = formatFetchDetail(fileIdx, filesTotal, downloaded, total, speedBps);
+            const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+            publish(detail, pct);
+          });
+          await rename(partPath, outputPath);
+          console.log(`[${this.name}] Downloaded ${fileName} -> ${outputPath}`);
+          return { ok: true, lastError: '' };
+        }
+
+        if (!res.ok) {
+          lastError = `HTTP ${res.status} ${res.statusText}`;
+          if (!RETRYABLE_STATUS.has(res.status)) {
+            console.warn(`[${this.name}] ${tag} Permanent failure for ${fileName}: ${lastError}`);
+            db.logEvent({
+              type: 'error', entityType: 'release',
+              message: `TorBox HTTP download failed for "${label}" (${fileName}): ${lastError} — not retrying.`,
+            });
+            break;
+          }
+          console.warn(`[${this.name}] ${tag} Download failed for ${fileName}: ${lastError}`);
+          if (attempt < MAX_FILE_ATTEMPTS) {
+            publish(`${lastError} ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
+            await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+          }
+          continue;
+        }
+
+        await this.fetchToFile(res, partPath, startOffset, (downloaded, total, speedBps) => {
+          const detail = formatFetchDetail(fileIdx, filesTotal, downloaded, total, speedBps);
+          const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+          publish(detail, pct);
+        });
+        await rename(partPath, outputPath);
+        console.log(`[${this.name}] Downloaded ${fileName} -> ${outputPath}`);
+        return { ok: true, lastError: '' };
+      } catch (fetchErr) {
+        lastError = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.warn(`[${this.name}] ${tag} Fetch/write failed for ${fileName}: ${lastError}`);
+        if (attempt < MAX_FILE_ATTEMPTS) {
+          publish(`Connection failed ${tag} — resuming in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
+          await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+        }
+      }
+    }
+
+    db.logEvent({
+      type: 'error', entityType: 'release',
+      message: `TorBox download failed for "${label}" file ${fileName} after ${MAX_FILE_ATTEMPTS} attempts: ${lastError}`,
+    });
+    return { ok: false, lastError };
   }
 
   private async waitForDownloadInner(torrentId: string, label: string): Promise<boolean> {
@@ -459,11 +609,14 @@ export class TorboxDownloadClient implements DownloadClient {
           lastLoggedState = stateSummary;
         }
 
-        // Publish live progress to the header job + queue page.
-        this.activeDetails.set(label, { state: stateSummary, progress });
+        // Publish live state to the header job + queue page. Torrent-side
+        // progress is NOT job completion (the file fetch hasn't started),
+        // so report indeterminate here — real % flows once bytes move.
+        // Previously "cached 100%" rendered a full bar before any download.
+        this.activeDetails.set(label, { state: stateSummary, progress: null });
         backgroundJobs.update(jobId, {
-          total: 100,
-          completed: progress ?? 0,
+          total: 0,
+          completed: 0,
           detail: stateSummary,
         });
 
@@ -501,58 +654,16 @@ export class TorboxDownloadClient implements DownloadClient {
           }
 
           let anyDownloaded = false;
+          let firstError = '';
           for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
             const file = files[fileIdx]!;
-            const dl = await this.service.requestDownload({ torrentId, fileId: file.id });
-            if (!dl.success) {
-              const errText = JSON.stringify(dl.error);
-              console.warn(`[${this.name}] Failed to get link for ${file.short_name || file.id}: ${errText}`);
-              db.logEvent({
-                type: 'error', entityType: 'release',
-                message: `TorBox download-link request failed for "${label}" file ${file.short_name || file.id}: ${errText}`,
-              });
-              continue;
-            }
-            const url = dl.result?.data || dl.result?.download_link || (typeof dl.result === 'string' ? dl.result : null);
-            if (!url) {
-              console.warn(`[${this.name}] No download URL for ${file.short_name || file.id}`);
-              db.logEvent({
-                type: 'error', entityType: 'release',
-                message: `TorBox returned no download URL for "${label}" file ${file.short_name || file.id}.`,
-              });
-              continue;
-            }
-
-            const outputPath = path.join(this.config.outputFolder!, file.short_name || `file_${file.id}.mkv`);
-            try {
-              const res = await fetch(url);
-              if (!res.ok) {
-                const body = await res.text().catch(() => '');
-                console.warn(`[${this.name}] Download failed for ${file.short_name || file.id}: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ''}`);
-                db.logEvent({
-                  type: 'error', entityType: 'release',
-                  message: `TorBox HTTP download failed for "${label}": ${res.status} ${res.statusText}`,
-                });
-                continue;
-              }
-              // Stream to disk with live progress — previously this phase
-              // buffered the whole file silently while the job sat at
-              // "cached 100%", looking dead for multi-GB downloads.
-              await this.fetchToFile(res, outputPath, (downloaded, total, speedBps) => {
-                const detail = formatFetchDetail(fileIdx + 1, files.length, downloaded, total, speedBps);
-                const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
-                this.activeDetails.set(label, { state: detail, progress: pct });
-                backgroundJobs.update(jobId, { total: 100, completed: pct ?? 0, detail });
-              });
-              console.log(`[${this.name}] Downloaded ${file.short_name || file.id} -> ${outputPath}`);
+            const res = await this.downloadFileWithRetry({
+              torrentId, file, fileIdx: fileIdx + 1, filesTotal: files.length, label, jobId,
+            });
+            if (res.ok) {
               anyDownloaded = true;
-            } catch (fetchErr) {
-              const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-              console.warn(`[${this.name}] Fetch/write failed for ${file.short_name || file.id}: ${msg}`);
-              db.logEvent({
-                type: 'error', entityType: 'release',
-                message: `TorBox download write failed for "${label}": ${msg}`,
-              });
+            } else if (!firstError) {
+              firstError = res.lastError;
             }
           }
 
@@ -564,10 +675,10 @@ export class TorboxDownloadClient implements DownloadClient {
             db.logEvent({
               type: 'error',
               entityType: 'release',
-              message: `TorBox download for "${label}" marked complete but every file download failed.`,
+              message: `TorBox download for "${label}" marked complete but every file download failed.${firstError ? ` Last error: ${firstError}` : ''}`,
             });
             this.activeDetails.delete(label);
-            failJob('Every file download failed');
+            failJob(`Every file download failed${firstError ? ` (${firstError})` : ''}`);
             return false;
           }
         }

@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { parseInflight, formatBytesShort, formatFetchDetail } from './download_clients/torbox';
+import { parseInflight, formatBytesShort, formatFetchDetail, RETRYABLE_STATUS, MAX_FILE_ATTEMPTS } from './download_clients/torbox';
 import { BackgroundJobRegistry } from './background_jobs';
 import { resolveShowScanDir } from './library_scanner';
 
@@ -59,4 +59,14 @@ test('resolveShowScanDir prefers the owned folder, falls back to sanitized title
   expect(resolveShowScanDir(root, 'Re: Zero', [null, undefined, ''])).toBe(`${root}/Re Zero`);
   // Files outside the root are ignored.
   expect(resolveShowScanDir(root, 'Reacher', ['/other/place/Reacher/x.mkv'])).toBe(`${root}/Reacher`);
+});
+
+test('transient CDN failures are retryable, client errors are not', () => {
+  for (const s of [408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]) {
+    expect(RETRYABLE_STATUS.has(s)).toBe(true);
+  }
+  for (const s of [400, 401, 403, 404, 410, 416]) {
+    expect(RETRYABLE_STATUS.has(s)).toBe(false);
+  }
+  expect(MAX_FILE_ATTEMPTS).toBeGreaterThan(1);
 });
