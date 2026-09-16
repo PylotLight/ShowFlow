@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, AlertCircleIcon, ShieldCheckIcon, HammerIcon, ArrowRightIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, AlertCircleIcon, ShieldCheckIcon, HammerIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
 
@@ -7,6 +7,7 @@ interface ReleaseItem {
   githubReleaseId: number;
   tagName: string;
   name: string | null;
+  body: string | null;
   publishedAt: string | null;
   prerelease: boolean;
   isLikelyCurrent: boolean;
@@ -42,6 +43,8 @@ export function UpdatesPanel() {
   
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
+  const [showOlder, setShowOlder] = React.useState(false);
+  const [notesOpen, setNotesOpen] = React.useState<Record<number, boolean>>({});
   const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
   const [reconnectAttempt, setReconnectAttempt] = React.useState(0);
   const pageRef = React.useRef(1);
@@ -295,6 +298,113 @@ export function UpdatesPanel() {
     finally { setActionLoading(null); }
   }
 
+  // Newest-first from GitHub: the current release and anything newer
+  // (plus in-flight builds) stay expanded; older releases collapse into a
+  // single toggle so the list doesn't grow a row per shipped version.
+  const currentIdx = releases.findIndex(r => r.isLikelyCurrent);
+  const visibleReleases = currentIdx === -1
+    ? releases
+    : releases.filter((r, i) => i <= currentIdx || r.buildInProgress);
+  const olderReleases = currentIdx === -1
+    ? []
+    : releases.filter((r, i) => i > currentIdx && !r.buildInProgress);
+
+  function renderReleaseRow(r: ReleaseItem) {
+    const isCurrent = r.isLikelyCurrent;
+    const isWatchTarget = activeUpdateTag === r.tagName;
+    const build = r.buildDetails;
+    const notesExpanded = !!notesOpen[r.githubReleaseId];
+
+    return (
+      <div key={r.githubReleaseId} className="space-y-2 rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
+        <div className="flex items-start justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-xs text-white/90 truncate font-semibold">{r.tagName}</span>
+              {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded border border-signal/20 font-mono">current</span>}
+              {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 font-mono">pre</span>}
+              {r.buildInProgress && (
+                <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20 font-mono flex items-center gap-1">
+                  <Loader2Icon className="size-2.5 animate-spin" /> CI Building ({build?.durationSeconds ? `${build.durationSeconds}s` : "in progress"})
+                </span>
+              )}
+              {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-400/20 font-mono">missing assets</span>}
+            </div>
+            {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
+            <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono flex-wrap">
+              <span>{r.publishedAt ? new Date(r.publishedAt).toLocaleString() : "—"}</span>
+              {r.assets.length > 0 && <span>Asset: {(r.assets[0]!.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>}
+              {build?.htmlUrl && (
+                <a href={build.htmlUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline flex items-center gap-0.5">
+                  GitHub Workflow <ArrowRightIcon className="size-2.5" />
+                </a>
+              )}
+              {r.body && (
+                <button
+                  onClick={() => setNotesOpen(prev => ({ ...prev, [r.githubReleaseId]: !prev[r.githubReleaseId] }))}
+                  className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
+                >
+                  Release notes
+                  <ChevronDownIcon className={`size-2.5 transition-transform ${notesExpanded ? "" : "-rotate-90"}`} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 ml-3 shrink-0">
+            {/* Action: Watch Build */}
+            {r.buildInProgress && (
+              <Button
+                variant={isWatchTarget ? "default" : "ghost"}
+                size="sm"
+                className="text-xs text-sky-400 hover:text-sky-300 border border-sky-500/20"
+                onClick={() => startWatchBuild(r.tagName)}
+              >
+                <HammerIcon className="size-3 mr-1" />
+                {isWatchTarget ? "Watching..." : "Track Build"}
+              </Button>
+            )}
+
+            {/* Action: Download & Install */}
+            {r.hasRequiredAssets && !isCurrent && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={actionLoading !== null}
+                onClick={() => doInstall(r.githubReleaseId, r.tagName)}
+              >
+                {actionLoading === `install-${r.githubReleaseId}` ? (
+                  <Loader2Icon className="size-3 animate-spin mr-1.5" />
+                ) : (
+                  <DownloadIcon className="size-3 mr-1.5" />
+                )}
+                Update to {r.tagName}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {r.body && notesExpanded && (
+          <div className="rounded bg-black/30 border border-white/5 p-2.5 max-h-64 overflow-y-auto">
+            <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-white/75">{r.body}</pre>
+          </div>
+        )}
+
+        {/* Inline Live Build Tracker Bar if this tag is actively selected */}
+        {isWatchTarget && currentStep === 1 && (
+          <div className="mt-2 p-2.5 rounded bg-sky-950/30 border border-sky-500/30 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Loader2Icon className="size-3.5 animate-spin text-sky-400" />
+              <span className="font-mono text-[11px] text-sky-200">
+                {build ? `Actions Run "${build.name}": status is ${build.status} (${build.durationSeconds ?? 0}s elapsed)` : "Monitoring GitHub Actions release workflow..."}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-sky-400/80">Polling live · {Math.round(pollDelayRef.current / 1000)}s</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* UPDATE PIPELINE PROGRESS CARD */}
@@ -493,85 +603,25 @@ export function UpdatesPanel() {
         )}
         {!loading && releases.length > 0 && (
           <div className="space-y-2">
-            {releases.map((r: ReleaseItem) => {
-              const isCurrent = r.isLikelyCurrent;
-              const isWatchTarget = activeUpdateTag === r.tagName;
-              const build = r.buildDetails;
-
-              return (
-                <div key={r.githubReleaseId} className="space-y-2 rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs text-white/90 truncate font-semibold">{r.tagName}</span>
-                        {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded border border-signal/20 font-mono">current</span>}
-                        {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 font-mono">pre</span>}
-                        {r.buildInProgress && (
-                          <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20 font-mono flex items-center gap-1">
-                            <Loader2Icon className="size-2.5 animate-spin" /> CI Building ({build?.durationSeconds ? `${build.durationSeconds}s` : "in progress"})
-                          </span>
-                        )}
-                        {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-400/20 font-mono">missing assets</span>}
-                      </div>
-                      {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
-                      <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono">
-                        <span>{r.publishedAt ? new Date(r.publishedAt).toLocaleString() : "—"}</span>
-                        {r.assets.length > 0 && <span>Asset: {(r.assets[0]!.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>}
-                        {build?.htmlUrl && (
-                          <a href={build.htmlUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline flex items-center gap-0.5">
-                            GitHub Workflow <ArrowRightIcon className="size-2.5" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-3 shrink-0">
-                      {/* Action: Watch Build */}
-                      {r.buildInProgress && (
-                        <Button
-                          variant={isWatchTarget ? "default" : "ghost"}
-                          size="sm"
-                          className="text-xs text-sky-400 hover:text-sky-300 border border-sky-500/20"
-                          onClick={() => startWatchBuild(r.tagName)}
-                        >
-                          <HammerIcon className="size-3 mr-1" />
-                          {isWatchTarget ? "Watching..." : "Track Build"}
-                        </Button>
-                      )}
-
-                      {/* Action: Download & Install */}
-                      {r.hasRequiredAssets && !isCurrent && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={actionLoading !== null}
-                          onClick={() => doInstall(r.githubReleaseId, r.tagName)}
-                        >
-                          {actionLoading === `install-${r.githubReleaseId}` ? (
-                            <Loader2Icon className="size-3 animate-spin mr-1.5" />
-                          ) : (
-                            <DownloadIcon className="size-3 mr-1.5" />
-                          )}
-                          Update to {r.tagName}
-                        </Button>
-                      )}
-                    </div>
+            {visibleReleases.map(renderReleaseRow)}
+            {olderReleases.length > 0 && (
+              <div className="rounded-lg border border-white/5 overflow-hidden">
+                <button
+                  onClick={() => setShowOlder(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-white/[0.02] transition-colors"
+                >
+                  <span className="font-mono">
+                    {showOlder ? "Hide" : "Show"} previous releases ({olderReleases.length})
+                  </span>
+                  <ChevronDownIcon className={`size-3.5 transition-transform ${showOlder ? "" : "-rotate-90"}`} />
+                </button>
+                {showOlder && (
+                  <div className="space-y-2 p-2 pt-0">
+                    {olderReleases.map(renderReleaseRow)}
                   </div>
-
-                  {/* Inline Live Build Tracker Bar if this tag is actively selected */}
-                  {isWatchTarget && currentStep === 1 && (
-                    <div className="mt-2 p-2.5 rounded bg-sky-950/30 border border-sky-500/30 text-xs flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Loader2Icon className="size-3.5 animate-spin text-sky-400" />
-                        <span className="font-mono text-[11px] text-sky-200">
-                          {build ? `Actions Run "${build.name}": status is ${build.status} (${build.durationSeconds ?? 0}s elapsed)` : "Monitoring GitHub Actions release workflow..."}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono text-sky-400/80">Polling live · {Math.round(pollDelayRef.current / 1000)}s</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                )}
+              </div>
+            )}
             {hasMore && (
               <div className="pt-2 text-center">
                 <Button

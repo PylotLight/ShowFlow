@@ -67,6 +67,39 @@ await Bun.$`git tag ${tag}`;
 
 await Bun.$`git push origin main --tags`;
 
-await Bun.$`gh release create ${tag} --title ${tag} --verify-tag --generate-notes`;
+// Release notes come from CHANGELOG.md's [Unreleased] section so published
+// releases carry the real notes (previously --generate-notes left only an
+// auto compare-link). After a successful release the section rotates into a
+// versioned heading, keeping the changelog accurate per version.
+const changelog = await Bun.file("CHANGELOG.md").text();
+const unreleasedHead = "## [Unreleased]";
+const headIdx = changelog.indexOf(unreleasedHead);
+let notesFile: string | null = null;
+let unreleasedBody = "";
+if (headIdx !== -1) {
+  const bodyStart = headIdx + unreleasedHead.length;
+  const nextHead = changelog.indexOf("\n## ", bodyStart);
+  unreleasedBody = changelog.slice(bodyStart, nextHead === -1 ? undefined : nextHead).trim();
+}
+if (unreleasedBody) {
+  notesFile = `${process.env.TMPDIR ?? "/tmp"}/showflow-release-notes-${version}.md`;
+  await Bun.write(notesFile, `# ${tag}\n\n${unreleasedBody}\n`);
+  await Bun.$`gh release create ${tag} --title ${tag} --verify-tag --notes-file ${notesFile}`;
+} else {
+  await Bun.$`gh release create ${tag} --title ${tag} --verify-tag --generate-notes`;
+}
+
+if (unreleasedBody && headIdx !== -1) {
+  const today = new Date().toISOString().slice(0, 10);
+  const bodyStart = headIdx + unreleasedHead.length;
+  const nextHead = changelog.indexOf("\n## ", bodyStart);
+  const before = changelog.slice(0, bodyStart);
+  const after = nextHead === -1 ? "" : changelog.slice(nextHead);
+  const rotated = `${before}\n\n## [${tag}] - ${today}\n${unreleasedBody}\n${after}`;
+  await Bun.write("CHANGELOG.md", rotated);
+  await Bun.$`git add CHANGELOG.md`;
+  await Bun.$`git commit -m ${`chore: rotate changelog for ${tag}`}`;
+  await Bun.$`git push origin main`;
+}
 
 console.log(`✓ Released ${tag}`);

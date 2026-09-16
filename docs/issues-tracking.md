@@ -313,6 +313,20 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 
 **Fix:** banner cycler — `GET /api/shows/:id/images/backdrops` lists provider options (TVDB fanart 3+15, TMDB voted backdrops, else single metadata fallback); `?index=` selects with URL-matched cache; pick persists via `PATCH /api/shows/:id {config:{backdropIndex}}` (settings-backed, no migration); hover arrows + counter in the UI. Covered by `backdrop_options.test.ts`.
 
+### 19. Updates releases list bloat + empty release notes
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-16
+
+**Findings:** published releases (e.g. v0.1.44) carried only the `--generate-notes` auto compare-link — `release.ts` never used the CHANGELOG. The panel also rendered every release expanded with no notes.
+**Fix:** `release.ts` publishes the `[Unreleased]` section as the notes and rotates it into a versioned heading; backend passes GitHub `body` through `ReleaseSummary`; panel collapses older-than-current into a toggle and adds per-row expandable notes.
+
+### 20. Banner crop beheads title art
+**Status:** [DONE — pending release]
+**Reported:** 2026-09-16 (expanded view clips top of image)
+
+**Root cause:** 21:7 container vs 16:9 art with `object-center` discards the top and bottom symmetrically — where title treatments live.
+**Fix:** crop anchors to the top by default; Top/Ctr/Btm preset toggle on banner hover next to the cycler counter, persisted per show (`backdropPosition` setting, validated, no migration).
+
 ---
 
 ## Backlog / Unprioritised
@@ -348,6 +362,8 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 16 | Toolbar space + Indexer Search name | 2026-09-15 (pending release) |
 | 17 | Probe noise mistaken for crash | 2026-09-16 (pending release) |
 | 18 | Banner backdrop cycling | 2026-09-16 (pending release) |
+| 19 | Updates list bloat + missing release notes | 2026-09-16 (pending release) |
+| 20 | Banner crop beheads title art | 2026-09-16 (pending release) |
 
 ---
 

@@ -217,7 +217,11 @@ export function imageRoutes() {
           const show = db.getShow(req.params.id!);
           if (!show) return errorResponse("Show not found", 404);
           const options = dedupeBackdropOptions(await listBackdropOptions(show, loadConfig()));
-          return json({ options, selected: clampBackdropIndex(options, db.getShowBackdropIndex(show.id)) });
+          return json({
+            options,
+            selected: clampBackdropIndex(options, db.getShowBackdropIndex(show.id)),
+            position: db.getShowBackdropPosition(show.id),
+          });
         } catch (err) {
           return errorResponse(err);
         }

@@ -117,6 +117,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   // Banner backdrop cycler: alternate backdrops the provider knows about.
   const [backdropOptions, setBackdropOptions] = React.useState<{ index: number; url: string }[]>([]);
   const [backdropIndex, setBackdropIndex] = React.useState(0);
+  // Banner focal point: which edge the 21:7 crop anchors to. Top default
+  // keeps title treatments (usually top-weighted) in frame.
+  const [backdropPosition, setBackdropPosition] = React.useState<"top" | "center" | "bottom">("top");
 
   const [status, setStatus] = React.useState<{ ok: boolean; text: string } | null>(null);
   const statusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,10 +146,12 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   React.useEffect(() => {
     setBackdropOptions([]);
     setBackdropIndex(0);
+    setBackdropPosition("top");
     fetch(`/api/shows/${show.id}/images/backdrops`).then(r => r.json()).then(data => {
       const options = Array.isArray(data.options) ? data.options : [];
       setBackdropOptions(options);
       setBackdropIndex(typeof data.selected === "number" ? data.selected : 0);
+      if (data.position === "center" || data.position === "bottom") setBackdropPosition(data.position);
     }).catch(() => {});
   }, [show.id]);
 
@@ -158,6 +163,15 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ config: { backdropIndex: next } }),
+    }).catch(() => {});
+  }
+
+  function setPosition(pos: "top" | "center" | "bottom") {
+    setBackdropPosition(pos);
+    fetch(`/api/shows/${show.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: { backdropPosition: pos } }),
     }).catch(() => {});
   }
 
@@ -818,9 +832,31 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           src={`/api/shows/${show.id}/images/backdrop?index=${backdropIndex}`}
           alt=""
           aria-hidden
-          className="size-full object-cover object-center"
+          className={`size-full object-cover ${backdropPosition === "center" ? "object-center" : backdropPosition === "bottom" ? "object-bottom" : "object-top"}`}
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
+        {/* Focal-point presets: which edge the ultra-wide crop anchors to. */}
+        <div className="absolute bottom-2 right-3 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {(["top", "center", "bottom"] as const).map((pos) => (
+            <button
+              key={pos}
+              onClick={() => setPosition(pos)}
+              title={`Anchor banner crop to ${pos}`}
+              className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+                backdropPosition === pos
+                  ? "bg-signal/25 text-signal font-semibold"
+                  : "bg-black/50 text-white/60 hover:text-white"
+              }`}
+            >
+              {pos === "center" ? "ctr" : pos.slice(0, 3)}
+            </button>
+          ))}
+          {backdropOptions.length > 1 && (
+            <span className="rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70">
+              {backdropIndex + 1}/{backdropOptions.length}
+            </span>
+          )}
+        </div>
         {backdropOptions.length > 1 && (
           <>
             <button
@@ -837,9 +873,6 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
             >
               <ChevronRight className="size-4" />
             </button>
-            <span className="absolute bottom-2 right-3 z-20 rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70 opacity-0 group-hover:opacity-100 transition-opacity">
-              {backdropIndex + 1}/{backdropOptions.length}
-            </span>
           </>
         )}
         <div className="absolute inset-0" style={{

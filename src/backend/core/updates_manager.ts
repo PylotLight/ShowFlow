@@ -107,6 +107,7 @@ export interface ReleaseSummary {
   githubReleaseId: number;
   tagName: string;
   name: string | null;
+  body: string | null;
   publishedAt: string | null;
   prerelease: boolean;
   isLikelyCurrent: boolean;
@@ -183,6 +184,7 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
           githubReleaseId: r.id,
           tagName: r.tag_name,
           name: r.name ?? null,
+          body: typeof r.body === 'string' && r.body.trim() ? r.body : null,
           publishedAt: r.published_at ?? null,
           prerelease: !!r.prerelease,
           isLikelyCurrent: r.tag_name === currentVersion,

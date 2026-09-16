@@ -1090,6 +1090,12 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
     self.setSetting(`backdropIndex.${showId}`, String(Number.isFinite(n) && n > 0 ? n : 0));
   }
 
+  // Banner focal point (top/center/bottom crop anchor). Same settings
+  // backing as the backdrop pick.
+  if (updates.config?.backdropPosition !== undefined) {
+    self.setSetting(`backdropPosition.${showId}`, normalizeBackdropPosition(updates.config.backdropPosition));
+  }
+
   // Apply a library type: bundles root folder + quality profile + indexers
   // (design-brief-platform-ux-systems.md §1). Resolves the identifier the
   // same way saveShow does so a bare id/name or the default type all land on
@@ -1111,6 +1117,18 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
 export function setShowTracking(self: DatabaseManager, showId: string, tracked: boolean) {
   self.drizz.update(schema.episodes).set({ is_tracked: tracked ? 1 : 0 })
     .where(eq(schema.episodes.show_id, showId)).run();
+}
+
+/** Valid banner focal points; anything else falls back to 'top'. */
+export type BackdropPosition = 'top' | 'center' | 'bottom';
+
+export function normalizeBackdropPosition(value: unknown): BackdropPosition {
+  return value === 'center' || value === 'bottom' ? value : 'top';
+}
+
+/** Selected banner focal point for a show. Defaults to 'top' (title art survives the 21:7 crop). */
+export function getShowBackdropPosition(self: DatabaseManager, showId: string): BackdropPosition {
+  return normalizeBackdropPosition(self.getSetting(`backdropPosition.${showId}`));
 }
 
 /** Selected banner backdrop index for a show (detail-page cycler). Defaults to 0. */
