@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Downloads ride out sick edges**: TorBox API calls fail fast (60s) instead of hanging forever; first-byte budget 90s→3min for cold CDN edges on multi-GB files.
+- **Jobs View navigates in-app**: notification View buttons switch views without a full page reload.
 
 ## [v0.1.50] - 2026-09-16
 - **Watch folder ignores in-progress downloads**: `.part/.tmp/.aria2` etc. are never imported (a stalled download looks "size-stable", so the mover was stealing partials mid-download and dropping truncated files in the library). TorBox stages partials in a hidden `.downloading/` dir and adopts v0.1.49 orphans, so already-fetched bytes resume.

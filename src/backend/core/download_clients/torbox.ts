@@ -51,7 +51,11 @@ export function formatBytesShort(bytes: number): string {
 export const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 export const MAX_FILE_ATTEMPTS = 5;
 const RETRY_BACKOFF_MS = [10_000, 30_000, 60_000, 120_000];
-const HEADER_TIMEOUT_MS = 90_000;
+// First-byte budget per attempt. TorBox's CDN can take minutes to start
+// serving a multi-GB file from a cold edge — 90s proved too twitchy in
+// production (back-to-back header timeouts on a 10GB file), so give it 3min.
+// Post-first-byte stalls are still caught by the 2min stall watchdog.
+const HEADER_TIMEOUT_MS = 180_000;
 const STALL_TIMEOUT_MS = 120_000;
 
 /** Human progress line for the file-fetch phase, e.g.

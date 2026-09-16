@@ -163,7 +163,22 @@ export function App() {
                 setSelected(null);
               }}
             />
-            <NotificationsPopover />
+            <NotificationsPopover onOpenLink={(link) => {
+              // Route popover deep-links through client state — no reload.
+              if (link === "/queue") {
+                setActiveNav("queue");
+                setSelected(null);
+                return;
+              }
+              const settingsMatch = link.match(/^\/settings\?tab=([^&]+)/);
+              if (settingsMatch) {
+                setSettingsInitialTab(decodeURIComponent(settingsMatch[1] ?? "general"));
+                setActiveNav("settings");
+                setSelected(null);
+                return;
+              }
+              window.location.assign(link);
+            }} />
             <FeedbackButton />
           </div>
         </header>

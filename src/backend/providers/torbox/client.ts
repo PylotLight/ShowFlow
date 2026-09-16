@@ -34,7 +34,13 @@ export class TorboxClient {
         'Content-Type': 'application/json',
       };
     }
-    const response = await fetch(url, options);
+    // TorBox's API (requestdl especially) occasionally hangs indefinitely.
+    // Fail fast so the download retry loop — not a wedged socket — owns recovery.
+    // A caller-supplied signal (e.g. a longer budget) always wins.
+    const response = await fetch(url, {
+      ...options,
+      signal: options.signal ?? AbortSignal.timeout(60_000),
+    });
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`TorBox API Error (${response.status}): ${errorText}`);

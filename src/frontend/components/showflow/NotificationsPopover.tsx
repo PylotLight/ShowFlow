@@ -61,7 +61,7 @@ type Tab = 'all' | 'alerts' | 'jobs' | 'activity';
 // attention, live background jobs, and the routine activity log. One icon,
 // one panel, filterable — instead of separate bell / spinner / feedback
 // buttons all competing for the same header space.
-export function NotificationsPopover() {
+export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: string) => void }) {
   const [data, setData] = React.useState<NotificationsResponse | null>(null);
   const [jobs, setJobs] = React.useState<BackgroundJob[]>([]);
   const [open, setOpen] = React.useState(false);
@@ -120,6 +120,14 @@ export function NotificationsPopover() {
         setData(prev => (prev ? { ...prev, priority: [], unreadCount: 0 } : prev));
       }
     } catch {}
+  }
+
+  function openLink(link: string) {
+    // In-app navigation when the host provides it — a plain <a> would force
+    // a full page reload and lose all client state.
+    setOpen(false);
+    if (onOpenLink) onOpenLink(link);
+    else window.location.assign(link);
   }
 
   function severityIcon(sev: string) {
@@ -234,7 +242,7 @@ export function NotificationsPopover() {
                       </p>
                     </div>
                     {n.link && (
-                      <a href={n.link} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</a>
+                      <button onClick={() => openLink(n.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</button>
                     )}
                   </div>
                 ))}
@@ -266,7 +274,7 @@ export function NotificationsPopover() {
                       )}
                     </div>
                     {job.link && (
-                      <a href={job.link} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</a>
+                      <button onClick={() => openLink(job.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</button>
                     )}
                   </div>
                 ))}
