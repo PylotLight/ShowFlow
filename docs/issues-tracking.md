@@ -365,6 +365,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 19 | Updates list bloat + missing release notes | 2026-09-16 (pending release) |
 | 20 | Banner crop beheads title art — fixed via Sonarr-style melt, focal presets removed | 2026-09-16 (pending release) |
 | 21 | Settings order: releases under Libraries | 2026-09-16 (pending release) |
+| 22 | Episode search empty for year-suffixed shows (Dark Matter (2024)) | 2026-09-16 (pending release) |
 
 ---
 

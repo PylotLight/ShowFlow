@@ -660,7 +660,7 @@ function Dashboard({
                           <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
                             <span
                               title={ep.showTitle}
-                              className="text-sm font-semibold truncate transition-colors text-white/90 group-hover:text-white"
+                              className="text-sm font-semibold truncate transition-colors text-white/75 group-hover:text-white"
                             >
                               {ep.showTitle}
                             </span>
@@ -781,7 +781,7 @@ function Dashboard({
                                   <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
                                     <span
                                       title={ep.showTitle}
-                                      className="text-xs font-medium text-white/85 truncate transition-colors group-hover:text-white"
+                                      className="text-xs font-medium text-white/70 truncate transition-colors group-hover:text-white"
                                     >
                                       {ep.showTitle}
                                     </span>

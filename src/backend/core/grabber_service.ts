@@ -51,7 +51,15 @@ function seasonIdentifier(season: number): RegExp {
 export function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number, opts?: { absolute?: boolean }): boolean {
   const lower = title.toLowerCase();
   const norm = lower.replace(/[._\s-]+/g, ' ');
-  const showNorm = showTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
+  // A trailing "(YYYY)" suffix (TVDB-style disambiguation, e.g.
+  // "Dark Matter (2024)") is metadata, not title: release names carry the
+  // bare year or none at all, so requiring the parenthesized token drops
+  // every legitimate match. Match on the bare words instead, but reject
+  // when the release carries a *conflicting* year (remake protection).
+  const yearMatch = /\b(19\d{2}|20\d{2})\b/.exec(showTitle);
+  const showYear = yearMatch ? yearMatch[1] : null;
+  const bareTitle = showYear ? showTitle.replace(/\(\d{4}\)/g, '') : showTitle;
+  const showNorm = bareTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
 
   // Extract significant words from the show title (no stopwords, no single chars)
   const showWords = showNorm.split(/\s+/).filter(w => !STOPWORDS.has(w) && w.length > 1);
@@ -60,12 +68,20 @@ export function isRelevantMatch(title: string, showTitle: string, season: number
   // Check how many significant show-title words appear in the release title
   const wordMatches = showWords.filter(w => norm.includes(w)).length;
   const enoughTitleWords = wordMatches >= Math.max(1, Math.ceil(showWords.length * 0.75));
+  if (!enoughTitleWords) return false;
+
+  // Year conflict: the release names a different year than the show.
+  if (showYear) {
+    const releaseYears = new Set<string>();
+    for (const m of norm.matchAll(/\b(19\d{2}|20\d{2})\b/g)) releaseYears.add(m[1]!);
+    if (releaseYears.size > 0 && !releaseYears.has(showYear)) return false;
+  }
 
   // Check for a season/episode identifier using zero-padded flexible regex
   // Handles S01E01, S1E1, S01E1, S1E01, S01E01-08 (packs), S01 E01, etc.
   if (episode != null) {
     const hasEp = new RegExp(`s0*${season}e0*${episode}(?:[^a-z0-9]|$)`, 'i').test(norm);
-    return hasEp && enoughTitleWords;
+    return hasEp;
   }
 
   // Season-wide searches must also carry a season identifier — otherwise
@@ -128,12 +144,17 @@ export class GrabberService {
       return { error: message };
     }
 
+    // Native exact-match indexers (Knaben `search_type: 100%`) require every
+    // query token to appear in the title, so a TVDB-style "Show (2024)"
+    // suffix poisons the query — release names never contain the parens.
+    // Search the bare title; isRelevantMatch still guards the year.
+    const queryTitle = show.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() || show.title;
     const query =
       episode != null
         ? seriesType === 'absolute'
-          ? `${show.title} ${String(episode).padStart(3, '0')}`
-          : `${show.title} S${pad(season)}E${pad(episode)}`
-        : `${show.title} S${pad(season)}`;
+          ? `${queryTitle} ${String(episode).padStart(3, '0')}`
+          : `${queryTitle} S${pad(season)}E${pad(episode)}`
+        : `${queryTitle} S${pad(season)}`;
 
     const label = episode != null
       ? `S${pad(season)}E${pad(episode)}`

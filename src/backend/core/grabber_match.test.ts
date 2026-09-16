@@ -32,3 +32,18 @@ test('episode scope behavior is unchanged', () => {
   expect(isRelevantMatch('Reacher S03E04 1080p', 'Reacher', 3, 4)).toBe(true);
   expect(isRelevantMatch('Reacher S03E05 1080p', 'Reacher', 3, 4)).toBe(false);
 });
+
+test('TVDB year suffix does not sink year-suffixed shows', () => {
+  // "Dark Matter (2024)": the parenthesized year is metadata, not title —
+  // releases carry the bare year or none at all.
+  expect(isRelevantMatch(
+    'Dark.Matter.2024.S02E02.Un.mondo.perfetto.ITA.ENG.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H-265-MeM.GP.mkv',
+    'Dark Matter (2024)', 2, 2)).toBe(true);
+  expect(isRelevantMatch('Dark.Matter.S02E02.1080p', 'Dark Matter (2024)', 2, 2)).toBe(true);
+  expect(isRelevantMatch('Dark.Matter.S02E03.1080p', 'Dark Matter (2024)', 2, 2)).toBe(false);
+  // Remake protection: a conflicting year still rejects.
+  expect(isRelevantMatch('Dark.Matter.2016.S02E02.1080p', 'Dark Matter (2024)', 2, 2)).toBe(false);
+  expect(isRelevantMatch('Dark.Matter.2016.S02E02.1080p', 'Dark Matter', 2, 2)).toBe(true);
+  // Season scope behaves the same.
+  expect(isRelevantMatch('Dark.Matter.2024.S02.2160p', 'Dark Matter (2024)', 2)).toBe(true);
+});

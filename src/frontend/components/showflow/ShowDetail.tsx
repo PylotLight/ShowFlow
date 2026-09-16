@@ -820,7 +820,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           background instead of ending at a hard edge, so there is no crop
           line and no focal anchor to fiddle with. Poster/title row below
           stays outside the fade and renders crisp. */}
-      <section className="group relative z-10 w-full h-[300px] md:h-[380px] shrink-0">
+      <section className="group relative z-10 w-full h-[340px] md:h-[440px] shrink-0">
         <div
           className="absolute inset-0"
           style={{
