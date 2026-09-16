@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-
+- **Fix**: backdrop counter (`1/7`) lifted clear of the content overlap the taller banner introduced.
 ## [v0.1.53] - 2026-09-16
 - **Layout polish**: Recent Activity badges fixed-width so messages align; calendar days roomier with Sonarr-style two-line entries and bigger text; hero banner taller with upward-biased art and a longer melt below the episode panel.
 

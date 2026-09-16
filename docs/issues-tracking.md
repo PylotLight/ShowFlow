@@ -370,6 +370,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 24 | Mover steals in-progress .part into library mid-download | 2026-09-16 (pending release) |
 | 25 | TorBox API hang wedges link requests; View reloads page; 90s first-byte too twitchy | 2026-09-16 (pending release) |
 | 26 | Agenda: wrong tz, provenance overflow, history placement, past-day filter, per-ep search | 2026-09-16 (pending release) |
+| 27 | Taller banner buried backdrop counter — lifted to bottom-16 | 2026-09-16 (pending release) |
 
 ---
 

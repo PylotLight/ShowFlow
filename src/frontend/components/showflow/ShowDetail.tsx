@@ -856,7 +856,9 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           }} />
         </div>
         {backdropOptions.length > 1 && (
-          <span className="absolute bottom-2 right-3 z-20 rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70">
+          // Lifted above the content-overlap zone: the episode panel pulls
+          // up over the banner's fade tail and would bury a bottom-2 pill.
+          <span className="absolute bottom-16 right-3 z-20 rounded-full bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white/70">
             {backdropIndex + 1}/{backdropOptions.length}
           </span>
         )}
