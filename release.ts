@@ -62,7 +62,9 @@ json.version = version;
 await Bun.write("package.json", JSON.stringify(json, null, 2) + "\n");
 
 await Bun.$`git add package.json`;
-await Bun.$`git commit -m ${`chore: bump version to ${version}`}`;
+// [skip ci]: the version bump carries no code change — the release event
+// build right after this is the one that ships, so skip the duplicate run.
+await Bun.$`git commit -m ${`chore: bump version to ${version} [skip ci]`}`;
 await Bun.$`git tag ${tag}`;
 
 await Bun.$`git push origin main --tags`;
@@ -98,7 +100,8 @@ if (unreleasedBody && headIdx !== -1) {
   const rotated = `${before}\n\n## [${tag}] - ${today}\n${unreleasedBody}\n${after}`;
   await Bun.write("CHANGELOG.md", rotated);
   await Bun.$`git add CHANGELOG.md`;
-  await Bun.$`git commit -m ${`chore: rotate changelog for ${tag}`}`;
+  // [skip ci]: changelog-only commit — nothing to build.
+  await Bun.$`git commit -m ${`chore: rotate changelog for ${tag} [skip ci]`}`;
   await Bun.$`git push origin main`;
 }
 

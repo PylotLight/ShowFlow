@@ -46,6 +46,7 @@ export function UpdatesPanel() {
   const [showOlder, setShowOlder] = React.useState(false);
   const [notesOpen, setNotesOpen] = React.useState<Record<number, boolean>>({});
   const [installedReleaseId, setInstalledReleaseId] = React.useState<string | null>(null);
+  const [installedTag, setInstalledTag] = React.useState<string | null>(null);
   const [reconnectAttempt, setReconnectAttempt] = React.useState(0);
   const pageRef = React.useRef(1);
   const pollTimerRef = React.useRef<any>(null);
@@ -226,6 +227,7 @@ export function UpdatesPanel() {
     setActionLoading(`install-${githubReleaseId}`);
     setErr(null);
     setInstalledReleaseId(null);
+    setInstalledTag(null);
     
     const interval = setInterval(() => {
       setDownloadProgress((prev) => (prev < 85 ? prev + 15 : prev));
@@ -250,7 +252,10 @@ export function UpdatesPanel() {
       
       setStepStatus("success");
       setStepMessage(`Release downloaded and verified by supervisor! Ready for activation.`);
-      if (data.releaseId) setInstalledReleaseId(data.releaseId);
+      if (data.releaseId) {
+        setInstalledReleaseId(data.releaseId);
+        setInstalledTag(tagName);
+      }
       fetchAll(true);
     } catch (e) { 
       clearInterval(interval);
@@ -314,6 +319,9 @@ export function UpdatesPanel() {
     const isWatchTarget = activeUpdateTag === r.tagName;
     const build = r.buildDetails;
     const notesExpanded = !!notesOpen[r.githubReleaseId];
+    // Downloaded + verified, awaiting activation — the Update button on
+    // this row becomes Activate so there's no scroll to the status card.
+    const isStaged = installedReleaseId !== null && installedTag === r.tagName;
 
     return (
       <div key={r.githubReleaseId} className="space-y-2 rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
@@ -364,21 +372,37 @@ export function UpdatesPanel() {
               </Button>
             )}
 
-            {/* Action: Download & Install */}
-            {r.hasRequiredAssets && !isCurrent && (
+            {/* Action: Download & Install, then Activate in place once staged */}
+            {isStaged ? (
               <Button
-                variant="secondary"
+                variant="default"
                 size="sm"
                 disabled={actionLoading !== null}
-                onClick={() => doInstall(r.githubReleaseId, r.tagName)}
+                onClick={() => doActivate(installedReleaseId!, r.tagName)}
               >
-                {actionLoading === `install-${r.githubReleaseId}` ? (
+                {actionLoading === `activate-${installedReleaseId}` ? (
                   <Loader2Icon className="size-3 animate-spin mr-1.5" />
                 ) : (
-                  <DownloadIcon className="size-3 mr-1.5" />
+                  <PlayIcon className="size-3 mr-1.5" />
                 )}
-                Update to {r.tagName}
+                Activate Now
               </Button>
+            ) : (
+              r.hasRequiredAssets && !isCurrent && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={actionLoading !== null}
+                  onClick={() => doInstall(r.githubReleaseId, r.tagName)}
+                >
+                  {actionLoading === `install-${r.githubReleaseId}` ? (
+                    <Loader2Icon className="size-3 animate-spin mr-1.5" />
+                  ) : (
+                    <DownloadIcon className="size-3 mr-1.5" />
+                  )}
+                  Update to {r.tagName}
+                </Button>
+              )
             )}
           </div>
         </div>
@@ -615,26 +639,6 @@ export function UpdatesPanel() {
         {!status && !loading && (
           <div className="rounded-lg bg-white/[0.03] p-4 border border-dashed border-white/10 text-center">
             <p className="font-mono text-xs text-muted-foreground">Could not reach supervisor status</p>
-          </div>
-        )}
-        {installedReleaseId && (
-          <div className="rounded-lg bg-signal/10 border border-signal/30 p-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-signal font-medium">Release downloaded & verified</p>
-              <p className="font-mono text-[10px] text-white/60 mt-0.5">{installedReleaseId}</p>
-            </div>
-            <Button
-              variant="default"
-              size="sm"
-              disabled={actionLoading !== null}
-              onClick={() => doActivate(installedReleaseId)}
-            >
-              {actionLoading === `activate-${installedReleaseId}` ? (
-                <Loader2Icon className="size-3 animate-spin" />
-              ) : (
-                "Activate Now"
-              )}
-            </Button>
           </div>
         )}
       </GlassPanel>

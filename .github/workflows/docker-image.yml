@@ -1,8 +1,9 @@
 name: Build & Push Docker Image
 
 on:
-  push:
-    branches: [main]
+  # Push builds disabled: nothing consumes per-merge images (updates ship
+  # via the release tarball), so every main push was a wasted ~1.5min run.
+  # Releases are the sole build trigger.
   release:
     types: [published]
 

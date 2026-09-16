@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Activate in place**: once a release is downloaded + verified, its row swaps Update for Activate Now — no more scrolling to the status card.
 
 ## [v0.1.47] - 2026-09-16
 - **Year-suffixed shows actually match**: a TVDB-style `Show (2024)` suffix no longer poisons indexer queries (Knaben exact-match needs every token) or the title filter (the parenthesized token never appears in release names). Queries use the bare title; matches still reject on a conflicting release year (remake protection). Fixes per-episode Search Releases returning nothing while Indexer Search finds releases.
