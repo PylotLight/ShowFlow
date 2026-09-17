@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.62] - 2026-09-17
 - **Fix**: movie posters no longer 404. A bare numeric TMDB id (legacy rows, hand-added provider ids) is ambiguous — films and series are numbered in separate sequences — so the series lookup retried as a film on 404 instead of giving up. Covers the `/api/images/poster/:source/:id` route, the background artwork warmer, and the backdrop list, so film artwork self-heals with no migration.
 - **Fix**: dropping a film into the watch folder now imports it. The filename parser read the release year (`Thor.2011.…`) as an absolute episode number, which disqualified the file from the movie matcher and sent it to the episode-only resolver: "Could not find show Thor on any configured provider." A lone year-shaped number that equals the film's own year no longer counts as an episode marker, and movie title parsing now cuts at the year, so quality/audio/group tags (`2160p.DV.Ai-Enhanced.RIFE…`) can't leak into the title and miss the library match.
 - **Manual import is movie-aware**: watch-folder listings label film rows `movie` and resolve them against the library without a provider round-trip; the Season/Episodes columns collapse to a Movie badge; assigning a library film routes to the film importer and drops any stale season/episode override; the show picker shows each entry's type + year so a film is distinguishable from a same-titled series. Movie import failures (missing root folder, existing destination) now report instead of answering "Imported" with the file untouched.
