@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Cancel active downloads**: every in-flight item on the Queue page gains a cancel button. TorBox grabs are aborted mid-flight — the poll loop, retry backoffs, and any streaming file fetch all interrupt immediately, the torrent is deleted from the TorBox account so it stops caching/seeding, and the staged `.part` file is cleaned up. Watch-folder imports can likewise be stopped and deleted from the drop folder. Each cancel surfaces a "Cancelled by user" job failure and a log event, so nothing vanishes silently. New `POST /api/system/processing/cancel`; queue item ids are now stable (`torbox:<torrentId>` / `blackhole:<file>`).
 
 ## [v0.1.62] - 2026-09-17
 - **Fix**: movie posters no longer 404. A bare numeric TMDB id (legacy rows, hand-added provider ids) is ambiguous — films and series are numbered in separate sequences — so the series lookup retried as a film on 404 instead of giving up. Covers the `/api/images/poster/:source/:id` route, the background artwork warmer, and the backdrop list, so film artwork self-heals with no migration.

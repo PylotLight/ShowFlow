@@ -94,6 +94,14 @@ export class TorboxClient {
     });
   }
 
+  /** Remove a torrent from the TorBox account (stops their download/seeding). */
+  async deleteTorrent(torrentId: string) {
+    const query = new URLSearchParams({ id: torrentId });
+    return this.request<any>(`/v1/api/torrents/deletetorrent?${query.toString()}`, {
+      method: 'DELETE',
+    });
+  }
+
   /** Lightweight credential/connectivity check - used by the health poller, not the download flow. */
   async getUserInfo() {
     return this.request<any>('/v1/api/user/me', { method: 'GET' });

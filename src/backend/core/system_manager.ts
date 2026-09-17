@@ -99,6 +99,11 @@ export class SystemManager {
     return this.watcher ? this.watcher.getProcessingDetail() : [];
   }
 
+  async cancelProcessing(id: string): Promise<{ ok: boolean; message: string }> {
+    if (!this.watcher) return { ok: false, message: 'Watcher is not running.' };
+    return this.watcher.cancelDownload(id);
+  }
+
   getWatcher(): DownloadManager | null {
     return this.watcher;
   }

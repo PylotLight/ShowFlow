@@ -1,4 +1,4 @@
-import { FileIcon, Loader2Icon, PauseIcon, PlayIcon, RadioIcon, RefreshCwIcon, CloudDownloadIcon } from "lucide-react";
+import { FileIcon, Loader2Icon, PauseIcon, PlayIcon, RadioIcon, RefreshCwIcon, CloudDownloadIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
@@ -58,6 +58,7 @@ function QueuePage() {
   const [events, setEvents] = React.useState<ActivityEvent[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [rescanning, setRescanning] = React.useState(false);
+  const [cancelingId, setCancelingId] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   const refresh = React.useCallback(() => {
@@ -106,6 +107,25 @@ function QueuePage() {
       setMsg({ ok: false, text: "Network error during rescan" });
     } finally {
       setRescanning(false);
+    }
+  }
+
+  async function cancelDownload(item: ProcessingItem) {
+    setCancelingId(item.id);
+    try {
+      const res = await fetch("/api/system/processing/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setMsg({ ok: false, text: data.error || `Failed to cancel "${item.title}"` });
+      else setMsg({ ok: true, text: data.message || `Cancelled "${item.title}"` });
+      refresh();
+    } catch {
+      setMsg({ ok: false, text: "Network error cancelling download" });
+    } finally {
+      setCancelingId(null);
     }
   }
 
@@ -185,10 +205,24 @@ function QueuePage() {
                   )}
                   <span className="font-mono text-xs text-white/85 truncate" title={item.title}>{item.title}</span>
                   {item.progress != null ? (
-                    <span className="text-xs font-semibold text-signal ml-auto shrink-0 tabular-nums">{Math.round(item.progress)}%</span>
+                    <span className="text-xs font-semibold text-signal tabular-nums">{Math.round(item.progress)}%</span>
                   ) : (
-                    <Loader2Icon className="size-3.5 animate-spin text-muted-foreground ml-auto shrink-0" />
+                    <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
                   )}
+                  <button
+                    type="button"
+                    onClick={() => cancelDownload(item)}
+                    disabled={cancelingId === item.id}
+                    title={item.client === "torbox" ? "Cancel download and remove from TorBox" : "Stop import and delete from watch folder"}
+                    aria-label={`Cancel ${item.title}`}
+                    className="ml-auto shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
+                  >
+                    {cancelingId === item.id ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      <XIcon className="size-3.5" />
+                    )}
+                  </button>
                 </div>
                 <div className="mt-2 flex items-center gap-3">
                   <div className="h-1.5 flex-1 rounded-full bg-white/5 overflow-hidden">

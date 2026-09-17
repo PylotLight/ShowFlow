@@ -61,8 +61,8 @@ export class DownloadManager {
     const blackhole = this.clients.get('blackhole') as BlackholeClient | undefined;
     const torbox = this.clients.get('torbox') as TorboxDownloadClient | undefined;
 
-    const local = (blackhole ? blackhole.getProcessingFiles() : []).map((f, i) => ({
-      id: `blackhole-${i}`,
+    const local = (blackhole ? blackhole.getProcessingFiles() : []).map(f => ({
+      id: `blackhole:${f}`,
       title: f,
       client: 'blackhole' as const,
       state: 'importing',
@@ -70,7 +70,7 @@ export class DownloadManager {
     }));
 
     const remote = (torbox ? torbox.getActiveDownloadsDetail() : []).map(d => ({
-      id: `torbox-${d.title}`,
+      id: `torbox:${d.torrentId || d.title}`,
       title: d.title,
       client: 'torbox' as const,
       state: d.state,
@@ -78,6 +78,25 @@ export class DownloadManager {
     }));
 
     return [...local, ...remote];
+  }
+
+  /**
+   * Cancel an in-flight item from getProcessingDetail(), identified by its
+   * `client:id` prefixed id. TorBox entries are removed from the account and
+   * our waiter is aborted; Blackhole entries are deleted from the watch folder.
+   */
+  async cancelDownload(id: string): Promise<{ ok: boolean; message: string }> {
+    if (id.startsWith('torbox:')) {
+      const torbox = this.clients.get('torbox') as TorboxDownloadClient | undefined;
+      if (!torbox) return { ok: false, message: 'TorBox client is not running' };
+      return torbox.cancelDownload(id.slice('torbox:'.length));
+    }
+    if (id.startsWith('blackhole:')) {
+      const blackhole = this.clients.get('blackhole') as BlackholeClient | undefined;
+      if (!blackhole) return { ok: false, message: 'Blackhole client is not running' };
+      return blackhole.deleteFile(id.slice('blackhole:'.length));
+    }
+    return { ok: false, message: `Unknown download id: ${id}` };
   }
 
   getTorboxClient(): TorboxDownloadClient | undefined {

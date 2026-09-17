@@ -115,6 +115,21 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
       },
     },
 
+    "/api/system/processing/cancel": {
+      async POST(req: Request) {
+        try {
+          const body = await req.json().catch(() => null) as { id?: string } | null;
+          const id = body?.id?.trim();
+          if (!id) return errorResponse("Download id is required", 400);
+          const result = await systemManager.cancelProcessing(id);
+          if (!result.ok) return errorResponse(result.message, 400);
+          return json(result);
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
     "/api/tasks": {
       async GET() {
         try {

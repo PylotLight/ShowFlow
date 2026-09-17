@@ -28,6 +28,16 @@ export class TorboxService {
     }
   }
 
+  async deleteTorrent(torrentId: string) {
+    try {
+      const result = await this.client.deleteTorrent(torrentId);
+      return { success: true, result };
+    } catch (error) {
+      console.error(`[TorboxService] Failed to delete torrent ${torrentId}:`, error);
+      return { success: false, error };
+    }
+  }
+
   async requestDownload(options: Parameters<TorboxClient['requestDownloadLink']>[0]) {
     try {
       const result = await this.client.requestDownloadLink(options);

@@ -63,14 +63,17 @@ const RETRY_BACKOFF_MS = [10_000, 30_000, 60_000, 120_000];
  * any file slower than 3 minutes failed all 5 attempts with "The operation
  * timed out". Body stalls remain covered by fetchToFile's stall watchdog.
  */
-async function fetchWithHeaderTimeout(url: string, headers: Record<string, string>): Promise<Response> {
+async function fetchWithHeaderTimeout(url: string, headers: Record<string, string>, cancelSignal?: AbortSignal): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(
     () => ctrl.abort(new Error(`No response headers within ${HEADER_TIMEOUT_MS / 1000}s`)),
     HEADER_TIMEOUT_MS,
   );
+  const signal = cancelSignal
+    ? AbortSignal.any([ctrl.signal, cancelSignal])
+    : ctrl.signal;
   try {
-    return await fetch(url, { headers, signal: ctrl.signal });
+    return await fetch(url, { headers, signal });
   } finally {
     clearTimeout(timer);
   }
@@ -119,6 +122,12 @@ export class TorboxDownloadClient implements DownloadClient {
   private processing = new Set<string>();
   private activeTitles = new Set<string>();
   private activeDetails = new Map<string, { state: string; progress: number | null }>();
+  /** torrentId -> title for every waiter currently running. */
+  private activeTorrents = new Map<string, string>();
+  /** torrentIds the user asked to cancel; waiters bail on their next check. */
+  private cancelled = new Set<string>();
+  /** Per-download abort controllers so a cancel interrupts an in-flight fetch/sleep. */
+  private controllers = new Map<string, AbortController>();
   private watchHandle: ReturnType<typeof watch> | null = null;
 
   constructor(config: Config) {
@@ -260,11 +269,52 @@ export class TorboxDownloadClient implements DownloadClient {
     return [...this.activeTitles];
   }
 
-  getActiveDownloadsDetail(): { title: string; state: string; progress: number | null }[] {
-    return [...this.activeTitles].map(title => ({
-      title,
-      ...(this.activeDetails.get(title) ?? { state: 'queued', progress: null }),
-    }));
+  getActiveDownloadsDetail(): { title: string; torrentId: string; state: string; progress: number | null }[] {
+    return [...this.activeTitles].map(title => {
+      const torrentId = [...this.activeTorrents.entries()].find(([, t]) => t === title)?.[0] ?? '';
+      return {
+        title,
+        torrentId,
+        ...(this.activeDetails.get(title) ?? { state: 'queued', progress: null }),
+      };
+    });
+  }
+
+  /**
+   * Stop an in-flight download: abort our waiter (poll loop, backoff sleeps,
+   * and any streaming fetch), delete the torrent from the TorBox account so
+   * it stops caching/seeding, and clean up the partial `.part` file.
+   */
+  async cancelDownload(torrentId: string): Promise<{ ok: boolean; message: string }> {
+    const tracked = this.activeTorrents.has(torrentId);
+    const title = this.activeTorrents.get(torrentId);
+    this.cancelled.add(torrentId);
+    this.controllers.get(torrentId)?.abort(new Error('Cancelled by user'));
+
+    let deleteFailed = '';
+    try {
+      const res = await this.service.deleteTorrent(torrentId);
+      if (!res.success) {
+        deleteFailed = res.error instanceof Error ? res.error.message : String(res.error ?? 'unknown error');
+      }
+    } catch (e) {
+      deleteFailed = e instanceof Error ? e.message : String(e);
+    }
+
+    if (!tracked) {
+      // No waiter to wind down — don't leave the cancel flag dangling.
+      this.cancelled.delete(torrentId);
+    }
+
+    if (deleteFailed && !tracked) {
+      return { ok: false, message: `Failed to remove download from TorBox: ${deleteFailed}` };
+    }
+    return {
+      ok: true,
+      message: deleteFailed
+        ? `Cancelled locally, but TorBox removal failed: ${deleteFailed}`
+        : `Cancelled ${title ? `"${title}"` : `torrent ${torrentId}`}`,
+    };
   }
 
   async submitReleaseBackground(release: { magnetUrl?: string; downloadUrl?: string; infoHash?: string; title: string }): Promise<{ ok: boolean; message: string }> {
@@ -360,10 +410,48 @@ export class TorboxDownloadClient implements DownloadClient {
 
   private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
     this.markInflight({ torrentId, title: label });
+    this.activeTorrents.set(torrentId, label);
+    this.controllers.set(torrentId, new AbortController());
     try {
       return await this.waitForDownloadInner(torrentId, label);
     } finally {
+      this.activeTorrents.delete(torrentId);
+      this.controllers.delete(torrentId);
+      this.cancelled.delete(torrentId);
       this.clearInflight(torrentId);
+    }
+  }
+
+  /** setTimeout that rejects early when the download is cancelled, so backoff
+   *  and poll waits never delay a cancel by up to two minutes. */
+  private sleep(ms: number, cancelSignal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (cancelSignal) cancelSignal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        const reason = cancelSignal?.reason;
+        reject(reason instanceof Error ? reason : new Error('Cancelled by user'));
+      };
+      cancelSignal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private isCancelled(torrentId: string): boolean {
+    return this.cancelled.has(torrentId);
+  }
+
+  /** Retry backoff that resolves false normally, or true (cleaning up the
+   *  partial file) if the download was cancelled while waiting. */
+  private async backoffOrCancelled(ms: number, partPath: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.sleep(ms, signal);
+      return false;
+    } catch {
+      await unlink(partPath).catch(() => {});
+      return true;
     }
   }
 
@@ -444,6 +532,7 @@ export class TorboxDownloadClient implements DownloadClient {
     jobId: string;
   }): Promise<{ ok: boolean; lastError: string }> {
     const { torrentId, file, fileIdx, filesTotal, label, jobId } = args;
+    const cancelSignal = this.controllers.get(torrentId)?.signal;
     const fileName = file.short_name || `file_${file.id}.mkv`;
     const outputPath = path.join(this.config.outputFolder!, fileName);
     // Stage the partial download in a hidden subdir, NOT next to the final
@@ -471,6 +560,10 @@ export class TorboxDownloadClient implements DownloadClient {
     };
 
     for (let attempt = 1; attempt <= MAX_FILE_ATTEMPTS; attempt++) {
+      if (this.isCancelled(torrentId)) {
+        await unlink(partPath).catch(() => {});
+        return { ok: false, lastError: 'Cancelled by user' };
+      }
       const tag = `(attempt ${attempt}/${MAX_FILE_ATTEMPTS})`;
       publish(`Requesting download link for file ${fileIdx}/${filesTotal} ${tag}`, 0);
 
@@ -491,7 +584,7 @@ export class TorboxDownloadClient implements DownloadClient {
         console.warn(`[${this.name}] ${tag} No download URL for ${fileName}: ${lastError}`);
         if (attempt < MAX_FILE_ATTEMPTS) {
           publish(`Link request failed ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
-          await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+          if (await this.backoffOrCancelled(RETRY_BACKOFF_MS[attempt - 1]!, partPath, cancelSignal)) return { ok: false, lastError: 'Cancelled by user' };
         }
         continue;
       }
@@ -504,21 +597,21 @@ export class TorboxDownloadClient implements DownloadClient {
 
       try {
         const headers: Record<string, string> = startOffset > 0 ? { Range: `bytes=${startOffset}-` } : {};
-        const res = await fetchWithHeaderTimeout(url, headers);
+        const res = await fetchWithHeaderTimeout(url, headers, cancelSignal);
 
         if (startOffset > 0 && res.status !== 206) {
           // Server ignored Range — restart from zero rather than corrupt.
           console.warn(`[${this.name}] ${tag} Range ignored (HTTP ${res.status}) for ${fileName}; restarting`);
           await unlink(partPath).catch(() => {});
           startOffset = 0;
-          const res2 = await fetchWithHeaderTimeout(url, {});
+          const res2 = await fetchWithHeaderTimeout(url, {}, cancelSignal);
           if (!res2.ok) {
             lastError = `HTTP ${res2.status} ${res2.statusText}`;
             if (!RETRYABLE_STATUS.has(res2.status)) break;
             console.warn(`[${this.name}] ${tag} Download failed for ${fileName}: ${lastError}`);
             if (attempt < MAX_FILE_ATTEMPTS) {
               publish(`${lastError} ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
-              await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+              if (await this.backoffOrCancelled(RETRY_BACKOFF_MS[attempt - 1]!, partPath, cancelSignal)) return { ok: false, lastError: 'Cancelled by user' };
             }
             continue;
           }
@@ -545,7 +638,7 @@ export class TorboxDownloadClient implements DownloadClient {
           console.warn(`[${this.name}] ${tag} Download failed for ${fileName}: ${lastError}`);
           if (attempt < MAX_FILE_ATTEMPTS) {
             publish(`${lastError} ${tag} — retrying in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
-            await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+            if (await this.backoffOrCancelled(RETRY_BACKOFF_MS[attempt - 1]!, partPath, cancelSignal)) return { ok: false, lastError: 'Cancelled by user' };
           }
           continue;
         }
@@ -559,11 +652,15 @@ export class TorboxDownloadClient implements DownloadClient {
         console.log(`[${this.name}] Downloaded ${fileName} -> ${outputPath}`);
         return { ok: true, lastError: '' };
       } catch (fetchErr) {
+        if (this.isCancelled(torrentId)) {
+          await unlink(partPath).catch(() => {});
+          return { ok: false, lastError: 'Cancelled by user' };
+        }
         lastError = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
         console.warn(`[${this.name}] ${tag} Fetch/write failed for ${fileName}: ${lastError}`);
         if (attempt < MAX_FILE_ATTEMPTS) {
           publish(`Connection failed ${tag} — resuming in ${RETRY_BACKOFF_MS[attempt - 1]! / 1000}s`, 0);
-          await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]!));
+          if (await this.backoffOrCancelled(RETRY_BACKOFF_MS[attempt - 1]!, partPath, cancelSignal)) return { ok: false, lastError: 'Cancelled by user' };
         }
       }
     }
@@ -593,12 +690,25 @@ export class TorboxDownloadClient implements DownloadClient {
       backgroundJobs.fail(jobId, message);
     };
 
+    const finishCancelled = (): boolean => {
+      this.activeDetails.delete(label);
+      failJob('Cancelled by user');
+      db.logEvent({
+        type: 'skip',
+        entityType: 'release',
+        message: `Cancelled download "${label}" (torrent ${torrentId}).`,
+      });
+      console.log(`[${this.name}] Cancelled download "${label}" (torrent ${torrentId})`);
+      return false;
+    };
+
     const maxAttempts = 600; // ~100 minutes with the adaptive schedule below
     let attempts = 0;
     let lastLoggedState = '';
     let transientFailures = 0;
 
     while (attempts < maxAttempts) {
+      if (this.isCancelled(torrentId)) return finishCancelled();
       let status: Awaited<ReturnType<TorboxService['getStatus']>> | null = null;
       try {
         status = await this.service.getStatus(torrentId);
@@ -696,6 +806,7 @@ export class TorboxDownloadClient implements DownloadClient {
           let anyDownloaded = false;
           let firstError = '';
           for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+            if (this.isCancelled(torrentId)) return finishCancelled();
             const file = files[fileIdx]!;
             const res = await this.downloadFileWithRetry({
               torrentId, file, fileIdx: fileIdx + 1, filesTotal: files.length, label, jobId,
@@ -728,7 +839,11 @@ export class TorboxDownloadClient implements DownloadClient {
       // Slightly back off while we're waiting — keeps log noise down and is
       // kinder to TorBox's rate limits during long cache waits.
       const delayMs = attempts < 30 ? 10_000 : attempts < 120 ? 15_000 : 20_000;
-      await new Promise(r => setTimeout(r, delayMs));
+      try {
+        await this.sleep(delayMs, this.controllers.get(torrentId)?.signal);
+      } catch {
+        return finishCancelled();
+      }
     }
 
     console.error(`[${this.name}] Torrent ${torrentId} did not complete within time limit (${maxAttempts} polls)`);
