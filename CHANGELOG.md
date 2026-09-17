@@ -3,10 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.59] - 2026-09-17
 - **TMDB auth fixed**: v4 read-access tokens (JWTs starting `eyJ…`) now ride the `Authorization: Bearer` header per TMDB's app auth docs instead of `?api_key=` (which always 401s); v3 keys keep using `api_key`. Either paste works — settings labels say so.
 - **Browse missed releases**: Recently Released rows for aired-but-missing episodes now show a Browse pill that opens the per-episode release browser scoped to that exact episode.
 - **Softer images**: posters fade + settle in over 500ms (opacity/scale, reduced-motion safe) with the skeleton held underneath until the fade completes — no more pop-in.
 - **Faster releases**: app + supervisor compile in one Docker layer (supervisor minified); the release tarball is extracted from the just-built image instead of a second bun install + compile — cuts ~1-2min per release and guarantees tarball == image bytes.
+
 ## [v0.1.58] - 2026-09-17
 - **Images serve DB-only**: poster routes never touch the network — a miss enqueues a bounded background warm (4 concurrent, 10min failure backoff) and returns 404 immediately; PosterImage retries while warming, then falls back cleanly. No more grid stalls behind live TVDB/TMDB fetches.
 - **Movie-aware scanner**: files under *Movies* library roots that don't look like episodes are skipped silently with a summary count — no more per-file "Show not found / Could not parse" spam every scan.
