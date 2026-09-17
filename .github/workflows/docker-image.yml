@@ -99,6 +99,8 @@ jobs:
         run: tar -czf showflow-${{ github.sha }}.tar.gz -C "$PWD" showflow manifest.json migrations
 
       - name: Upload release asset
-        run: gh release upload ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
+        # No checkout in this job (files come from the image), so gh can't
+        # resolve the repo from a git remote — pass it explicitly.
+        run: gh release upload --repo ${{ github.repository }} ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix**: release asset upload no longer fails with `not a git repository`. The v0.1.59 "faster releases" change dropped the `publish-release-assets` job's checkout, but `gh release upload` still resolved the repo from a git remote — so every release since built the image yet uploaded nothing. The command now passes `--repo` explicitly. (v0.1.61 shipped with no tarball; re-released as v0.1.62.)
 
 ## [v0.1.61] - 2026-09-17
 - **Fix**: release asset publishing no longer dies on `invalid reference format` — the image-extract step pulled the digest under the repo's raw mixed-case name (`PylotLight/ShowFlow`), which Docker rejects; the ref is now lowercased like the tag side already was.
