@@ -19,22 +19,44 @@ export interface ParsedMovie {
 /**
  * Splits a movie filename into a probable title + year. Returns null when
  * there is nothing title-like left (pure tags/numbers).
+ *
+ * Convention-first: in a scene release the title sits BEFORE the (19|20)YY
+ * year and everything after it is quality/audio/group noise ("2160p", "DV",
+ * "TrueHD.7.1", "GROUP"). So when a year is present we take the leading
+ * segment as the title instead of trying to scrub the whole name — scrubbing
+ * leaks unknown tags (an "Ai-Enhanced" / "RIFE" upscaled rip) into the title
+ * and the lookup misses. No year → fall back to scrubbing the whole name.
  */
 export function parseMovieFilename(filename: string): ParsedMovie | null {
   const base = path.basename(filename).replace(/\.[a-z0-9]{2,4}$/i, '');
-  let s = base.replace(/[._]+/g, ' ').replace(/-/g, ' ');
-  let year: number | null = null;
-  const ym = /\b(19\d{2}|20\d{2})\b/.exec(s);
+  const spaced = base.replace(/[._]+/g, ' ');
+  const ym = /\b(19\d{2}|20\d{2})\b/.exec(spaced);
   if (ym) {
-    year = parseInt(ym[1]!, 10);
-    s = s.replace(ym[0], ' ');
+    const year = parseInt(ym[1]!, 10);
+    // Everything before the year is the title; drop any opening bracket the
+    // year-cut landed inside ("Dune (2021)" → lead "Dune (") and trailing
+    // separators, then normalize whitespace.
+    const lead = spaced
+      .slice(0, ym.index)
+      .replace(/[\[\(\{<].*$/, '')
+      .replace(/[._\-\s]+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (lead.length >= 2) return { title: lead, year };
+    // Year glued to the front ("2012.mkv") — no title before it.
+    const tail = spaced
+      .slice(ym.index + ym[0].length)
+      .replace(MOVIE_NOISE, ' ')
+      .replace(/[\[\](){}]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (tail.length < 2) return null;
+    return { title: tail.replace(/\s+[A-Z0-9]{2,8}$/, '').trim(), year };
   }
-  s = s.replace(MOVIE_NOISE, ' ').replace(/[\[\](){}]/g, ' ').replace(/\s+/g, ' ').trim();
-  // Trailing release-group tag ("…x264-GROUP" → "… GROUP" after the dash
-  // split above): an all-caps tail token is a group, not the title.
+  let s = spaced.replace(/-/g, ' ').replace(MOVIE_NOISE, ' ').replace(/[\[\](){}]/g, ' ').replace(/\s+/g, ' ').trim();
   s = s.replace(/\s+[A-Z0-9]{2,8}$/, '').trim();
   if (s.length < 2) return null;
-  return { title: s, year };
+  return { title: s, year: null };
 }
 
 export interface MovieShowHit {

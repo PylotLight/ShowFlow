@@ -28,6 +28,55 @@ import type { DownloadClient } from './types';
  */
 const INCOMPLETE_SUFFIXES = ['.part', '.tmp', '.partial', '.aria2', '.!qb', '.bc!', '.crdownload'];
 
+/**
+ * Content hash for duplicate detection.
+ *
+ * Full-file SHA-256 was the most expensive thing the importer did on a film
+ * drop: a 50GB remux means 50GB of disk → page cache → hasher, minutes of
+ * I/O and real memory pressure in a limited pod, all to answer "have I seen
+ * this file before?". Sonarr/Radarr solved this with a *partial* hash: file
+ * size plus sampled slices. A collision needs identical size AND identical
+ * head/middle/tail bytes — for media that means the same file.
+ *
+ * Files at or under HASH_FULL_LIMIT keep the historical whole-file digest
+ * byte-for-byte, so every `processed_files` row written before this existed
+ * still dedupes. Only large drops move to the sampled scheme, and the
+ * `size:` prefix domain-separates those values from any legacy hash.
+ */
+export const HASH_CHUNK = 4 * 1024 * 1024; // 4MiB read slice
+export const HASH_FULL_LIMIT = 512 * 1024 * 1024; // ≤512MB: whole file
+const HASH_SAMPLE_COUNT = 3; // head / middle / tail
+
+export async function hashFileForDedupe(filePath: string): Promise<string> {
+  const file = Bun.file(filePath);
+  const size = file.size;
+  const hasher = new Bun.CryptoHasher('sha256');
+
+  // Regions to read, as [start, end) pairs.
+  const regions: Array<[number, number]> = [];
+  if (size <= HASH_FULL_LIMIT) {
+    regions.push([0, size]);
+  } else {
+    // Size first: it domains-separates a sampled digest from any historical
+    // whole-file hash and makes each slice's position part of the identity.
+    hasher.update(`size:${size}:`);
+    const window = Math.max(1, Math.min(HASH_CHUNK, Math.floor(size / HASH_SAMPLE_COUNT)));
+    const starts = [0, Math.floor((size - window) / 2), size - window];
+    for (let i = 0; i < HASH_SAMPLE_COUNT; i++) regions.push([starts[i]!, starts[i]! + window]);
+  }
+
+  // Fixed-size slices bound peak memory to one chunk regardless of file
+  // size — never rely on the runtime's own stream chunking here.
+  for (const [from, to] of regions) {
+    for (let off = from; off < to; off += HASH_CHUNK) {
+      const end = Math.min(off + HASH_CHUNK, to);
+      const buf = await file.slice(off, end).arrayBuffer();
+      hasher.update(new Uint8Array(buf));
+    }
+  }
+  return hasher.digest('hex');
+}
+
 export function isIncompleteDownloadFile(filename: string): boolean {
   const base = path.basename(filename).toLowerCase();
   return INCOMPLETE_SUFFIXES.some((s) => base.endsWith(s));
@@ -338,6 +387,7 @@ export class BlackholeClient implements DownloadClient {
     fullPath: string;
     show?: string;
     showId?: string;
+    kind?: 'movie' | 'episode';
     season?: number;
     episodes?: number[];
     existingFile?: string;
@@ -353,6 +403,7 @@ export class BlackholeClient implements DownloadClient {
       fullPath: string;
       show?: string;
       showId?: string;
+      kind?: 'movie' | 'episode';
       season?: number;
       episodes?: number[];
       existingFile?: string;
@@ -368,6 +419,23 @@ export class BlackholeClient implements DownloadClient {
         const fullPath = path.join(folder, filename);
 
         const entry: any = { filename, fullPath, resolved: false, held: this.isHeldForManual(fullPath) };
+
+        // Movie first: the oracle is episode-only, so a film filename either
+        // 404s through every provider or (worse) grabs a same-titled series'
+        // episode list and reports a bogus S/E. A movie match resolves
+        // instantly against the library with no network round-trip.
+        const movieHit = this.matchMovieFile(filename);
+        if (movieHit) {
+          entry.kind = 'movie';
+          entry.show = movieHit.showTitle;
+          entry.showId = movieHit.showId;
+          entry.resolved = true;
+          const movieFile = db.getMovieFile(movieHit.showId);
+          if (movieFile?.file_path) entry.existingFile = path.basename(movieFile.file_path);
+          results.push(entry);
+          continue;
+        }
+
         try {
           const result = await this.oracle.resolveForList(
             filename,
@@ -377,13 +445,18 @@ export class BlackholeClient implements DownloadClient {
           maybeForcedGc();
           BlackholeClient.mem('manual list resolve ' + filename.slice(0, 40));
           if (result) {
+            entry.kind = 'episode';
             entry.show = result.show.title;
-            entry.showId = result.show.id;
+            // The UI feeds showId straight into /api/shows/:id/seasons and
+            // into the force-import grab hint, both of which key on the
+            // internal library id — the oracle's Show.id is the *provider*
+            // id, so translate it here or every picker silently 404s.
+            const existingShow = db.getShowByProvider(result.show.provider, result.show.id);
+            entry.showId = existingShow?.id ?? result.show.id;
             entry.season = result.season;
             entry.episodes = result.episodes;
             entry.resolved = true;
 
-            const existingShow = db.getShowByProvider(result.show.provider, result.show.id);
             if (existingShow && entry.season != null && entry.episodes?.length) {
               const existingEp = db.getEpisode(existingShow.id, entry.season, entry.episodes[0]);
               if (existingEp?.file_path) {
@@ -392,7 +465,13 @@ export class BlackholeClient implements DownloadClient {
             }
           } else {
             const diag = this.oracle.getDiagnostics();
-            if (!diag.parsed?.show) {
+            // A filename that looks like a film but didn't match the library
+            // needs a different hint than "add the show" — the user usually
+            // HAS the title and just hasn't added the movie entry yet.
+            const film = parseMovieFilename(filename);
+            if (film && !diag.parsed?.episodes?.length && diag.parsed?.season == null) {
+              entry.error = `No library movie for "${film.title}${film.year ? ` (${film.year})` : ''}" — add the film, or Match Show to pick one`;
+            } else if (!diag.parsed?.show) {
               entry.error = "Could not parse show name or episode numbers from filename";
             } else {
               entry.error = `Could not match "${diag.parsed.show}" against existing library shows`;
@@ -469,16 +548,28 @@ export class BlackholeClient implements DownloadClient {
 
   /**
    * Library movie match for a watch-folder filename (#33). Returns a hit
-   * only when the name carries NO season/episode markers (episode files
+   * only when the name carries NO real season/episode markers (episode files
    * must keep flowing to the oracle) and parses to a title matching a
    * library movie show.
+   *
+   * "Real" excludes the case that made bare film drops fail: the parser reads
+   * the release YEAR (Thor.2011… → absoluteNumbers [2011]) as an absolute
+   * episode number. A year-shaped 4-digit number that equals the movie's own
+   * parsed year is not an episode marker, so we still take the movie path.
    */
   private matchMovieFile(filename: string): MovieShowHit | null {
     const parsed = new FilenameParser().parse(filename);
-    if (parsed && (parsed.season !== undefined || (parsed.episodes?.length ?? 0) > 0 || (parsed.absoluteNumbers?.length ?? 0) > 0)) {
+    const movie = parseMovieFilename(filename);
+    if (parsed && (parsed.season !== undefined || (parsed.episodes?.length ?? 0) > 0)) {
       return null;
     }
-    const movie = parseMovieFilename(filename);
+    const abs = parsed?.absoluteNumbers ?? [];
+    if (abs.length > 0) {
+      // Absolute numbers that are NOT just the film's release year mean a
+      // genuine absolute-numbered episode (anime) — leave it to the oracle.
+      const onlyYear = abs.length === 1 && movie?.year != null && abs[0] === movie.year;
+      if (!onlyYear) return null;
+    }
     if (!movie) return null;
     return findMovieShow(movie.title, movie.year);
   }
@@ -499,7 +590,8 @@ export class BlackholeClient implements DownloadClient {
     const show = db.getShow(showId);
     if (!show) {
       debugLog(`Movie import: show ${showId} vanished, holding ${filename}`);
-      if (!opts?.force) this.holdForManual(fullPath);
+      if (opts?.force) throw new Error(`Movie show ${showId} no longer exists in the library.`);
+      this.holdForManual(fullPath);
       return;
     }
     db.logPipelineEvent({
@@ -514,7 +606,8 @@ export class BlackholeClient implements DownloadClient {
       console.error(`[${this.name}] ${message}`);
       db.logEvent({ type: 'error', entityType: 'file', message });
       db.logPipelineEvent({ showId, stage: 'FAILED', eventType: 'import_failed', message, releaseTitle: filename });
-      if (!opts?.force) this.holdForManual(fullPath);
+      if (opts?.force) throw new Error(message);
+      this.holdForManual(fullPath);
       return;
     }
 
@@ -579,7 +672,10 @@ export class BlackholeClient implements DownloadClient {
       throw new Error(`Failed to move ${fullPath} -> ${finalPath}: ${moveErr instanceof Error ? moveErr.message : moveErr}.`);
     }
     if (movedTo === null) {
-      if (!opts?.force) this.holdForManual(fullPath);
+      const message = `Destination already exists for movie "${show.title}" (${finalPath}). Nothing imported.`;
+      console.warn(`[${this.name}] ${message}`);
+      if (opts?.force) throw new Error(message);
+      this.holdForManual(fullPath);
       return;
     }
     this.releaseManualHold(fullPath);
@@ -697,9 +793,21 @@ export class BlackholeClient implements DownloadClient {
       // landing in holdForManual. When the filename carries no
       // season/episode markers, try the library movie matcher FIRST and
       // import the film; anything unmatched falls through to the normal
-      // episode path below. Explicit show hints (manual import) always take
-      // the episode path.
-      if (!opts?.showId) {
+      // episode path below.
+      if (opts?.showId) {
+        // Manual import with an explicit pick: honour it. A movie show gets
+        // the film importer (no S/E machinery); series picks continue on the
+        // oracle path so season/episode overrides keep working.
+        const picked = db.getShow(opts.showId);
+        if (picked && (picked.series_type ?? 'standard') === 'movie') {
+          await this.importMovieFile(filename, fullPath, hash, {
+            showId: picked.id,
+            showTitle: picked.title,
+            showYear: picked.year ?? null,
+          }, opts);
+          return;
+        }
+      } else {
         const movieHit = this.matchMovieFile(filename);
         if (movieHit) {
           await this.importMovieFile(filename, fullPath, hash, movieHit, opts);
@@ -766,6 +874,17 @@ export class BlackholeClient implements DownloadClient {
         errorMessage += ` Closest matches on ${bestAttempt.provider}: ${similarShows}.`;
       } else {
         errorMessage += ` No matching shows found on tmdb, tvdb, or anilist.`;
+      }
+    }
+
+    // The movie fast-path already ran and found no library film by that
+    // title — say so, because "search the TV providers for Thor" is a dead
+    // end for a file that is obviously a movie drop.
+    if (!opts?.showId) {
+      const film = parseMovieFilename(filename);
+      const noEpisodeMarkers = parsed?.season == null && !(parsed?.episodes?.length ?? 0);
+      if (film && noEpisodeMarkers && !findMovieShow(film.title, film.year)) {
+        errorMessage += ` "${film.title}${film.year ? ` (${film.year})` : ''}" looks like a movie: add it to the library first, or force-import it onto a movie entry.`;
       }
     }
 
@@ -1179,19 +1298,9 @@ export class BlackholeClient implements DownloadClient {
 
   private async hashFile(filePath: string): Promise<string> {
     BlackholeClient.mem('hash start');
-    const hasher = new Bun.CryptoHasher('sha256');
-    // Read in fixed-size slices rather than relying on Bun.file().stream()
-    // chunking — the runtime (esp. linux binaries) may yield the whole file
-    // as one buffer. A fixed slice bounds memory to HASH_CHUNK regardless.
-    const file = Bun.file(filePath);
-    const HASH_CHUNK = 4 * 1024 * 1024; // 4MiB
-    for (let off = 0; off < file.size; off += HASH_CHUNK) {
-      const end = Math.min(off + HASH_CHUNK, file.size);
-      const buf = await file.slice(off, end).arrayBuffer();
-      hasher.update(new Uint8Array(buf));
-    }
+    const hash = await hashFileForDedupe(filePath);
     BlackholeClient.mem('hash end');
-    return hasher.digest('hex');
+    return hash;
   }
 
   private async moveFile(
@@ -1225,33 +1334,23 @@ export class BlackholeClient implements DownloadClient {
       if (err?.code === 'EXDEV' || err?.code === 'EACCES' || err?.code === 'EPERM') {
         // Cross-device copy or destination directory write-blocked (e.g. a
         // hostPath volume owned by a different uid than the container). Fall
-        // back to read+write+delete so we degrade gracefully instead of
-        // erroring out. Copy is done in bounded slices so peak memory never
-        // scales with file size.
-        const srcFile = Bun.file(src);
-        const copyChunk = 16 * 1024 * 1024; // 16MiB
-        const { createWriteStream } = await import('node:fs');
-        const ws = createWriteStream(finalDest, { flags: 'w' });
+        // back to copy+delete so we degrade gracefully instead of erroring
+        // out. Same-mount drops never get here — `rename` is a metadata
+        // operation, instant for a 50GB file.
+        //
+        // `copyFile` maps to copy_file_range(2) on Linux: the kernel moves
+        // pages between the page caches without ever copying into our
+        // address space, so a 50GB remux costs no JS heap and no per-chunk
+        // event-loop yield. The chunked stream below is only the fallback for
+        // filesystems where the kernel fast path isn't supported (ENOTSUP/
+        // EXDEV on the copy itself).
         try {
-          for (let off = 0; off < srcFile.size; off += copyChunk) {
-            const end = Math.min(off + copyChunk, srcFile.size);
-            const buf = await srcFile.slice(off, end).arrayBuffer();
-            const chunk = new Uint8Array(buf);
-            if (!ws.write(chunk)) {
-              await new Promise<void>((res, rej) => {
-                ws.once('drain', res);
-                ws.once('error', rej);
-              });
-            }
-          }
-          await new Promise<void>((res, rej) => {
-            ws.end();
-            ws.once('finish', res);
-            ws.once('error', rej);
-          });
-        } catch (e) {
-          ws.destroy();
-          throw e;
+          const { copyFile } = await import('node:fs/promises');
+          await copyFile(src, finalDest);
+        } catch (copyErr: any) {
+          if (!['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EINVAL'].includes(copyErr?.code)) throw copyErr;
+          debugLog('kernel-side copy unsupported, falling back to chunked stream', { code: copyErr?.code });
+          await this.copyFileChunked(src, finalDest);
         }
         await unlink(src);
       } else {
@@ -1260,5 +1359,35 @@ export class BlackholeClient implements DownloadClient {
     }
 
     return finalDest;
+  }
+
+  /** Bounded-memory userspace copy (16MiB slices) for filesystems where
+   *  copy_file_range(2) is unavailable. Peak RSS stays ~16MiB per file. */
+  private async copyFileChunked(src: string, dest: string): Promise<void> {
+    const srcFile = Bun.file(src);
+    const copyChunk = 16 * 1024 * 1024; // 16MiB
+    const { createWriteStream } = await import('node:fs');
+    const ws = createWriteStream(dest, { flags: 'w' });
+    try {
+      for (let off = 0; off < srcFile.size; off += copyChunk) {
+        const end = Math.min(off + copyChunk, srcFile.size);
+        const buf = await srcFile.slice(off, end).arrayBuffer();
+        const chunk = new Uint8Array(buf);
+        if (!ws.write(chunk)) {
+          await new Promise<void>((res, rej) => {
+            ws.once('drain', res);
+            ws.once('error', rej);
+          });
+        }
+      }
+      await new Promise<void>((res, rej) => {
+        ws.end();
+        ws.once('finish', res);
+        ws.once('error', rej);
+      });
+    } catch (e) {
+      ws.destroy();
+      throw e;
+    }
   }
 }

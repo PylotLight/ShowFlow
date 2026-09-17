@@ -14,6 +14,8 @@ interface WatchFile {
   fullPath: string;
   show?: string;
   showId?: string;
+  /** Episode-only resolutions carry season/episode data; films never do. */
+  kind?: 'movie' | 'episode';
   season?: number;
   episodes?: number[];
   existingFile?: string;
@@ -31,6 +33,7 @@ interface LibraryShow {
   id: string;
   title: string;
   year?: number;
+  seriesType?: string;
 }
 
 interface EpisodeOverride {
@@ -118,7 +121,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         if (Array.isArray(data)) {
-          setLibraryShows(data.map((s) => ({ id: s.id, title: s.title, year: s.year })));
+          setLibraryShows(data.map((s) => ({ id: s.id, title: s.title, year: s.year, seriesType: s.seriesType })));
         }
       })
       .catch(() => {});
@@ -132,6 +135,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     if (!Array.isArray(files)) return;
     const showIds = new Set<string>();
     for (const f of files) {
+      if (f.kind === 'movie' || assignedShows[f.filename]?.seriesType === 'movie') continue;
       const id = assignedShows[f.filename]?.id ?? f.showId;
       if (id) {
         showIds.add(id);
@@ -191,26 +195,41 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
       ...prev,
       [file.filename]: show,
     }));
-    fetchShowSeasons(show.id);
 
-    // Try to re-resolve season/episodes automatically now that the series is known.
-    // Reuse the parsed values if the file already resolved (f.season/f.episodes), otherwise
-    // sniff SxxEyy patterns from the filename. Only set an override when there's no
-    // existing override already (don't stomp manual edits).
-    if (file.season != null || file.episodes?.length) {
-      fetchSeasonEpisodes(show.id, file.season ?? 0);
+    // Films take the movie importer backend-side (seriesType === "movie"),
+    // so no season/episode axis exists to prefill — and sniffing one from a
+    // film filename would only produce junk overrides. Re-assigning a film
+    // onto a file that previously had a series override must drop it, or the
+    // stale S/E would be posted alongside the movie pick.
+    if (show.seriesType === "movie") {
+      setEpisodeOverrides((prev) => {
+        if (!prev[file.filename]) return prev;
+        const next = { ...prev };
+        delete next[file.filename];
+        return next;
+      });
     } else {
-      const sniffed = sniffEpisodeNumbers(file.filename);
-      if (sniffed && (sniffed.season != null || sniffed.episodes.length > 0)) {
-        setEpisodeOverrides((prev) =>
-          prev[file.filename]
-            ? prev
-            : { ...prev, [file.filename]: { ...(sniffed.season != null ? { season: sniffed.season } : {}), ...(sniffed.episodes.length ? { episodes: sniffed.episodes } : {}) } }
-        );
-        if (sniffed.season != null) fetchSeasonEpisodes(show.id, sniffed.season);
+      fetchShowSeasons(show.id);
+
+      // Try to re-resolve season/episodes automatically now that the series is known.
+      // Reuse the parsed values if the file already resolved (f.season/f.episodes), otherwise
+      // sniff SxxEyy patterns from the filename. Only set an override when there's no
+      // existing override already (don't stomp manual edits).
+      if (file.season != null || file.episodes?.length) {
+        fetchSeasonEpisodes(show.id, file.season ?? 0);
       } else {
-        // Still fetch the default season so the selector has options
-        fetchSeasonEpisodes(show.id, 1);
+        const sniffed = sniffEpisodeNumbers(file.filename);
+        if (sniffed && (sniffed.season != null || sniffed.episodes.length > 0)) {
+          setEpisodeOverrides((prev) =>
+            prev[file.filename]
+              ? prev
+              : { ...prev, [file.filename]: { ...(sniffed.season != null ? { season: sniffed.season } : {}), ...(sniffed.episodes.length ? { episodes: sniffed.episodes } : {}) } }
+          );
+          if (sniffed.season != null) fetchSeasonEpisodes(show.id, sniffed.season);
+        } else {
+          // Still fetch the default season so the selector has options
+          fetchSeasonEpisodes(show.id, 1);
+        }
       }
     }
 
@@ -470,6 +489,18 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
 
                     const assignedShow = assignedShows[f.filename];
                     const assignedShowId = assignedShow?.id ?? f.showId;
+                    // Films have no season/episode axis: the backend matcher
+                    // labels them kind="movie", and an explicit library pick
+                    // is authoritative too (seriesType from /api/shows).
+                    const isMovie = assignedShow ? assignedShow.seriesType === 'movie' : f.kind === 'movie';
+                    const movieBadge = (
+                      <span
+                        className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+                        title="Movies import as a single file — no season or episode"
+                      >
+                        Movie
+                      </span>
+                    );
                     const seasonOptions = assignedShowId && seasonsByShow[assignedShowId]?.length
                       ? seasonsByShow[assignedShowId]
                       : (() => {
@@ -477,7 +508,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                           return Array.from({ length: maxSeason + 1 }, (_, i) => i); // Specials (0) .. max
                         })();
 
-                    const seasonCellContent = (
+                    const seasonCellContent = isMovie ? movieBadge : (
                       <Select
                         value={displaySeason != null ? String(displaySeason) : undefined}
                         onValueChange={(v) => setSeasonOverride(f.filename, v === "__auto__" ? null : parseInt(v, 10))}
@@ -507,7 +538,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                       </Select>
                     );
 
-                    const episodesCellContent = (
+                    const episodesCellContent = isMovie ? movieBadge : (
                       <button
                         type="button"
                         onClick={() => openEpisodePicker(f)}
@@ -704,7 +735,15 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                       <div className="truncate text-xs font-medium text-foreground group-hover:text-signal transition-colors">
                         {s.title}
                       </div>
-                      {s.year && <div className="text-[10px] text-muted-foreground">{s.year}</div>}
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        {s.year && <span>{s.year}</span>}
+                        {/* Films and series share the title index — without the
+                            type pill an "Thor (2011)" movie is indistinguishable
+                            from a same-named series when assigning manually. */}
+                        {s.seriesType && (
+                          <span className="rounded bg-white/5 px-1 font-mono uppercase tracking-wider">{s.seriesType}</span>
+                        )}
+                      </div>
                     </div>
                     <CheckIcon className="size-4 shrink-0 text-signal opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>

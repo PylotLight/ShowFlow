@@ -44,6 +44,12 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
     return super.fetch(endpoint, options);
   }
 
+  /** base.fetch throws `API Request failed: 404 …` — the only signal we get
+   *  that a numeric TMDB id simply isn't a series (it's a film). */
+  private static isNotFound(err: unknown): boolean {
+    return /404/.test(err instanceof Error ? err.message : String(err));
+  }
+
   /** Query string for a TMDB call: v3 keys append `api_key`, Bearer
    *  tokens authenticate via header and need no query param. */
   private qs(params: Record<string, string | undefined>): string {
@@ -74,7 +80,18 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
     // /movie/ so every existing getShow() caller (warmer, images, sync,
     // bulk detail) works for films untouched.
     if (TMDBProvider.isMovieId(id)) return this.getMovie(id);
-    const data = await this.fetch<any>(`/tv/${id}${this.qs({ language: 'en-US', append_to_response: 'external_ids' })}`);
+    // Bare numeric ids (legacy rows, provider ids hand-added through the
+    // sources dialog, or imported from Sonarr/Radarr) are ambiguous: TMDB
+    // numbers films and series in separate sequences, so a 404 on /tv/ is
+    // not "unknown title", it's usually "this is a movie". Retry there
+    // before giving up, or those rows render without artwork forever.
+    let data: any;
+    try {
+      data = await this.fetch<any>(`/tv/${id}${this.qs({ language: 'en-US', append_to_response: 'external_ids' })}`);
+    } catch (err) {
+      if (!TMDBProvider.isNotFound(err)) throw err;
+      return this.getMovie(id);
+    }
     return {
       id: data.id.toString(),
       title: data.name,
@@ -195,9 +212,20 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
    * of being stuck with whatever single backdrop the metadata carries.
    */
   async getBackdrops(id: string): Promise<{ url: string; width?: number; height?: number }[]> {
-    // Movie ids (m- prefix) route to the film image list — same shape.
+    // Movie ids (m- prefix) route to the film image list — same shape. A
+    // bare numeric id tries the series list first and falls back to films
+    // on 404 (see getShow for why).
     const mid = TMDBProvider.stripMoviePrefix(id);
-    const path = TMDBProvider.isMovieId(id) ? `/movie/${mid}/images` : `/tv/${id}/images`;
+    if (TMDBProvider.isMovieId(id)) return this.fetchBackdrops(`/movie/${mid}/images`);
+    try {
+      return await this.fetchBackdrops(`/tv/${id}/images`);
+    } catch (err) {
+      if (!TMDBProvider.isNotFound(err)) throw err;
+      return this.fetchBackdrops(`/movie/${mid}/images`);
+    }
+  }
+
+  private async fetchBackdrops(path: string): Promise<{ url: string; width?: number; height?: number }[]> {
     const data = await this.fetch<any>(`${path}${this.qs({})}`);
     const backdrops = Array.isArray(data?.backdrops) ? data.backdrops : [];
     return backdrops

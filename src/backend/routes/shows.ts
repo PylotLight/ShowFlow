@@ -144,6 +144,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                 id: s.id,
                 providerType: s.provider_type,
                 title: s.title,
+                year: s.year ?? null,
                 profile: s.profile,
                 seriesType: s.series_type,
                 uuid: s.id,
