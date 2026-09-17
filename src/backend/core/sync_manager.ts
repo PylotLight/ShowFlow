@@ -37,6 +37,10 @@ export class SyncManager {
       // reconcile below is episode-driven too, so movies skip it as well.)
       if (show.series_type === 'movie') {
         debugLog(`Successfully synced movie: ${show.title}`);
+        // Persisted metadata now carries poster/backdrop paths — kick the
+        // artwork warmer so library cards/hero have bytes on disk immediately,
+        // instead of only warming when the grid's <img> later 404s.
+        void import('../routes/artwork_warmer').then(m => m.warmPoster(showId, { force: true })).catch(() => {});
         db.logEvent({
           type: 'sync',
           entityType: 'show',
@@ -84,6 +88,10 @@ export class SyncManager {
           debugLog(`Air-window reconcile failed for ${show.title}: ${err}`);
         }
       }
+
+      // Metadata (incl. poster path) is persisted — warm the card artwork now
+      // rather than waiting for the grid's <img> to 404 and trigger a lazy warm.
+      void import('../routes/artwork_warmer').then(m => m.warmPoster(showId)).catch(() => {});
 
       debugLog(`Successfully synced show: ${show.title}`);
       db.logEvent({
