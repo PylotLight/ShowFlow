@@ -49,7 +49,14 @@ const manifest = {
     name: OUTFILE,
     sha256,
   },
-  minimumSupervisorVersion: process.env.SUPERVISOR_VERSION ?? "0.0.0",
+  // Supervisor activation-protocol floor — NOT the release version. The release
+  // tarball swaps only the app binary; the running supervisor persists across
+  // updates, so gating on the release's own tag would strand every pod that
+  // predates it (that's what broke in-place updates from v0.1.55→v0.1.61).
+  // Bump this only when the activation contract itself changes incompatibly.
+  // Deliberately independent of SUPERVISOR_VERSION, which is the running
+  // supervisor's own reported version (see Dockerfile / supervisor/state.ts).
+  minimumSupervisorVersion: process.env.MIN_SUPERVISOR_VERSION ?? "0.1.0",
 };
 
 await Bun.write("manifest.json", JSON.stringify(manifest, null, 2) + "\n");

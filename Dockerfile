@@ -19,10 +19,11 @@ ENV SUPERVISOR_VERSION=${SUPERVISOR_VERSION}
 
 # GITHUB_SHA and GITHUB_REF_NAME define the app binary's __BUILD_COMMIT__
 # and __BUILD_VERSION__ at compile time (via build.ts's `define` block).
-# SUPERVISOR_VERSION is used at runtime by the supervisor via
-# process.env.SUPERVISOR_VERSION (supervisor/state.ts), so both build.ts
-# (manifest minimumSupervisorVersion) and the supervisor process read the
-# same env var to stay in sync.
+# SUPERVISOR_VERSION is read only at runtime by the supervisor
+# (supervisor/state.ts) to report the pod's own supervisor version. It is
+# deliberately NOT used for the manifest's minimumSupervisorVersion — that is
+# a separate, slow-moving activation-protocol floor (build.ts), so pods can
+# update in place without rebuilding the image every release.
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
