@@ -1,7 +1,17 @@
 import * as React from "react";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, AlertCircleIcon, ShieldCheckIcon, HammerIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, AlertCircleIcon, ShieldCheckIcon, HammerIcon, ArrowRightIcon, ChevronDownIcon, RadioIcon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
+import { Switch } from "@frontend/components/ui/switch";
+
+interface PendingUpdate {
+  tag: string;
+  releaseId: string;
+  title: string | null;
+  notes: string | null;
+  publishedAt: string | null;
+  stagedAt: string;
+}
 
 interface ReleaseItem {
   githubReleaseId: number;
@@ -52,6 +62,13 @@ export function UpdatesPanel() {
   const pollTimerRef = React.useRef<any>(null);
   const pollDelayRef = React.useRef(3000);
   const reconnectTimerRef = React.useRef<any>(null);
+
+  // ---- Background watcher state ----
+  const [pending, setPending] = React.useState<PendingUpdate | null>(null);
+  const [autoDownload, setAutoDownload] = React.useState(true);
+  const [checking, setChecking] = React.useState(false);
+  const [checkNote, setCheckNote] = React.useState<string | null>(null);
+  const watchTimerRef = React.useRef<any>(null);
 
   function headers(): Record<string, string> {
     return { Authorization: `Bearer ${token ?? tokenRef.current}` };
@@ -145,18 +162,88 @@ export function UpdatesPanel() {
     }
   }
 
+  // ---- Background watcher: fetch staged state, force a check, toggle mode ----
+  function fetchPending() {
+    return fetch("/api/admin/updates/pending", { headers: headers() })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) { setPending(d.pending ?? null); if (typeof d.autoDownload === "boolean") setAutoDownload(d.autoDownload); } })
+      .catch(() => {});
+  }
+
+  // Runs one watcher cycle. `force` bypasses the 15s feed-TTL on the server
+  // (real conditional GET → 304 when nothing changed). Cheap + rate-limit-free
+  // either way, so we call it on mount, on "Check now", and on the visible poll.
+  function runCheck(opts: { force?: boolean; note?: boolean } = {}) {
+    setChecking(true);
+    return fetch("/api/admin/updates/check", {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify({ force: opts.force !== false }),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((res: any) => {
+        setPending(res.pending ?? null);
+        if (opts.note) {
+          if (res.status === "staged") setCheckNote(`Checked — ${res.latestTag} is staged and ready to activate.`);
+          else if (res.status === "up-to-date") setCheckNote(`Checked — you're on the latest release (${res.currentVersion}).`);
+          else if (res.status === "downloaded-not-verified") setCheckNote(`Checked — ${res.latestTag} downloaded but failed verification: ${res.error ?? "unknown"}`);
+          else if (res.status === "skipped") setCheckNote(`Checked — ${res.latestTag} is newer, but auto-download is off.`);
+          else setCheckNote(null);
+        }
+        if (res.status === "staged") fetchAll(true);
+      })
+      .catch(e => { if (opts.note) setCheckNote(`Check failed: ${e instanceof Error ? e.message : String(e)}`); })
+      .finally(() => setChecking(false));
+  }
+
+  function toggleAutoDownload(next: boolean) {
+    setAutoDownload(next);
+    setCheckNote(null);
+    fetch("/api/admin/updates/settings", {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify({ autoDownload: next }),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(d => setAutoDownload(!!d.autoDownload))
+      // Revert the optimistic flip if the save failed.
+      .catch(() => setAutoDownload(!next));
+  }
+
   React.useEffect(() => {
     fetch("/api/admin/token")
       .then(r => r.json())
-      .then(d => { tokenRef.current = d.token; setToken(d.token); fetchAll(); })
+      .then(d => { tokenRef.current = d.token; setToken(d.token); fetchAll(); fetchPending(); })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (watchTimerRef.current) clearInterval(watchTimerRef.current);
     };
   }, []);
+
+  // ---- Adaptive watcher poll ----
+  // While this panel is mounted AND the tab is actually visible, run a cheap
+  // watcher check every 20s so a freshly-pushed release auto-downloads in front
+  // of you. Pause entirely when the tab is hidden (no pointless background
+  // traffic) — the 15-min scheduler task covers the closed-tab case. Checks
+  // never touch the rate-limited API unless a genuinely newer tag exists.
+  React.useEffect(() => {
+    if (!token) return;
+    const start = () => {
+      if (watchTimerRef.current) return;
+      watchTimerRef.current = setInterval(() => runCheck({ force: false }), 20_000);
+    };
+    const stop = () => {
+      if (watchTimerRef.current) { clearInterval(watchTimerRef.current); watchTimerRef.current = null; }
+    };
+    const onVisible = () => (document.visibilityState === "visible" ? start() : stop());
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { document.removeEventListener("visibilitychange", onVisible); stop(); };
+  }, [token]);
 
   // ---- Reconnect poller: polls /internal/ready from the SPA itself ----
   // The SW offline.html only intercepts *navigation* requests (manual refreshes).
@@ -319,9 +406,14 @@ export function UpdatesPanel() {
     const isWatchTarget = activeUpdateTag === r.tagName;
     const build = r.buildDetails;
     const notesExpanded = !!notesOpen[r.githubReleaseId];
-    // Downloaded + verified, awaiting activation — the Update button on
-    // this row becomes Activate so there's no scroll to the status card.
-    const isStaged = installedReleaseId !== null && installedTag === r.tagName;
+    // Downloaded + verified, awaiting activation — either from a manual
+    // "Update to" click this session (installedReleaseId) or from the
+    // background watcher's auto-download (pending). The row's Update button
+    // becomes Activate so there's no scroll to the status card.
+    const stagedReleaseId = (installedReleaseId && installedTag === r.tagName)
+      ? installedReleaseId
+      : (pending && pending.tag === r.tagName ? pending.releaseId : null);
+    const isStaged = stagedReleaseId !== null;
 
     return (
       <div key={r.githubReleaseId} className="space-y-2 rounded-lg bg-white/[0.03] p-3 border border-white/5 hover:border-white/10 transition-colors">
@@ -378,9 +470,9 @@ export function UpdatesPanel() {
                 variant="default"
                 size="sm"
                 disabled={actionLoading !== null}
-                onClick={() => doActivate(installedReleaseId!, r.tagName)}
+                onClick={() => doActivate(stagedReleaseId!, r.tagName)}
               >
-                {actionLoading === `activate-${installedReleaseId}` ? (
+                {actionLoading === `activate-${stagedReleaseId}` ? (
                   <Loader2Icon className="size-3 animate-spin mr-1.5" />
                 ) : (
                   <PlayIcon className="size-3 mr-1.5" />
@@ -431,6 +523,51 @@ export function UpdatesPanel() {
 
   return (
     <div className="space-y-6">
+      {/* STAGED-AND-READY BANNER — set by the background watcher's auto-download
+          (or a manual "Update to"). One click here runs the same supervisor
+          handoff the per-row Activate uses. Hidden while an activation is in
+          flight (the pipeline card below owns the screen then). */}
+      {pending && !activeUpdateTag && (
+        <GlassPanel className="p-6 space-y-4 border-emerald-500/30 bg-emerald-500/[0.03]">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <ShieldCheckIcon className="size-5 shrink-0 text-emerald-400 mt-0.5" />
+              <div className="min-w-0">
+                <h3 className="font-display text-sm font-semibold tracking-wide text-white">
+                  Update <span className="font-mono text-emerald-400">{pending.tag}</span> is downloaded &amp; verified
+                </h3>
+                <p className="text-muted-foreground text-xs mt-0.5">
+                  The new build is staged on disk. Activating briefly restarts ShowFlow — you can do it now or later.
+                </p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">
+                  releaseId {pending.releaseId.slice(0, 12)} · staged {new Date(pending.stagedAt).toLocaleString()}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="default"
+              size="sm"
+              className="shrink-0"
+              disabled={actionLoading !== null}
+              onClick={() => doActivate(pending.releaseId, pending.tag)}
+            >
+              {actionLoading === `activate-${pending.releaseId}` ? (
+                <Loader2Icon className="size-3.5 animate-spin mr-1.5" />
+              ) : (
+                <PlayIcon className="size-3.5 mr-1.5" />
+              )}
+              Activate
+            </Button>
+          </div>
+          {pending.notes && (
+            <details className="rounded bg-black/30 border border-white/5">
+              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground font-mono select-none">Release notes</summary>
+              <pre className="whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-relaxed text-white/75 max-h-64 overflow-y-auto">{pending.notes}</pre>
+            </details>
+          )}
+        </GlassPanel>
+      )}
+
       {/* UPDATE PIPELINE PROGRESS CARD */}
       {activeUpdateTag && (
         <GlassPanel className="p-6 space-y-5 border-signal/30 bg-signal/[0.02]">
@@ -549,9 +686,29 @@ export function UpdatesPanel() {
 
       {/* AVAILABLE RELEASES LIST */}
       <GlassPanel className="p-6 space-y-4">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Releases</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Published GitHub releases with showflow + manifest.json assets</p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Releases</h3>
+            <p className="text-muted-foreground text-xs mt-0.5">Published GitHub releases with showflow + manifest.json assets</p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <label className="flex items-center gap-2 cursor-pointer select-none" title="When on, a newly published release is auto-downloaded and verified in the background, then waits for you to Activate.">
+              <span className="text-[11px] text-muted-foreground font-mono">Auto-download</span>
+              <Switch checked={autoDownload} onCheckedChange={toggleAutoDownload} />
+            </label>
+            <Button variant="ghost" size="sm" onClick={() => runCheck({ force: true, note: true })} disabled={checking} title="Check GitHub for a new release now">
+              {checking ? <Loader2Icon className="size-3.5 animate-spin mr-1.5" /> : <RadioIcon className="size-3.5 mr-1.5" />}
+              Check now
+            </Button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/70">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+          </span>
+          Watching the Releases feed automatically (this panel checks every ~20s while open; every 15 min in the background).
+          {checkNote && <span className="text-signal"> {checkNote}</span>}
         </div>
         {loading && (
           <div className="flex items-center justify-center py-6">

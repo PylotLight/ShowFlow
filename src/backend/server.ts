@@ -270,6 +270,23 @@ try {
 
 console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, version ${BUILD_VERSION})`);
 
+// Release watcher boot housekeeping: if we're running a build that previously
+// sat as "pending activation", the activation succeeded, so forget the marker
+// (removes the notification + the panel's "ready to activate" card). Then kick
+// one deferred check off the critical path — the scheduler runs the same cycle
+// every 15 min thereafter, and the settings panel can force one on demand.
+try {
+  const { reconcilePendingOnBoot, runWatchCycle } = await import("./core/update_watcher");
+  reconcilePendingOnBoot();
+  setTimeout(() => {
+    runWatchCycle({ force: true }).catch((err) =>
+      console.warn("[updates] startup watch cycle failed:", err instanceof Error ? err.message : err),
+    );
+  }, 5000);
+} catch (err) {
+  console.error("Failed to initialize release watcher:", err instanceof Error ? err.message : err);
+}
+
 // ---- Graceful shutdown ----------------------------------------------------
 
 let sigtermReceived = false;

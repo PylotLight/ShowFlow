@@ -5,7 +5,7 @@ import { cn } from "@frontend/lib/utils";
 
 interface Notification {
   id: string;
-  type: 'health' | 'pipeline_failure' | 'event';
+  type: 'health' | 'pipeline_failure' | 'event' | 'update';
   severity: 'error' | 'warning' | 'info';
   title: string;
   message: string | null;

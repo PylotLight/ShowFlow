@@ -105,13 +105,15 @@ const TASKS: Record<TaskName, TaskDefinition> = {
   },
   'update-check': {
     name: 'update-check',
-    displayName: 'Update Check',
-    description: 'Check for ShowFlow updates',
+    displayName: 'Update Watcher',
+    description: 'Check the GitHub Releases Atom feed for a newer build and auto-download + verify it (rate-limit-free; activation stays a manual click)',
     category: 'system',
-    intervalMinutes: 10080, // Weekly
+    intervalMinutes: 15, // ETag/304 revalidation makes frequent checks essentially free
     defaultEnabled: true,
     action: async () => {
-      debugLog('Task update-check complete: Update check performed');
+      const { runWatchCycle } = await import('./update_watcher');
+      const result = await runWatchCycle();
+      debugLog(`Task update-check complete: ${result.status} (latest ${result.latestTag ?? 'none'})`);
     },
   },
   'pipeline-cleanup': {

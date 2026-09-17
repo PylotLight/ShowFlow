@@ -2,6 +2,7 @@ import { sql, desc } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { db } from '../db';
 import { json, errorResponse } from './_shared';
+import { getPendingUpdate } from '../core/update_watcher';
 
 const DISMISSED_SETTING_KEY = 'notifications:dismissed';
 
@@ -75,6 +76,23 @@ export function notificationRoutes() {
               timestamp: e.created_at,
               link: null,
             })),
+            // A staged-but-not-yet-activated release is actionable, so it rides
+            // the "Needs Attention" rail with a deep-link straight to the
+            // Updates panel's Activate button. Cleared once activated.
+            ...(() => {
+              const pending = getPendingUpdate();
+              if (!pending) return [];
+              return [{
+                id: `update:${pending.releaseId}`,
+                type: 'update' as const,
+                severity: 'info' as const,
+                title: `Update ${pending.tag} is ready to activate`,
+                message: 'Downloaded and verified — open Updates to activate when ready.',
+                reasonCode: null,
+                timestamp: pending.stagedAt,
+                link: '/settings?tab=general',
+              }];
+            })(),
           ].filter((n) => !dismissed.has(n.id));
 
           return json({

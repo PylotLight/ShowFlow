@@ -269,6 +269,35 @@ async function downloadAsset(assetId: number, token: string | undefined, repo: s
 }
 
 /**
+ * Resolves a release by its tag (`releases.atom` only exposes tags, not the
+ * numeric release id) and downloads + installs its tarball. Exactly one
+ * rate-limited API call per *actual* new release — the watcher's cheap feed
+ * polling never touches this endpoint. Kept separate from listReleases so a
+ * background auto-download never needs the full releases list.
+ */
+export async function downloadAndInstallByTag(tag: string): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+  const { token, repo } = githubConfig();
+
+  const relRes = await fetch(`${GITHUB_API}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, {
+    headers: githubHeaders(token),
+  });
+  if (!relRes.ok) {
+    if (relRes.status === 429) rateLimited(relRes);
+    throw new Error(`GitHub release "${tag}" not found (${relRes.status}).`);
+  }
+  rateLimited(relRes);
+  const release = (await relRes.json()) as any;
+  const assets = (release.assets ?? []) as any[];
+  const tarballAsset = assets.find((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
+  if (!tarballAsset) {
+    return { ok: false, message: `Release "${tag}" is missing required tarball asset (showflow-<sha>.tar.gz).` };
+  }
+
+  const releaseId = await installTarball(tarballAsset, token, repo);
+  return callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` }).then((result) => ({ ...result, releaseId }));
+}
+
+/**
  * Downloads a GitHub release's `showflow-<sha>.tar.gz` into
  * /data/downloads/<releaseId>/ and hands off to the supervisor's
  * /admin/install-archive, which extracts and verifies the content
@@ -290,16 +319,18 @@ export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok:
     return { ok: false, message: `Release "${release.tag_name}" is missing required tarball asset (showflow-<sha>.tar.gz).` };
   }
 
-  const tarballBytes = await downloadAsset(tarballAsset.id, token, repo);
+  const releaseId = await installTarball(tarballAsset, token, repo);
+  return callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` }).then((result) => ({ ...result, releaseId }));
+}
 
+/** Shared tarball download + stage-to-disk used by both id- and tag-based install. */
+async function installTarball(tarballAsset: { id: number; name: string }, token: string | undefined, repo: string): Promise<string> {
+  const tarballBytes = await downloadAsset(tarballAsset.id, token, repo);
   const releaseId = tarballAsset.name.replace(/^showflow-/, "").replace(/\.tar\.gz$/, "");
   const dest = `${DOWNLOADS_DIR}/${releaseId}`;
   await mkdir(dest, { recursive: true });
-
-  const tarballPath = `${dest}/release.tar.gz`;
-  await Bun.write(tarballPath, tarballBytes);
-
-  return callSupervisor("/admin/install-archive", { releaseId, tarball: tarballPath }).then((result) => ({ ...result, releaseId }));
+  await Bun.write(`${dest}/release.tar.gz`, tarballBytes);
+  return releaseId;
 }
 
 // ---- Supervisor admin bridge -------------------------------------------
