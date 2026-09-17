@@ -247,6 +247,8 @@ export class DatabaseManager {
   updateEpisodeFileRowPath(rowId: number, filePath: string) { return episodeFiles.updateEpisodeFileRowPath(this, rowId, filePath); }
   listUnprobedEpisodeFiles() { return episodeFiles.listUnprobedEpisodeFiles(this); }
   pruneSupersededEpisodeFiles() { return episodeFiles.pruneSupersededEpisodeFiles(this); }
+  getMovieFile(showId: string) { return episodeFiles.getMovieFile(this, showId); }
+  recordMovieFile(input: Parameters<typeof episodeFiles.recordMovieFile>[1]) { return episodeFiles.recordMovieFile(this, input); }
 
   // ---- Episode mapping (anime season-splits, issues-tracking.md #4) --------
 

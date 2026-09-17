@@ -211,6 +211,19 @@ export function searchRoutes(systemManager: SystemManager) {
 
           if (ok) {
             db.logEvent({ type: "grab", entityType: "release", message: message || `Grabbed ${release.title}` });
+            // Movie provenance: the interactive movie browser posts its
+            // show id alongside the release so later imports can pin the
+            // film even when the filename is generic.
+            if (typeof release?.movieShowId === "string" && release.movieShowId) {
+              try {
+                db.recordGrabbedRelease({
+                  showId: release.movieShowId,
+                  releaseTitle: release.title,
+                  indexerName: release.indexerName ?? null,
+                  publishDate: release.publishDate ?? null,
+                });
+              } catch {}
+            }
           }
           return json({ success: ok, message: message || (ok ? `Grabbed ${release.title}` : `Grab failed for "${release.title}". Check that a Download Client is configured.`) });
         } catch (err) {

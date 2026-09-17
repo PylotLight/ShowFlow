@@ -5,6 +5,7 @@ import type { Indexer, IndexerResult } from '../providers/indexers/types';
 import type { NativeIndexerConfig } from '../providers/indexers/native/types';
 import { NATIVE_INDEXER_META } from '../providers/indexers/native/types';
 import { qualityEngine, type ReleaseScore } from './quality_engine';
+import { isRelevantMovieMatch } from './movie_match';
 import { debugLog, logDebug } from './debug';
 import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
 import type { DownloadManager } from './download_manager';
@@ -17,6 +18,11 @@ const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for'
 // movie-only indexers/junk results out without needing per-indexer category
 // mapping.
 const TV_CATEGORY = 5000;
+
+// Films live under Prowlarr's "2000" parent category (per the indexer
+// category map in providers/indexers/types.ts) — same scoping rationale
+// as TV_CATEGORY above.
+const MOVIE_CATEGORY = 2000;
 
 export interface ScoredRelease extends IndexerResult {
   score: ReleaseScore;
@@ -497,6 +503,174 @@ export class GrabberService {
     }
 
     return { success: true, message: `Grabbed ${release.title}`, release };
+  }
+
+  /**
+   * Searches all configured indexers for a movie ("Title YYYY", movie
+   * category) and scores every result against the show's quality profile.
+   * Mirrors searchReleases minus the season/episode scoping — films are
+   * single-shot grabs.
+   */
+  async searchMovieReleases(
+    showId: string,
+  ): Promise<{ releases: ScoredRelease[]; profileId: string } | { error: string }> {
+    const show = db.getShow(showId);
+    if (!show) return { error: `Show ${showId} not found` };
+
+    const libraryType = show.library_type_id ? db.getLibraryType(show.library_type_id) : null;
+    const profileId = libraryType?.quality_profile_id ?? db.resolveProfileId(show.profile) ?? '';
+    const indexers = this.getEnabledIndexers({ libraryType });
+    if (indexers.length === 0) {
+      const message = 'No indexers configured. Add a Prowlarr or Native indexer in Settings > Indexers.';
+      db.logPipelineEvent({
+        showId, stage: 'FAILED', eventType: 'search_no_indexers', reasonCode: 'NO_INDEXERS_CONFIGURED', message,
+      });
+      return { error: message };
+    }
+
+    const queryTitle = show.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() || show.title;
+    const query = show.year ? `${queryTitle} ${show.year}` : queryTitle;
+
+    logDebug({
+      type: 'grabber', level: 'info', source: 'GrabberService',
+      message: `Searching ${indexers.length} indexers for movie "${show.title}" (query: "${query}")`,
+    });
+
+    const allReleases: (IndexerResult & { indexer: Indexer })[] = [];
+    for (const indexer of indexers) {
+      try {
+        const results = await indexer.search(query, { type: 'movie', categories: [MOVIE_CATEGORY] });
+        logDebug({
+          type: 'grabber', level: results.length > 0 ? 'info' : 'debug', source: indexer.name,
+          message: `Found ${results.length} releases for "${query}"`,
+        });
+        allReleases.push(...results.map(r => ({ ...r, indexer })));
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        logDebug({
+          type: 'grabber', level: 'error', source: indexer.name,
+          message: `Search error for "${query}"`, error: errorMessage,
+        });
+        db.logPipelineEvent({
+          showId, stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
+          message: `${indexer.name} search failed: ${errorMessage}`, indexerName: indexer.name,
+        });
+      }
+    }
+
+    const beforeFilter = allReleases.length;
+    const filtered = allReleases.filter(r => isRelevantMovieMatch(r.title, show.title, show.year ?? null));
+    const removed = beforeFilter - filtered.length;
+    if (removed > 0) {
+      logDebug({
+        type: 'grabber', level: 'info', source: 'GrabberService',
+        message: `Filtered ${removed}/${beforeFilter} results that don't match movie "${show.title}"`,
+      });
+      db.logPipelineEvent({
+        showId, stage: 'SEARCHING', eventType: 'release_filtered', reasonCode: 'TITLE_OR_SEASON_MISMATCH',
+        message: `${removed} release(s) filtered out - don't match "${show.title}"`,
+        metadata: { count: removed, sample: allReleases.filter(r => !isRelevantMovieMatch(r.title, show.title, show.year ?? null)).slice(0, 50).map(r => r.title) },
+      });
+    }
+
+    const scored = filtered.map((r): ScoredRelease => ({ ...r, score: qualityEngine.getReleaseScore(r.title, profileId) }));
+    const rejected = scored.filter(r => r.score.rejected);
+    const releases = scored
+      .filter(r => !r.score.rejected)
+      .sort((a, b) => b.score.totalScore - a.score.totalScore);
+
+    if (rejected.length > 0) {
+      const breakdown: Record<string, number> = {};
+      for (const r of rejected) {
+        const code = r.score.rejectCode ?? 'QUALITY_UNKNOWN';
+        breakdown[code] = (breakdown[code] ?? 0) + 1;
+      }
+      db.logPipelineEvent({
+        showId, stage: 'SEARCHING', eventType: 'release_rejected',
+        message: `${rejected.length} release(s) rejected by quality profile`,
+        metadata: {
+          count: rejected.length, breakdown,
+          releases: rejected.slice(0, 50).map(r => ({ title: r.title, code: r.score.rejectCode, reason: r.score.rejectReason })),
+        },
+      });
+    }
+
+    db.logPipelineEvent({
+      showId, stage: 'SEARCHING', eventType: 'search_completed',
+      message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
+      metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
+    });
+
+    if (releases.length > 0) {
+      logDebug({
+        type: 'grabber', level: 'info', source: 'GrabberService',
+        message: `Best release: "${releases[0]!.title}" (score: ${releases[0]!.score.totalScore})`,
+      });
+      db.logPipelineEvent({
+        showId, stage: 'SEARCHING', eventType: 'release_selected',
+        message: `Top pick selected: "${releases[0]!.title}" (score: ${releases[0]!.score.totalScore})`,
+        releaseTitle: releases[0]!.title,
+      });
+    } else {
+      logDebug({
+        type: 'grabber', level: 'warn', source: 'GrabberService',
+        message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
+      });
+      db.logPipelineEvent({
+        showId, stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
+        message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
+      });
+    }
+
+    return { releases, profileId };
+  }
+
+  /**
+   * Grabs the best release for a movie, skipping when it wouldn't be an
+   * upgrade over the file already on disk.
+   */
+  async grabBestMovieRelease(showId: string): Promise<GrabResult> {
+    logDebug({
+      type: 'grabber', level: 'info', source: 'GrabberService',
+      message: `Best movie grab for show=${showId}`,
+    });
+
+    const result = await this.searchMovieReleases(showId);
+    if ('error' in result) {
+      logDebug({ type: 'grabber', level: 'warn', source: 'GrabberService', message: result.error });
+      return { success: false, message: result.error };
+    }
+
+    const { releases, profileId } = result;
+    if (releases.length === 0) {
+      logDebug({ type: 'grabber', level: 'warn', source: 'GrabberService', message: 'No releases found to grab' });
+      return { success: false, message: 'No releases found' };
+    }
+
+    const best = releases[0]!;
+
+    const existing = db.getMovieFile(showId);
+    if (existing) {
+      const existingFilename = path.basename(existing.file_path);
+      if (!qualityEngine.shouldUpgrade(existingFilename, best.title, profileId)) {
+        logDebug({
+          type: 'grabber', level: 'info', source: 'GrabberService',
+          message: `Skipping grab — "${best.title}" is not an upgrade over "${existingFilename}"`,
+        });
+        db.logPipelineEvent({
+          showId, stage: 'WANTED', eventType: 'not_upgrade', reasonCode: 'NOT_AN_UPGRADE',
+          message: `"${best.title}" is not an upgrade over the existing file`,
+          releaseTitle: best.title,
+        });
+        return {
+          success: false,
+          message: `Best found release (${best.title}) is not an upgrade over existing file.`,
+          bestRelease: best,
+        };
+      }
+    }
+
+    return this.grabRelease(best, { showId });
   }
 
   private getEnabledIndexers(opts?: { libraryType?: any }): Indexer[] {

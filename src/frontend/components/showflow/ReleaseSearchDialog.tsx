@@ -112,6 +112,10 @@ interface ReleaseSearchDialogProps {
   episode?: number;
   onGrabbed?: (message: string, success: boolean) => void;
   autoCloseOnSuccess?: boolean;
+  /** Movie mode: single-shot film search (no S/E), hits /movie/search. */
+  kind?: "tv" | "movie";
+  /** Year shown in the header for movies. */
+  year?: number | null;
 }
 
 function ReleaseSearchDialog({
@@ -123,7 +127,10 @@ function ReleaseSearchDialog({
   episode,
   onGrabbed,
   autoCloseOnSuccess = true,
+  kind = "tv",
+  year = null,
 }: ReleaseSearchDialogProps) {
+  const isMovie = kind === "movie";
   const isSeasonScope = episode == null;
 
   const [releases, setReleases] = React.useState<Release[] | null>(null);
@@ -145,9 +152,11 @@ function ReleaseSearchDialog({
     setLoading(true);
     setError(null);
     setReleases(null);
-    const path = isSeasonScope
-      ? `/api/shows/${showId}/seasons/${season}/search`
-      : `/api/shows/${showId}/seasons/${season}/episodes/${episode}/search`;
+    const path = isMovie
+      ? `/api/shows/${showId}/movie/search`
+      : isSeasonScope
+        ? `/api/shows/${showId}/seasons/${season}/search`
+        : `/api/shows/${showId}/seasons/${season}/episodes/${episode}/search`;
     fetch(path)
       .then(async (r) => {
         const data = await r.json();
@@ -156,7 +165,7 @@ function ReleaseSearchDialog({
       })
       .catch((err: any) => setError(err.message ?? "Search failed"))
       .finally(() => setLoading(false));
-  }, [showId, season, episode, isSeasonScope]);
+  }, [showId, season, episode, isSeasonScope, isMovie]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -207,10 +216,13 @@ function ReleaseSearchDialog({
   async function handleGrab(release: Release) {
     setGrabbingGuid(release.guid);
     try {
+      // Movie grabs carry the show id so the backend can record provenance
+      // (the generic grab endpoint is otherwise show-agnostic).
+      const payload = isMovie ? { ...release, movieShowId: showId } : release;
       const res = await fetch("/api/search/grab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(release),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       const message: string = data.message ?? (data.success ? `Grabbed ${release.title}` : "Grab failed");
@@ -234,11 +246,13 @@ function ReleaseSearchDialog({
       <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="truncate" title={showTitle}>Search Releases</DialogTitle>
-          <DialogDescription className="truncate" title={`${showTitle} · ${isSeasonScope ? `Season ${season}` : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}`}>
+          <DialogDescription className="truncate" title={isMovie ? `${showTitle}${year ? ` (${year})` : ""}` : `${showTitle} · ${isSeasonScope ? `Season ${season}` : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}`}>
             {showTitle} ·{" "}
-            {isSeasonScope
-              ? `Season ${season} (packs & episodes)`
-              : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}
+            {isMovie
+              ? `${year ?? ""} (movie)`.trim()
+              : isSeasonScope
+                ? `Season ${season} (packs & episodes)`
+                : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}
           </DialogDescription>
         </DialogHeader>
 

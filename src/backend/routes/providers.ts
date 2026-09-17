@@ -37,13 +37,21 @@ export function providerRoutes() {
           const url = new URL(req.url);
           const q = url.searchParams.get("q");
           if (!q || q.trim().length === 0) return json([]);
+          // Film search: TMDB-only (?kind=movie → /search/movie, ids come
+          // back m- prefixed so they can't collide with series).
+          const kind = url.searchParams.get("kind");
+          if (kind === "movie" && source !== "tmdb") {
+            return errorResponse(`Movie search is only supported for source "tmdb".`, 400);
+          }
 
           const config = loadConfig();
           const provider = ProviderFactory.getProvider(source, config);
           if (!provider.isConfigured()) {
             return errorResponse(`Source "${source}" is not configured.`, 400);
           }
-          const results = await provider.searchShow(q);
+          const results = kind === "movie" && source === "tmdb"
+            ? await (provider as unknown as { searchMovies(q: string): Promise<any[]> }).searchMovies(q)
+            : await provider.searchShow(q);
           return json(
             results.slice(0, 12).map((r) => {
               const existing = db.getShowByProvider(source, r.id);
@@ -68,7 +76,7 @@ export function providerRoutes() {
                 backdropUrl: `/api/images/backdrop/${source}/${r.id}`,
                 existingShowId: existing?.id || null,
                 overview: source === "tmdb" ? meta?.overview : source === "anilist" ? meta?.description : null,
-                type: source === "anilist" ? meta?.format : null,
+                type: kind === "movie" ? "movie" : source === "anilist" ? meta?.format : null,
                 rating: normalizeRating(source, meta),
                 status: normalizeStatus(source, { metadata: meta }),
               };
@@ -134,7 +142,14 @@ export function providerRoutes() {
           if (!provider.isConfigured()) {
             return errorResponse(`Source "${source}" is not configured.`, 400);
           }
-          const show = await provider.getShow(req.params.id!);
+          const url = new URL(req.url);
+          const kind = url.searchParams.get("kind");
+          if (kind === "movie" && source !== "tmdb") {
+            return errorResponse(`Movie detail is only supported for source "tmdb".`, 400);
+          }
+          const show = kind === "movie" && source === "tmdb"
+            ? await (provider as unknown as { getMovie(id: string): Promise<any> }).getMovie(req.params.id!)
+            : await provider.getShow(req.params.id!);
           const imdbId = extractImdbId(source, show.metadata);
           const imdbRatings = imdbId ? await fetchImdbRatings(imdbId) : null;
           const imdbRating = imdbRatings?.rating ?? null;
@@ -295,6 +310,7 @@ function toGenres(source: ProviderType, show: { metadata?: Record<string, any> }
 function normalizeSeriesType(source: ProviderType, show: { metadata?: Record<string, any> }): string | null {
   const meta = metaOf(show);
   if (!meta) return null;
+  if (meta.media_kind === "movie") return "movie";
   if (source === "anilist") return typeof meta.format === "string" ? meta.format : null;
   if (source === "tmdb") return typeof meta.type === "string" ? meta.type : "tv";
   if (source === "tvdb" && Array.isArray(meta.genres)) {
@@ -366,6 +382,7 @@ function toFirstAirDate(source: ProviderType, show: { metadata?: Record<string, 
   const meta = metaOf(show);
   if (!meta) return null;
   if (source === "tmdb" && typeof meta.first_air_date === "string") return meta.first_air_date;
+  if (source === "tmdb" && typeof meta.release_date === "string") return meta.release_date;
   if (source === "anilist" && meta.startDate?.year) return String(meta.startDate.year);
   if (source === "tvdb" && typeof meta.first_air_time === "string") return meta.first_air_time.slice(0, 10);
   return null;
@@ -385,7 +402,9 @@ function toLinks(source: ProviderType, show: { metadata?: Record<string, any>; i
     : [];
 
   if (source === "tmdb") {
-    links.push({ label: "TMDB", url: `https://www.themoviedb.org/tv/${show.id}` });
+    const path = meta?.media_kind === "movie" ? "movie" : "tv";
+    const id = typeof show.id === "string" ? show.id.replace(/^m-/, "") : show.id;
+    links.push({ label: "TMDB", url: `https://www.themoviedb.org/${path}/${id}` });
   }
   if (source === "anilist") {
     links.push({ label: "AniList", url: `https://anilist.co/anime/${show.id}` });

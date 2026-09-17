@@ -32,7 +32,19 @@ export class SyncManager {
         });
       }
 
-      // 2. Update episodes with air dates (may be from a different provider)
+      // 2. Update episodes with air dates (may be from a different provider).
+      // Films have no episodes — metadata-only sync, then done. (Air-window
+      // reconcile below is episode-driven too, so movies skip it as well.)
+      if (show.series_type === 'movie') {
+        debugLog(`Successfully synced movie: ${show.title}`);
+        db.logEvent({
+          type: 'sync',
+          entityType: 'show',
+          entityId: showId,
+          message: `Synced movie "${show.title}"`,
+        });
+        return;
+      }
       if (airtimeProviderInfo) {
         const airtimeProvider = ProviderFactory.getProvider(airtimeProviderInfo.providerType as ProviderType, this.config);
         const episodes = await airtimeProvider.getEpisodes(airtimeProviderInfo.providerId);

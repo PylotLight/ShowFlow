@@ -62,6 +62,127 @@ interface SearchTarget {
   episode?: number;
 }
 
+interface MovieFileInfo {
+  path: string;
+  size: number | null;
+  sourceKind: string | null;
+  releaseTitle: string | null;
+  indexerName: string | null;
+  importedAt: string | null;
+}
+
+function formatMovieBytes(bytes: number | null): string {
+  if (bytes == null) return "";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024)));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * Detail body for films: no seasons/episodes exist, so this shows the
+ * metadata + file status with Browse/Auto-grab actions instead of the
+ * episode list.
+ */
+function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
+  showId: string;
+  showTitle: string;
+  onBrowse: () => void;
+  onAutoGrab: () => void;
+  grabbing: boolean;
+}) {
+  const [year, setYear] = React.useState<number | null>(null);
+  const [movieFile, setMovieFile] = React.useState<MovieFileInfo | null>(null);
+  const [meta, setMeta] = React.useState<{ overview?: string | null; genres?: string[] | null; rating?: number | null; firstAirDate?: string | null; status?: string | null } | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/shows/${showId}`)
+      .then(r => r.json())
+      .then(async (data) => {
+        if (cancelled) return;
+        setYear(typeof data.year === "number" ? data.year : null);
+        setMovieFile(data.movieFile ?? null);
+        if (data.providerType === "tmdb" && data.providerId) {
+          try {
+            const m = await fetch(`/api/providers/tmdb/show/${data.providerId}?kind=movie`).then(r => r.json());
+            if (!cancelled) setMeta(m);
+          } catch {}
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [showId]);
+
+  return (
+    <GlassPanel className="p-5 flex flex-col gap-4">
+      {loading ? (
+        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />
+          Loading movie...
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 bg-white/[0.06] border border-white/10 rounded-full px-2 py-0.5">
+              Movie{year ? ` · ${year}` : ""}
+            </span>
+            {meta?.status && (
+              <span className="font-mono text-[10px] uppercase tracking-wider text-white/50">{meta.status}</span>
+            )}
+            {movieFile ? (
+              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-signal border border-signal/20">
+                <Check className="size-3" strokeWidth={3} />
+                Available{movieFile.size != null ? ` · ${formatMovieBytes(movieFile.size)}` : ""}
+              </span>
+            ) : (
+              <span className="rounded-full bg-accent-amber/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20">
+                Missing — not downloaded
+              </span>
+            )}
+          </div>
+          {meta?.overview && (
+            <p className="text-sm text-white/70 leading-relaxed max-w-3xl">{meta.overview}</p>
+          )}
+          {(meta?.genres?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {meta!.genres!.map(g => (
+                <span key={g} className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground">{g}</span>
+              ))}
+            </div>
+          )}
+          {movieFile && (
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[11px] text-white/60 break-all">
+              {movieFile.path}
+              {movieFile.releaseTitle && <span className="block text-white/35 mt-0.5">from: {movieFile.releaseTitle}</span>}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onBrowse}
+              className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.07] text-muted-foreground hover:text-foreground px-3 py-1.5 font-mono text-caption uppercase tracking-wider transition-colors"
+            >
+              <SearchIcon className="size-3.5" /> Browse releases
+            </button>
+            <button
+              type="button"
+              onClick={onAutoGrab}
+              disabled={grabbing}
+              className="flex items-center gap-1.5 rounded-full bg-signal/15 hover:bg-signal/25 text-signal px-3 py-1.5 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              {grabbing ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
+              {movieFile ? "Upgrade" : "Auto-grab"}
+            </button>
+          </div>
+        </>
+      )}
+    </GlassPanel>
+  );
+}
+
 function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: { show: ShowSummary; onBack: () => void; modal?: boolean; onToggleExpand?: () => void; expanded?: boolean }) {
   const [seasons, setSeasons] = React.useState<SeasonStat[] | null>(null);
   // All seasons' episodes, keyed by season number. One unified list, latest
@@ -84,7 +205,11 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
   const [folderProfiles, setFolderProfiles] = React.useState<{ id: string; name: string; root_folder_path: string }[]>([]);
   const [rootFolderPath, setRootFolderPath] = React.useState<string | null>(null);
   const [rootFolderSaving, setRootFolderSaving] = React.useState(false);
-  const [seriesType, setSeriesType] = React.useState<string>("standard");
+  const [seriesType, setSeriesType] = React.useState<string>(show.seriesType ?? "standard");
+  // Films render a dedicated panel (no seasons/episodes exist for them).
+  const isMovie = (show.seriesType ?? seriesType) === "movie";
+  // Bumps to re-fetch the movie panel after a grab/import.
+  const [movieRefresh, setMovieRefresh] = React.useState(0);
   const [releaseDelayMinutes, setReleaseDelayMinutes] = React.useState<number | null>(null);
 
   const [manageSourcesOpen, setManageSourcesOpen] = React.useState(false);
@@ -246,7 +371,8 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
     setSeasons(null);
     setEpisodesBySeason({});
     setCollapsed({});
-    loadAllEpisodes();
+    // Films have no episode rows — the movie panel owns its own fetches.
+    if ((show.seriesType ?? "standard") !== "movie") loadAllEpisodes();
   }, [show.id]);
 
   const orderedSeasons = React.useMemo(() => (seasons ? orderSeasons(seasons) : []), [seasons]);
@@ -917,7 +1043,28 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
       {/* Content — pulled up over the banner's fade tail so the art melts
           below the episode panel instead of ending above it. */}
       <div className="relative z-10 flex-1 px-4 md:px-8 pt-4 md:pt-6 pb-4 md:pb-8 flex flex-col min-h-0 -mt-10 md:-mt-14">
-        {seasons === null ? (
+        {isMovie ? (
+          <MoviePanel
+            key={movieRefresh}
+            showId={show.id}
+            showTitle={show.title}
+            onBrowse={() => setSearchTarget({ season: 0 })}
+            onAutoGrab={async () => {
+              setGrabTarget("movie");
+              try {
+                const res = await fetch(`/api/shows/${show.id}/movie/grab`, { method: "POST" });
+                const data = await res.json();
+                flashStatus(data.message ?? (data.success ? "Grabbed" : "Grab failed"), !!data.success);
+                if (data.success) setMovieRefresh((n) => n + 1);
+              } catch (err: any) {
+                flashStatus(err.message ?? "Grab failed", false);
+              } finally {
+                setGrabTarget(null);
+              }
+            }}
+            grabbing={grabTarget === "movie"}
+          />
+        ) : seasons === null ? (
           <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
             <div className="size-4 rounded-full border border-muted-foreground/40 border-t-transparent animate-spin" />
             Loading seasons...
@@ -1072,9 +1219,14 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
           showTitle={show.title}
           season={searchTarget.season}
           episode={searchTarget.episode}
+          kind={isMovie ? "movie" : "tv"}
           onGrabbed={(message, success) => {
             flashStatus(message, success);
-            loadAllEpisodes();
+            if (isMovie) {
+              if (success) setMovieRefresh((n) => n + 1);
+            } else {
+              loadAllEpisodes();
+            }
           }}
           autoCloseOnSuccess
         />

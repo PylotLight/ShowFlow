@@ -122,6 +122,10 @@ function sortResults(results: SearchResult[], mode: SortMode): SearchResult[] {
 function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = React.useState(false);
   const [source, setSource] = React.useState<ProviderId>("tvdb");
+  // TV vs film search — films are TMDB-only (?kind=movie → /search/movie,
+  // added with seriesType 'movie').
+  const [kind, setKind] = React.useState<"tv" | "movie">("tv");
+  const isMovieKind = kind === "movie" && source === "tmdb";
   const [availableSources, setAvailableSources] = React.useState<ProviderId[]>([]);
   const [query, setQuery] = React.useState("");
   const [sortMode, setSortMode] = React.useState<SortMode>("relevance");
@@ -202,6 +206,19 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     setSelectedShowProfileId(findProfileForType(seriesType));
   }, [seriesType, showProfiles]);
 
+  // Movies default to a *Movies* library type when one exists (root folder
+  // + profile follow from it); TV keeps the default type.
+  React.useEffect(() => {
+    if (libraryTypes.length === 0) return;
+    if (isMovieKind) {
+      const movies = libraryTypes.find(t => /movie/i.test(t.name));
+      if (movies) setSelectedLibraryTypeId(movies.id);
+    } else {
+      const def = libraryTypes.find((t: any) => t.is_default === 1) || libraryTypes[0];
+      if (def) setSelectedLibraryTypeId(def.id);
+    }
+  }, [isMovieKind, libraryTypes]);
+
   React.useEffect(() => {
     if (!query.trim()) {
       setResults([]);
@@ -211,7 +228,8 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     setError(null);
     const timeout = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/providers/${source}/search?q=${encodeURIComponent(query)}`);
+        const kindParam = kind === "movie" && source === "tmdb" ? "&kind=movie" : "";
+        const res = await fetch(`/api/providers/${source}/search?q=${encodeURIComponent(query)}${kindParam}`);
         if (!res.ok) throw new Error((await res.json()).error ?? "Search failed");
         const data = await res.json();
         setResults(data);
@@ -224,7 +242,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
       }
     }, 350);
     return () => clearTimeout(timeout);
-  }, [query, source]);
+  }, [query, source, kind]);
 
   React.useEffect(() => {
     if (!activeItem || activeItem.existingShowId) {
@@ -236,7 +254,8 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
     setDetailLoading(true);
     setDetailError(null);
     setDetail(null);
-    fetch(`/api/providers/${source}/show/${activeItem.id}`)
+    const kindParam = isMovieKind ? "?kind=movie" : "";
+    fetch(`/api/providers/${source}/show/${activeItem.id}${kindParam}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load details");
         return res.json();
@@ -251,7 +270,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         if (!cancelled) setDetailLoading(false);
       });
     return () => { cancelled = true; };
-  }, [activeItem, source]);
+  }, [activeItem, source, isMovieKind]);
 
   function toggleSelect(item: SearchResult) {
     setSelectedItems(prev => {
@@ -282,7 +301,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             providerId: item.id,
             name: item.title,
             profile: selectedLibraryTypeId ? undefined : (selectedQualityProfile || undefined),
-            seriesType,
+            seriesType: isMovieKind ? "movie" : seriesType,
             showProfileId: selectedShowProfileId || undefined,
             libraryTypeId: selectedLibraryTypeId || undefined,
           }),
@@ -320,7 +339,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         </DialogHeader>
 
         <div className="flex gap-2">
-          <Select value={source} onValueChange={(v) => { setSource(v as ProviderId); setSeriesType(v === "anilist" ? "anime" : "standard"); }}>
+          <Select value={source} onValueChange={(v) => { setSource(v as ProviderId); if (v !== "tmdb") setKind("tv"); setSeriesType(v === "anilist" ? "anime" : "standard"); }}>
             <SelectTrigger className="w-28 shrink-0">
               <SelectValue />
             </SelectTrigger>
@@ -330,6 +349,22 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
               ))}
             </SelectContent>
           </Select>
+          {source === "tmdb" && (
+            <div className="flex shrink-0 rounded-md border border-white/10 p-0.5 text-xs font-mono">
+              {(["tv", "movie"] as const).map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => { setKind(k); setSeriesType(k === "movie" ? "movie" : "standard"); }}
+                  className={kind === k
+                    ? "rounded px-2.5 py-1 font-bold uppercase tracking-wider bg-signal/15 text-signal"
+                    : "rounded px-2.5 py-1 uppercase tracking-wider text-muted-foreground hover:text-white"}
+                >
+                  {k === "tv" ? "TV" : "Movies"}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="relative flex-1">
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
@@ -375,13 +410,14 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
           )}
           <div className="flex items-center gap-1.5">
             <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Series</span>
-            <Select value={seriesType} onValueChange={setSeriesType}>
+            <Select value={isMovieKind ? "movie" : seriesType} onValueChange={setSeriesType} disabled={isMovieKind}>
               <SelectTrigger className="w-28 h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="standard">Standard</SelectItem>
                 <SelectItem value="anime">Anime</SelectItem>
+                {isMovieKind && <SelectItem value="movie">Movie</SelectItem>}
               </SelectContent>
             </Select>
           </div>

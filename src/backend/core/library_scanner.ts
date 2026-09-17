@@ -1,5 +1,6 @@
 import { db, type Config } from '../db';
 import { normalizeShowTitle } from '../db/shows';
+import { parseMovieFilename, findMovieShow } from './movie_match';
 import { FilenameParser } from '../parser';
 import { debugLog } from './debug';
 import {
@@ -144,6 +145,89 @@ export class LibraryScanner {
     return LibraryScanner.VIDEO_EXTENSIONS.has(path.extname(base).toLowerCase());
   }
 
+  /**
+   * Movie-file mapping for library scans (#33): parses the filename into a
+   * probable title+year, matches a library movie show, and records the file
+   * on the (0,0) sentinel — same idempotency/probe/provenance handling as
+   * episodes, minus the episodes-table path update (movies have no rows).
+   * Returns 'changed' only when a row was actually recorded, so callers can
+   * keep the audit log quiet on steady state.
+   */
+  private async mapMovieFile(file: string, filename: string): Promise<'changed' | 'unchanged'> {
+    const movie = parseMovieFilename(filename);
+    if (!movie) return 'unchanged';
+    const hit = findMovieShow(movie.title, movie.year);
+    if (!hit) return 'unchanged';
+    const recorded = await this.recordMovieFileForShow(hit.showId, file, filename);
+    if (recorded === 'changed') {
+      db.logEvent({
+        type: 'scan',
+        entityType: 'episode',
+        entityId: `${hit.showId}:movie`,
+        message: `Mapped file ${filename} to movie "${hit.showTitle}"`,
+      });
+    }
+    return recorded;
+  }
+
+  /**
+   * Per-show variant for scanShow(movie): the show is already known, so no
+   * title lookup — just idempotency + probe + record.
+   */
+  private async mapMovieFileToShow(showId: string, file: string, filename: string): Promise<'changed' | 'unchanged'> {
+    const recorded = await this.recordMovieFileForShow(showId, file, filename);
+    if (recorded === 'changed') {
+      db.logEvent({
+        type: 'scan',
+        entityType: 'episode',
+        entityId: `${showId}:movie`,
+        message: `[show scan] Mapped file ${filename} to movie`,
+      });
+    }
+    return recorded;
+  }
+
+  private async recordMovieFileForShow(showId: string, file: string, filename: string): Promise<'changed' | 'unchanged'> {
+    let live = null;
+    let size: number | null = null;
+    try {
+      const st = await fs.promises.stat(file);
+      size = st.size;
+      live = db.getMovieFile(showId);
+    } catch {
+      return 'unchanged';
+    }
+    if (live && live.file_path === file && live.container && live.file_size === size) {
+      return 'unchanged';
+    }
+    try {
+      const grab = db.findMostRecentGrabForShow(showId, 30);
+      const media = (live && live.container && live.file_size === size)
+        ? {
+          container: live.container, video_width: live.video_width, video_height: live.video_height,
+          video_codec: live.video_codec, video_fps: live.video_fps, hdr: live.hdr,
+          audio_codec: live.audio_codec, audio_channels: live.audio_channels,
+          duration_seconds: live.duration_seconds, bitrate_kbps: live.bitrate_kbps,
+        }
+        : await probeToMediaColumns(file);
+      db.recordMovieFile({
+        showId,
+        filePath: file,
+        originalName: filename,
+        fileSize: size,
+        sourceKind: grab ? 'release' : 'import',
+        releaseTitle: grab?.release_title ?? null,
+        indexerName: grab?.indexer_name ?? null,
+        publishDate: grab?.publish_date ?? null,
+        media,
+      });
+      return 'changed';
+    } catch (err) {
+      debugLog(`Failed to record movie provenance for ${file}: ${err}`);
+      return 'unchanged';
+    }
+  }
+
   constructor(private config: Config) {}
 
   /**
@@ -247,6 +331,9 @@ export class LibraryScanner {
       const isMovieFile = underMovieRoot(file) && !episodeLike;
 
       if (!parsed) {
+        // Unparseable under a movie root: probably a film — try the movie
+        // matcher before giving up (#33).
+        if (isMovieFile && await this.mapMovieFile(file, filename) === 'changed') { foundCount++; continue; }
         if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Could not parse filename: ${filename}`);
         continue;
@@ -273,6 +360,7 @@ export class LibraryScanner {
         }));
       }
       if (shows.length === 0) {
+        if (isMovieFile && await this.mapMovieFile(file, filename) === 'changed') { foundCount++; continue; }
         if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Show not found in database: ${parsed.show} (${filename})`);
         unknownCount++;
@@ -284,6 +372,7 @@ export class LibraryScanner {
       // file to the wrong show.
       const show = shows.find((s: any) => this.titleMatchesShow(parsed.show, s.title, s)) ?? shows[0];
       if (!show) {
+        if (isMovieFile && await this.mapMovieFile(file, filename) === 'changed') { foundCount++; continue; }
         if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Show not found in database: ${parsed.show} (${filename})`);
         unknownCount++;
@@ -353,7 +442,7 @@ export class LibraryScanner {
       });
     }
 
-    console.log(`Scan complete. Mapped ${foundCount} episodes, quarantined ${quarantinedCount} junk file(s), deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows. Skipped ${moviesSkipped} movie file(s).`);
+    console.log(`Scan complete. Mapped ${foundCount} episodes/movies, quarantined ${quarantinedCount} junk file(s), deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows. Skipped ${moviesSkipped} unmatched movie file(s).`);
   }
 
   private normalizeForMatch(value: string): string {
@@ -393,6 +482,36 @@ export class LibraryScanner {
     const rootFolder = libraryRoot || show.root_folder_path || db.getShowRootFolder(showId);
     if (!rootFolder) {
       console.log(`No root folder for show "${show.title}". Nothing to scan.`);
+      return;
+    }
+
+    // Films have no episode rows — narrow by the movie file (if any),
+    // else the `Title (Year)` folder, else the full root.
+    if ((show.series_type ?? 'standard') === 'movie') {
+      const movieFile = db.getMovieFile(showId);
+      let movieDir = rootFolder;
+      try {
+        if (movieFile) {
+          movieDir = path.dirname(movieFile.file_path);
+        } else {
+          const titled = resolveShowScanDir(rootFolder, `${show.title}${show.year ? ` (${show.year})` : ''}`, []);
+          if ((await fs.promises.stat(titled)).isDirectory()) movieDir = titled;
+        }
+      } catch {}
+      console.log(`Scanning movie "${show.title}" in ${movieDir}`);
+      let movieFound = 0;
+      const quarantineDir = resolveQuarantineDir(this.config);
+      try {
+        for (const file of this.walk(movieDir)) {
+          const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
+          if (junkOutcome) continue;
+          if (!this.shouldScanFile(file)) continue;
+          if (await this.mapMovieFileToShow(showId, file, path.basename(file)) === 'changed') movieFound++;
+        }
+      } catch (e: any) {
+        if (e?.code !== 'ENOENT') console.warn(`Error scanning movie "${show.title}":`, e);
+      }
+      console.log(`Movie scan complete for "${show.title}". Mapped ${movieFound} file(s).`);
       return;
     }
 

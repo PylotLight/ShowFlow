@@ -256,7 +256,7 @@ export function Library({
                         className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {seriesTypes.map(st => (
                         <button key={st} onClick={() => setSeriesTypeFilter(st)}
-                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === st ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{st}</button>
+                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === st ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{st.charAt(0).toUpperCase() + st.slice(1)}</button>
                       ))}
                     </div>
                   );

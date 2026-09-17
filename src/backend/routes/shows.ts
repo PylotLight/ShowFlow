@@ -193,6 +193,11 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
 
           const showUuid = crypto.randomUUID();
           const seriesType = body.seriesType || 'standard';
+          // Films are TMDB-only (the sole provider with movie metadata);
+          // their provider ids carry the m- prefix (see TMDBProvider).
+          if (seriesType === 'movie' && body.source !== 'tmdb') {
+            return errorResponse(`seriesType "movie" is only supported for source "tmdb".`, 400);
+          }
 
           // When libraryTypeId is set, resolve root folder and quality profile
           // from the library type (design-brief-platform-ux-systems.md §1).
@@ -287,8 +292,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           if (!hasChanges) {
             return errorResponse("Nothing to update - provide profile, seriesType, libraryTypeId, or tracked.");
           }
-          if (body.seriesType !== undefined && !['standard', 'anime'].includes(body.seriesType)) {
-            return errorResponse("seriesType must be 'standard' or 'anime'.");
+          if (body.seriesType !== undefined && !['standard', 'anime', 'movie'].includes(body.seriesType)) {
+            return errorResponse("seriesType must be 'standard', 'anime', or 'movie'.");
           }
 
           const updatedIds = db.bulkUpdateShows(ids, {
@@ -324,21 +329,35 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           if (!show) return errorResponse("Show not found.", 404);
 
           const config = db.getShowConfig(req.params.id!);
+          const seriesType = show.series_type ?? 'standard';
+
+          // Films carry no episode rows — hand the UI the live movie file
+          // directly so the detail page can render status without a scan.
+          const movieFile = seriesType === 'movie' ? db.getMovieFile(req.params.id!) : null;
 
           return json({
             id: show.id,
             providerType: show.provider_type,
+            providerId: show.provider_id,
             title: show.title,
             profile: show.profile,
             year: show.year,
             originalTitle: show.original_title,
             rootFolderPath: show.root_folder_path,
-            seriesType: show.series_type ?? 'standard',
+            seriesType,
             lastUpdated: show.last_updated,
             // Learned release delay forecast (minutes after air). Used by the
             // UI to show the show's expected release window alongside air
             // dates.
             releaseDelayMinutes: show.release_delay_minutes,
+            movieFile: movieFile ? {
+              path: movieFile.file_path,
+              size: movieFile.file_size,
+              sourceKind: movieFile.source_kind,
+              releaseTitle: movieFile.release_title,
+              indexerName: movieFile.indexer_name,
+              importedAt: movieFile.imported_at,
+            } : null,
             config,
           });
         } catch (err) {
@@ -1224,6 +1243,51 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease) });
         } catch (err) {
           return errorResponse(err, 502);
+        }
+      },
+    },
+
+    // Movie equivalents of the season/episode search+grab above: films are
+    // single-shot (no S/E), so one search and one grab endpoint each.
+    "/api/shows/:id/movie/search": {
+      async GET(req: RouteReq) {
+        try {
+          const show = db.getShow(req.params.id!);
+          if (!show) return errorResponse("Show not found.", 404);
+          if ((show.series_type ?? 'standard') !== 'movie') {
+            return errorResponse("Movie search is only available for movie entries.", 400);
+          }
+          const config = loadConfig();
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
+          const result = await grabber.searchMovieReleases(req.params.id!);
+          if ("error" in result) return errorResponse(result.error, 400);
+          const movieFile = db.getMovieFile(req.params.id!);
+          return json({
+            profileId: result.profileId,
+            releases: result.releases.map(serializeRelease),
+            hasFile: !!movieFile,
+            filePath: movieFile?.file_path ?? null,
+          });
+        } catch (err) {
+          return errorResponse(err, 502);
+        }
+      },
+    },
+
+    "/api/shows/:id/movie/grab": {
+      async POST(req: RouteReq) {
+        try {
+          const show = db.getShow(req.params.id!);
+          if (!show) return errorResponse("Show not found.", 404);
+          if ((show.series_type ?? 'standard') !== 'movie') {
+            return errorResponse("Movie grab is only available for movie entries.", 400);
+          }
+          const config = loadConfig();
+          const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
+          const result = await grabber.grabBestMovieRelease(req.params.id!);
+          return json({ ...result, bestRelease: result.bestRelease ? serializeRelease(result.bestRelease) : undefined, release: result.release ? serializeRelease(result.release) : undefined });
+        } catch (err) {
+          return errorResponse(err, 500);
         }
       },
     },

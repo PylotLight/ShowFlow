@@ -4,6 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Oracle } from '../../parser/oracle';
 import type { ParsedFilename } from '../../parser/index';
+import { FilenameParser } from '../../parser/index';
+import { parseMovieFilename, findMovieShow, type MovieShowHit } from '../movie_match';
 import { db } from '../../db';
 import type { ProviderType } from '../../providers/factory';
 import type { Episode } from '../types';
@@ -464,6 +466,169 @@ export class BlackholeClient implements DownloadClient {
     }
   }
 
+  /**
+   * Library movie match for a watch-folder filename (#33). Returns a hit
+   * only when the name carries NO season/episode markers (episode files
+   * must keep flowing to the oracle) and parses to a title matching a
+   * library movie show.
+   */
+  private matchMovieFile(filename: string): MovieShowHit | null {
+    const parsed = new FilenameParser().parse(filename);
+    if (parsed && (parsed.season !== undefined || (parsed.episodes?.length ?? 0) > 0 || (parsed.absoluteNumbers?.length ?? 0) > 0)) {
+      return null;
+    }
+    const movie = parseMovieFilename(filename);
+    if (!movie) return null;
+    return findMovieShow(movie.title, movie.year);
+  }
+
+  /**
+   * Full movie import: upgrade-gated move into `Title (Year)/Title (Year).ext`
+   * under the show's root, provenance on the (0,0) sentinel, pipeline event.
+   * Mirrors the episode tail below without the seasons/episodes machinery.
+   */
+  private async importMovieFile(
+    filename: string,
+    fullPath: string,
+    hash: string,
+    hit: MovieShowHit,
+    opts?: { force?: boolean; showId?: string; overrides?: { season?: number; episodes?: number[] } },
+  ) {
+    const showId = hit.showId;
+    const show = db.getShow(showId);
+    if (!show) {
+      debugLog(`Movie import: show ${showId} vanished, holding ${filename}`);
+      if (!opts?.force) this.holdForManual(fullPath);
+      return;
+    }
+    db.logPipelineEvent({
+      showId, stage: 'IMPORTING', eventType: 'import_started',
+      message: `Processing "${filename}" for movie "${show.title}"`,
+      releaseTitle: filename,
+    });
+
+    const rootFolder = db.getShowRootFolder(showId);
+    if (!rootFolder) {
+      const message = `No root folder configured for movie "${show.title}". File ${filename} skipped.`;
+      console.error(`[${this.name}] ${message}`);
+      db.logEvent({ type: 'error', entityType: 'file', message });
+      db.logPipelineEvent({ showId, stage: 'FAILED', eventType: 'import_failed', message, releaseTitle: filename });
+      if (!opts?.force) this.holdForManual(fullPath);
+      return;
+    }
+
+    const base = `${show.title}${show.year ? ` (${show.year})` : ''}`.replace(/[<>":/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    const ext = path.extname(filename) || '.mkv';
+    const finalPath = path.join(rootFolder, base, `${base}${ext}`);
+
+    if (this.config.dryRun) {
+      console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);
+      db.logEvent({ type: 'dryrun', entityType: 'file', message: `[dry-run] Would import ${filename} for movie "${show.title}"` });
+      return;
+    }
+
+    const existing = db.getMovieFile(showId);
+    if (existing) {
+      const existingFilename = path.basename(existing.file_path);
+      const profileId = show.profile || 'standard';
+      if (opts?.force) {
+        console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
+        try { await unlink(existing.file_path); } catch (e) {
+          console.warn(`[${this.name}] Failed to remove old file ${existing.file_path}:`, e);
+        }
+      } else {
+        let existingProbe: ProbeMediaForComparison | null = null;
+        if (existing.container) {
+          existingProbe = mediaFromStoredRow(existing);
+        } else if (existing.file_path && (await Bun.file(existing.file_path).exists())) {
+          existingProbe = await probeMediaFile(existing.file_path);
+        }
+        const isUpgrade = existingProbe
+          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
+          : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
+        if (!isUpgrade) {
+          console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}. Skipping. File remains in watch folder for manual review.`);
+          db.logEvent({ type: 'skip', entityType: 'file', message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.` });
+          db.logPipelineEvent({
+            showId, stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
+            message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
+            releaseTitle: filename,
+          });
+          if (!opts?.force) this.holdForManual(fullPath);
+          return;
+        }
+        console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
+        db.logEvent({ type: 'upgrade', entityType: 'file', message: `Upgrading ${existingFilename} to ${filename} for movie "${show.title}"` });
+        try { await unlink(existing.file_path); } catch (e) {
+          console.warn(`[${this.name}] Failed to remove old file ${existing.file_path}:`, e);
+        }
+      }
+    }
+
+    try {
+      await mkdir(path.dirname(finalPath), { recursive: true });
+    } catch (mkdirErr: any) {
+      const code = mkdirErr?.code ? ` (${mkdirErr.code})` : '';
+      throw new Error(`Could not create destination directory ${path.dirname(finalPath)}${code}.`);
+    }
+    let movedTo: string | null;
+    try {
+      movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
+    } catch (moveErr: any) {
+      throw new Error(`Failed to move ${fullPath} -> ${finalPath}: ${moveErr instanceof Error ? moveErr.message : moveErr}.`);
+    }
+    if (movedTo === null) {
+      if (!opts?.force) this.holdForManual(fullPath);
+      return;
+    }
+    this.releaseManualHold(fullPath);
+
+    console.log(`[${this.name}] Moved ${filename} -> ${movedTo} (movie "${show.title}")`);
+    db.logProcessedFile(hash, fullPath, movedTo);
+    db.logEvent({
+      type: 'grab', entityType: 'episode', entityId: showId,
+      message: `Imported ${filename} for movie "${show.title}"`,
+      metadata: { movedTo },
+    });
+
+    const mediaProbe = await probeMediaFile(movedTo);
+    let fileSize: number | null = null;
+    try { fileSize = (await stat(movedTo)).size; } catch {}
+    try {
+      const grab = db.findMostRecentGrabForShow(showId, 30);
+      db.recordMovieFile({
+        showId,
+        filePath: movedTo,
+        originalName: filename,
+        fileSize,
+        sourceKind: grab ? 'release' : 'import',
+        releaseTitle: grab?.release_title ?? null,
+        indexerName: grab?.indexer_name ?? null,
+        publishDate: grab?.publish_date ?? null,
+        media: mediaProbe ? {
+          container: mediaProbe.container,
+          video_width: mediaProbe.video?.width ?? null,
+          video_height: mediaProbe.video?.height ?? null,
+          video_codec: mediaProbe.video?.codec?.toLowerCase() ?? null,
+          video_fps: mediaProbe.video?.fps ? Math.round(mediaProbe.video.fps) : null,
+          hdr: mediaProbe.video?.hdr ? 1 : null,
+          audio_codec: mediaProbe.audio?.[0]?.codec?.toLowerCase() ?? null,
+          audio_channels: mediaProbe.audio?.[0]?.channels ?? null,
+          duration_seconds: mediaProbe.durationSeconds ? Math.round(mediaProbe.durationSeconds) : null,
+          bitrate_kbps: mediaProbe.overallBitrate ? Math.round(mediaProbe.overallBitrate / 1000) : null,
+        } : null,
+      });
+    } catch (err) {
+      console.warn(`[${this.name}] Failed to record movie provenance for ${filename}:`, err);
+    }
+    db.logPipelineEvent({
+      showId, stage: 'AVAILABLE', eventType: 'import_completed',
+      message: `Imported "${filename}" for movie "${show.title}"`,
+      releaseTitle: filename,
+      metadata: { filePath: movedTo },
+    });
+  }
+
   private async handleFile(
     folder: string,
     filename: string,
@@ -521,6 +686,22 @@ export class BlackholeClient implements DownloadClient {
         } else {
           console.log(`[${this.name}] Skipping duplicate: ${filename}`);
           db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
+          return;
+        }
+      }
+
+      // ---- Movie fast-path (#33) -------------------------------------
+      // The oracle is episode-only: a film filename resolves to nothing and
+      // would burn a full provider round-trip (and its 404 spam) before
+      // landing in holdForManual. When the filename carries no
+      // season/episode markers, try the library movie matcher FIRST and
+      // import the film; anything unmatched falls through to the normal
+      // episode path below. Explicit show hints (manual import) always take
+      // the episode path.
+      if (!opts?.showId) {
+        const movieHit = this.matchMovieFile(filename);
+        if (movieHit) {
+          await this.importMovieFile(filename, fullPath, hash, movieHit, opts);
           return;
         }
       }

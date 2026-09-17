@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-
+- **Full movie support**: add films from TMDB (TV/Movies toggle in Add Show, m- prefixed ids so films never collide with series), library entries with posters/backdrops, per-movie Browse + Auto-grab (title+year index search, remake-safe matching, upgrade-aware), automatic import matching (`Title (Year)/Title (Year).ext`), library scan mapping, and a dedicated detail panel with file status. No migration — films reuse episode_files on a (0,0) sentinel plus nullable grab rows.
 ## [v0.1.59] - 2026-09-17
 - **TMDB auth fixed**: v4 read-access tokens (JWTs starting `eyJ…`) now ride the `Authorization: Bearer` header per TMDB's app auth docs instead of `?api_key=` (which always 401s); v3 keys keep using `api_key`. Either paste works — settings labels say so.
 - **Browse missed releases**: Recently Released rows for aired-but-missing episodes now show a Browse pill that opens the per-episode release browser scoped to that exact episode.

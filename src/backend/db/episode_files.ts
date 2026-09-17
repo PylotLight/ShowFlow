@@ -294,3 +294,33 @@ export function listAllCurrentEpisodeFiles(self: DatabaseManager): EpisodeFileRo
     .where(eq(schema.episodeFiles.is_current, 1))
     .all() as EpisodeFileRow[];
 }
+
+// ---- Movies --------------------------------------------------------------
+//
+// Films live in the same table keyed on the (0, 0) sentinel: no episodes
+// table row exists for a movie, so season/episode-scoped queries never
+// touch these rows, while prune/idempotency/media/probe handling is
+// reused untouched. No migration needed (columns are already nullable-
+// friendly and there is no CHECK constraint).
+
+/** Sentinel S/E key for movie rows in episode_files. */
+export const MOVIE_SEASON = 0;
+export const MOVIE_EPISODE = 0;
+
+/** The live file for a movie show, if any. */
+export function getMovieFile(self: DatabaseManager, showId: string): EpisodeFileRow | null {
+  return getCurrentEpisodeFile(self, showId, MOVIE_SEASON, MOVIE_EPISODE);
+}
+
+export type RecordMovieFileInput = Omit<RecordEpisodeFileInput, 'showId' | 'season' | 'episode'> & {
+  showId: string;
+};
+
+/** Records a movie's on-disk file (supersedes the previous live row). */
+export function recordMovieFile(self: DatabaseManager, input: RecordMovieFileInput) {
+  return recordEpisodeFile(self, {
+    ...input,
+    season: MOVIE_SEASON,
+    episode: MOVIE_EPISODE,
+  });
+}

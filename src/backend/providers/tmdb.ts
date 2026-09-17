@@ -5,6 +5,22 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   name = 'tmdb';
   protected apiBaseUrl = 'https://api.themoviedb.org/3';
 
+  /**
+   * Movie ids are stored provider-side prefixed (`m-<tmdbid>`) so a film
+   * and a series sharing a numeric TMDB id never collide in
+   * show_providers — and so getShow() below can route to /movie/ without
+   * any caller needing to know the kind.
+   */
+  static readonly MOVIE_PREFIX = 'm-';
+
+  static isMovieId(id: string): boolean {
+    return id.startsWith(TMDBProvider.MOVIE_PREFIX);
+  }
+
+  static stripMoviePrefix(id: string): string {
+    return TMDBProvider.isMovieId(id) ? id.slice(TMDBProvider.MOVIE_PREFIX.length) : id;
+  }
+
   constructor(config: any = {}) {
     super(config);
     const token = config?.apiKeys?.tmdb || process.env.TMDB_API_KEY || '';
@@ -54,6 +70,10 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getShow(id: string): Promise<Show> {
+    // Library movies are stored with the m- prefix — route straight to
+    // /movie/ so every existing getShow() caller (warmer, images, sync,
+    // bulk detail) works for films untouched.
+    if (TMDBProvider.isMovieId(id)) return this.getMovie(id);
     const data = await this.fetch<any>(`/tv/${id}${this.qs({ language: 'en-US', append_to_response: 'external_ids' })}`);
     return {
       id: data.id.toString(),
@@ -175,7 +195,10 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
    * of being stuck with whatever single backdrop the metadata carries.
    */
   async getBackdrops(id: string): Promise<{ url: string; width?: number; height?: number }[]> {
-    const data = await this.fetch<any>(`/tv/${id}/images${this.qs({})}`);
+    // Movie ids (m- prefix) route to the film image list — same shape.
+    const mid = TMDBProvider.stripMoviePrefix(id);
+    const path = TMDBProvider.isMovieId(id) ? `/movie/${mid}/images` : `/tv/${id}/images`;
+    const data = await this.fetch<any>(`${path}${this.qs({})}`);
     const backdrops = Array.isArray(data?.backdrops) ? data.backdrops : [];
     return backdrops
       .filter((b: any) => typeof b?.file_path === 'string' && b.file_path.length > 0)
@@ -185,5 +208,37 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
         width: typeof b?.width === 'number' ? b.width : undefined,
         height: typeof b?.height === 'number' ? b.height : undefined,
       }));
+  }
+
+  /**
+   * Film metadata for a (possibly m- prefixed) movie id. Stored library
+   * ids keep the prefix so films never collide with same-numbered series.
+   */
+  async getMovie(id: string): Promise<Show> {
+    const mid = TMDBProvider.stripMoviePrefix(id);
+    const data = await this.fetch<any>(`/movie/${mid}${this.qs({ language: 'en-US', append_to_response: 'external_ids' })}`);
+    return {
+      id: `${TMDBProvider.MOVIE_PREFIX}${data.id}`,
+      title: data.title,
+      year: data.release_date ? parseInt(data.release_date.substring(0, 4)) : undefined,
+      originalTitle: data.original_title,
+      provider: this.name,
+      metadata: { ...data, media_kind: 'movie' },
+    };
+  }
+
+  async searchMovies(query: string): Promise<Show[]> {
+    const data = await this.fetch<{ results: any[] }>(
+      `/search/movie${this.qs({ query, language: 'en-US', include_adult: 'false' })}`
+    );
+    return data.results.map(item => ({
+      id: `${TMDBProvider.MOVIE_PREFIX}${item.id}`,
+      title: item.title,
+      year: item.release_date ? parseInt(item.release_date.substring(0, 4)) : undefined,
+      originalTitle: item.original_title,
+      provider: this.name,
+      normalizedId: `${TMDBProvider.MOVIE_PREFIX}${item.id}`,
+      metadata: { ...item, media_kind: 'movie' },
+    }));
   }
 }
