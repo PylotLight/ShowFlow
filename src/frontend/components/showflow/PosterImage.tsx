@@ -36,7 +36,22 @@ function PosterImage({
   // keystroke re-render) must not flash the skeleton for an image the
   // browser already has — start revealed and let the cached bytes show
   // through instantly.
+  const [currentSrc, setCurrentSrc] = React.useState(src);
   const [loaded, setLoaded] = React.useState(() => seenSrcs.has(src));
+  // `faded` lags `loaded` by the fade duration so the skeleton stays
+  // mounted *under* the fading-in image — the cut happens only once the
+  // image is fully opaque, so there's no flash of bare background.
+  const [faded, setFaded] = React.useState(() => seenSrcs.has(src));
+  if (currentSrc !== src) {
+    setCurrentSrc(src);
+    setLoaded(seenSrcs.has(src));
+    setFaded(seenSrcs.has(src));
+  }
+  React.useEffect(() => {
+    if (!loaded || faded) return;
+    const t = setTimeout(() => setFaded(true), 500);
+    return () => clearTimeout(t);
+  }, [loaded, faded]);
   // Posters serve DB-only now; a 404 means the background warmer hasn't
   // finished yet (issues #31). Retry the same URL a few times — no cache
   // buster needed since error responses aren't cached — then give up and
@@ -54,7 +69,7 @@ function PosterImage({
 
   return (
     <div className={cn("relative overflow-hidden bg-muted", className)}>
-      {!loaded && <Skeleton className="absolute inset-0" />}
+      {!faded && <Skeleton className="absolute inset-0" />}
       <img
         src={trySrc}
         alt={alt}
@@ -69,8 +84,8 @@ function PosterImage({
           }
         }}
         className={cn(
-          "size-full object-cover transition-opacity duration-300",
-          loaded ? "opacity-100" : "opacity-0",
+          "size-full object-cover transition-all duration-500 ease-out",
+          loaded ? "opacity-100 scale-100" : "opacity-0 motion-safe:scale-[1.04]",
         )}
       />
     </div>

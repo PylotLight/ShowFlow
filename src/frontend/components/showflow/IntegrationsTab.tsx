@@ -74,7 +74,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
             </button>
           </div>
         </FieldRow>
-        <FieldRow label="TMDB API Key" description="themoviedb.org API key for show metadata">
+        <FieldRow label="TMDB API Key" description="themoviedb.org v3 API key or v4 read access token (starts eyJ…) — either works">
           <div className="relative">
             <Input
               type={showTmdbKey ? "text" : "password"}

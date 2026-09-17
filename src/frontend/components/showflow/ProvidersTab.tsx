@@ -27,7 +27,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         <p className="text-muted-foreground text-xs mt-0.5">Credentials for metadata providers. These replace values in your .env file.</p>
       </div>
 
-      <FieldRow label="TMDB API Key" description="themoviedb.org API key for show metadata">
+      <FieldRow label="TMDB API Key" description="themoviedb.org v3 API key or v4 read access token (starts eyJ…) — either works">
         <div className="relative">
           <Input
             type={showTmdbKey ? "text" : "password"}

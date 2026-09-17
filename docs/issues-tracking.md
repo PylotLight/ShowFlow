@@ -375,6 +375,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 29 | In-app DB cleanup (Analytics panel + auto sweep); health log names failing components; TheXem 403 via missing browser UA | 2026-09-17 (pending release) |
 | 30 | Poster loading: card-size variant, session seen-cache kills search skeleton flash, async decode | 2026-09-17 (pending release) |
 | 31 | DB-only image serving + background warmer; movie-aware scanner kills film log spam; memoized cards + deferred search; skip-log once | 2026-09-17 (pending release) |
+| 32 | TMDB 401 (Bearer vs api_key by token shape) + Browse on Recently Released misses + poster fade-in + release pipeline speedup | 2026-09-17 (pending release) |
 
 ---
 

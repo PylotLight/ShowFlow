@@ -587,6 +587,28 @@ function Dashboard({
                                 Awaiting release
                               </span>
                             )}
+                            {/* Missed item: aired with no file — one click opens
+                                the per-episode release browser (same dialog the
+                                agenda rows use), scoped to this exact episode. */}
+                            {!ep.filePath && showObj && (
+                              <button
+                                type="button"
+                                title={`Browse releases for ${ep.showTitle} S${String(ep.season).padStart(2, "0")}E${String(ep.episode).padStart(2, "0")}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSearchTarget({
+                                    showId: showObj.id,
+                                    showTitle: ep.showTitle,
+                                    season: ep.season,
+                                    episode: ep.episode,
+                                  });
+                                }}
+                                className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal border border-signal/20 hover:bg-signal/20 transition-colors"
+                              >
+                                <SearchIcon className="size-2" strokeWidth={3} />
+                                Browse
+                              </button>
+                            )}
                             <span className="text-[10px] font-mono text-white/60 shrink-0 leading-none">
                               {getCompactDate(ep.airDate)}
                             </span>

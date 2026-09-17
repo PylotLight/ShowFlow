@@ -7,12 +7,40 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
 
   constructor(config: any = {}) {
     super(config);
-    this.apiKey = config?.apiKeys?.tmdb || process.env.TMDB_API_KEY || '';
+    const token = config?.apiKeys?.tmdb || process.env.TMDB_API_KEY || '';
+    this.apiKey = token;
+    // TMDB ships two credential shapes: v3 API keys (32-hex, ride the
+    // `?api_key=` query param) and v4 read-access tokens (JWTs starting
+    // `eyJ…`, which MUST ride the `Authorization: Bearer` header — passing
+    // a JWT as `?api_key=` always 401s (issues #32). Detect by shape so
+    // either paste works.
+    this.useBearer = token.startsWith('eyJ');
+  }
+
+  private useBearer = false;
+
+  protected override async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    if (this.useBearer) {
+      const headers = new Headers(options.headers);
+      headers.set('Authorization', `Bearer ${this.apiKey}`);
+      options = { ...options, headers };
+    }
+    return super.fetch(endpoint, options);
+  }
+
+  /** Query string for a TMDB call: v3 keys append `api_key`, Bearer
+   *  tokens authenticate via header and need no query param. */
+  private qs(params: Record<string, string | undefined>): string {
+    const all: Record<string, string> = {};
+    if (!this.useBearer && this.apiKey) all.api_key = this.apiKey;
+    for (const [k, v] of Object.entries(params)) if (v !== undefined) all[k] = v;
+    const s = new URLSearchParams(all).toString();
+    return s ? `?${s}` : '';
   }
 
   override async searchShow(query: string): Promise<Show[]> {
     const data = await this.fetch<{ results: any[] }>(
-      `/search/tv?api_key=${this.apiKey}&query=${encodeURIComponent(query)}&language=en-US`
+      `/search/tv${this.qs({ query, language: 'en-US' })}`
     );
 
     return data.results.map(item => ({
@@ -26,7 +54,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getShow(id: string): Promise<Show> {
-    const data = await this.fetch<any>(`/tv/${id}?api_key=${this.apiKey}&language=en-US&append_to_response=external_ids`);
+    const data = await this.fetch<any>(`/tv/${id}${this.qs({ language: 'en-US', append_to_response: 'external_ids' })}`);
     return {
       id: data.id.toString(),
       title: data.name,
@@ -37,7 +65,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getSeasons(showId: string): Promise<Season[]> {
-    const data = await this.fetch<any>(`/tv/${showId}?api_key=${this.apiKey}&language=en-US`);
+    const data = await this.fetch<any>(`/tv/${showId}${this.qs({ language: 'en-US' })}`);
     const seasons = data.seasons || [];
 
     return seasons.map((s: any) => ({
@@ -49,12 +77,12 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
   }
 
   override async getEpisodes(showId: string, seasonNumber?: number): Promise<Episode[]> {
-    const data = await this.fetch<any>(`/tv/${showId}?api_key=${this.apiKey}&language=en-US`);
+    const data = await this.fetch<any>(`/tv/${showId}${this.qs({ language: 'en-US' })}`);
     const seasons = data.seasons || [];
 
     let allEpisodes: Episode[] = [];
     for (const s of seasons) {
-      const seasonData = await this.fetch<any>(`/tv/${showId}/season/${s.season_number}?api_key=${this.apiKey}`);
+      const seasonData = await this.fetch<any>(`/tv/${showId}/season/${s.season_number}${this.qs({})}`);
       allEpisodes.push(...(seasonData.episodes || []).map((e: any) => ({
         season: s.season_number,
         episode: e.episode_number,
@@ -88,7 +116,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
 
   private async getEpisodeBySeasonEpisode(showId: string, season: number, episode: number): Promise<Episode> {
     const data = await this.fetch<any>(
-      `/tv/${showId}/season/${season}/episode/${episode}?api_key=${this.apiKey}`
+      `/tv/${showId}/season/${season}/episode/${episode}${this.qs({})}`
     );
 
     return {
@@ -108,7 +136,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
    * This matches how most anime/long-running-show release groups count episodes.
    */
   private async getEpisodeByAbsolute(showId: string, absolute: number): Promise<Episode> {
-    const show = await this.fetch<any>(`/tv/${showId}?api_key=${this.apiKey}`);
+    const show = await this.fetch<any>(`/tv/${showId}${this.qs({})}`);
     const seasons = (show.seasons || [])
       .filter((s: any) => s.season_number > 0)
       .sort((a: any, b: any) => a.season_number - b.season_number);
@@ -117,7 +145,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
 
     for (const s of seasons) {
       const seasonData = await this.fetch<any>(
-        `/tv/${showId}/season/${s.season_number}?api_key=${this.apiKey}`
+        `/tv/${showId}/season/${s.season_number}${this.qs({})}`
       );
       const episodes = seasonData.episodes || [];
 
@@ -147,7 +175,7 @@ export class TMDBProvider extends BaseProvider implements IMetadataProvider {
    * of being stuck with whatever single backdrop the metadata carries.
    */
   async getBackdrops(id: string): Promise<{ url: string; width?: number; height?: number }[]> {
-    const data = await this.fetch<any>(`/tv/${id}/images?api_key=${this.apiKey}`);
+    const data = await this.fetch<any>(`/tv/${id}/images${this.qs({})}`);
     const backdrops = Array.isArray(data?.backdrops) ? data.backdrops : [];
     return backdrops
       .filter((b: any) => typeof b?.file_path === 'string' && b.file_path.length > 0)

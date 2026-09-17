@@ -29,18 +29,16 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
-# App binary + manifest.json baked into the same build step.
-RUN bun run build.ts
-
+# App binary + manifest.json + supervisor compiled in a single step: one
+# Bun startup, one layer, no intermediate snapshots between compiles.
 # Supervisor is its own compiled executable — a distroless image with no
 # shell can't run a bare .ts file, and the app binary being self-contained
-# doesn't make the supervisor self-contained too. Target pinned explicitly
-# to match build.ts's showflow target, rather than relying on Bun's
-# auto-detected host target inside this (already amd64-pinned) stage.
-# Output goes to dist/ rather than ./supervisor — the latter collides with
-# the supervisor/ *source* directory (supervisor/index.ts) and Bun refuses
-# to overwrite a directory with a file.
-RUN bun build --compile --linux-x64 supervisor/index.ts --outfile=dist/supervisor
+# doesn't make the supervisor self-contained too. Output goes to dist/
+# rather than ./supervisor — the latter collides with the supervisor/
+# *source* directory (supervisor/index.ts) and Bun refuses to overwrite a
+# directory with a file.
+RUN bun run build.ts && \
+    bun build --compile --minify --linux-x64 supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot
