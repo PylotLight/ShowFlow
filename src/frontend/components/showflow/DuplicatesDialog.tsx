@@ -30,11 +30,14 @@ function DuplicatesDialog({
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [confirming, setConfirming] = React.useState<Set<string>>(new Set());
   const [consolidating, setConsolidating] = React.useState<string | null>(null);
+  const [consolidatingAll, setConsolidatingAll] = React.useState(false);
+  const [confirmAll, setConfirmAll] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
+    setConfirmAll(false);
     try {
       const res = await fetch("/api/shows/duplicates");
       if (!res.ok) throw new Error("Failed to load overlapping folders");
@@ -88,6 +91,25 @@ function DuplicatesDialog({
     }
   }
 
+  async function consolidateAll() {
+    setConsolidatingAll(true);
+    setError(null);
+    setConfirmAll(false);
+    try {
+      const res = await fetch("/api/shows/duplicates/consolidate-all", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "Bulk consolidation failed");
+      }
+      await load();
+      onMerged?.();
+    } catch (err: any) {
+      setError(err.message ?? "Bulk consolidation failed");
+    } finally {
+      setConsolidatingAll(false);
+    }
+  }
+
   if (!open) return null;
 
   return (
@@ -99,14 +121,49 @@ function DuplicatesDialog({
             <FolderArchive className="size-4 text-signal" />
             <h3 className="font-display text-lg font-semibold text-white/90">Overlapping Folders</h3>
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="text-muted-foreground hover:text-white transition-colors"
-            aria-label="Close"
-          >
-            <X className="size-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {(groups ?? []).length > 0 && !loading && (
+              confirmAll ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAll(false)}
+                    disabled={consolidatingAll}
+                    className="rounded-md border border-white/10 text-muted-foreground hover:text-white text-xs font-medium px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={consolidateAll}
+                    disabled={consolidatingAll}
+                    className="flex items-center gap-1.5 rounded-md bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 text-xs font-medium px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                  >
+                    {consolidatingAll ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+                    {consolidatingAll ? "Consolidating all..." : `Confirm · ${groups!.length} group${groups!.length === 1 ? "" : "s"}`}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmAll(true)}
+                  disabled={consolidatingAll}
+                  className="flex items-center gap-1.5 rounded-md bg-signal/15 text-signal hover:bg-signal/25 text-xs font-medium px-2.5 py-1.5 transition-colors shrink-0"
+                >
+                  <FolderArchive className="size-3" />
+                  Consolidate all
+                </button>
+              )
+            )}
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="text-muted-foreground hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto">
@@ -130,7 +187,7 @@ function DuplicatesDialog({
             const id = `${group.rootFolder}:${group.key}`;
             const isExpanded = expanded.has(id);
             const isConfirming = confirming.has(id);
-            const isBusy = consolidating === id;
+            const isBusy = consolidating === id || consolidatingAll;
             return (
               <div key={id} className="rounded-xl border border-white/10 bg-black/20 overflow-hidden">
                 <button

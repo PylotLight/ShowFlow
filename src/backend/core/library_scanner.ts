@@ -3,6 +3,7 @@ import { normalizeShowTitle } from '../db/shows';
 import { parseMovieFilename, findMovieShow } from './movie_match';
 import { FilenameParser } from '../parser';
 import { debugLog } from './debug';
+import { sanitizeTitle } from '../shared/sanitize_title';
 import {
   isQuarantinableJunk,
   resolveQuarantineDir,
@@ -112,10 +113,7 @@ async function probeToMediaColumns(file: string): Promise<FileMediaColumns | nul
  * falls back to the full root walk otherwise.
  */
 export function resolveShowScanDir(rootFolder: string, title: string, episodePaths: (string | null | undefined)[]): string {
-  const sanitized = (title || '')
-    .replace(/[<>":/\\|?*]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const sanitized = sanitizeTitle(title);
   const childNames = new Set<string>();
   for (const p of episodePaths) {
     if (!p || !p.startsWith(rootFolder)) continue;

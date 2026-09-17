@@ -1,5 +1,6 @@
 import Fuse from 'fuse.js';
 
+import { sanitizeTitle } from '../shared/sanitize_title';
 import { FilenameParser, type ParsedFilename } from './index';
 import { ProviderFactory, type ProviderType } from '../providers/factory';
 import { db } from '../db';
@@ -930,11 +931,10 @@ export class Oracle {
   }
 
   private sanitize(value: string): string {
-    // Strip characters that are illegal on the filesystems ShowFlow targets
-    // (NTFS/SMB and POSIX). Colons are stripped too: they are legal on POSIX
-    // but illegal on macOS/APFS and in SMB, so a colon in a folder name makes
-    // Samba expose an 8.3 mangled name (e.g. "REJ1JG~5") to Mac Finder.
-    return value.replace(/[<>":/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    // Colons become " - " (Sonarr-style): they are legal on POSIX but illegal
+    // on macOS/APFS and in SMB, so a colon in a folder name makes Samba
+    // expose an 8.3 mangled name (e.g. "REJ1JG~5") to Mac Finder.
+    return sanitizeTitle(value);
   }
 
   /**

@@ -3,6 +3,7 @@ import { rename, mkdir, unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Oracle } from '../../parser/oracle';
+import { sanitizeTitle } from '../../shared/sanitize_title';
 import type { ParsedFilename } from '../../parser/index';
 import { FilenameParser } from '../../parser/index';
 import { parseMovieFilename, findMovieShow, type MovieShowHit } from '../movie_match';
@@ -517,7 +518,7 @@ export class BlackholeClient implements DownloadClient {
       return;
     }
 
-    const base = `${show.title}${show.year ? ` (${show.year})` : ''}`.replace(/[<>":/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    const base = sanitizeTitle(`${show.title}${show.year ? ` (${show.year})` : ''}`);
     const ext = path.extname(filename) || '.mkv';
     const finalPath = path.join(rootFolder, base, `${base}${ext}`);
 

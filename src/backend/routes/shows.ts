@@ -3,6 +3,7 @@ import * as schema from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { ProviderFactory } from "../providers/factory";
 import { SyncManager } from "../core/sync_manager";
+import { sanitizeTitle } from "../shared/sanitize_title";
 import { GrabberService } from "../core/grabber_service";
 import type { Scheduler } from "../core/scheduler";
 import type { SystemManager } from "../core/system_manager";
@@ -25,10 +26,7 @@ import { Oracle } from "../parser/oracle";
  * would move every other show in the profile; that was the pre-fix behavior.
  */
 function resolveShowFolder(show: any, rootFolder: string, episodes: any[]) {
-  const sanitizedTitle = (show.title || '')
-    .replace(/[<>":/\\|?*]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const sanitizedTitle = sanitizeTitle(show.title);
 
   // The current folder name is whatever direct child of the library root
   // actually holds this show's files. Derive it from episode paths when
@@ -850,6 +848,18 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           }
           const { consolidateOverlappingFolders } = await import("../core/folder_dedup");
           const result = await consolidateOverlappingFolders(db, body.rootFolder, body.key);
+          return json({ ok: true, ...result });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    "/api/shows/duplicates/consolidate-all": {
+      async POST() {
+        try {
+          const { consolidateAllOverlappingFolders } = await import("../core/folder_dedup");
+          const result = await consolidateAllOverlappingFolders(db);
           return json({ ok: true, ...result });
         } catch (err) {
           return errorResponse(err, 500);

@@ -254,6 +254,48 @@ export async function consolidateOverlappingFolders(
   return { moved, removedFolders };
 }
 
+export interface ConsolidateAllResult {
+  groups: number;
+  moved: number;
+  removedFolders: string[];
+  details: { rootFolder: string; key: string; moved: number; removedFolders: string[]; error?: string }[];
+}
+
+/**
+ * Consolidate every detected overlapping-folder group in one pass. Groups are
+ * detected up front, then each is consolidated independently; consolidate
+ * re-derives its own group from disk, so a group that a prior iteration
+ * already resolved (shared folders across groups) is skipped rather than
+ * failing the whole run.
+ */
+export async function consolidateAllOverlappingFolders(
+  db: DatabaseManager,
+): Promise<ConsolidateAllResult> {
+  const detected = await detectOverlappingFolders(db);
+  const details: ConsolidateAllResult["details"] = [];
+  let moved = 0;
+  const removedFolders: string[] = [];
+
+  for (const g of detected) {
+    try {
+      const res = await consolidateOverlappingFolders(db, g.rootFolder, g.key);
+      moved += res.moved;
+      removedFolders.push(...res.removedFolders);
+      details.push({ rootFolder: g.rootFolder, key: g.key, ...res });
+    } catch (err: any) {
+      details.push({
+        rootFolder: g.rootFolder,
+        key: g.key,
+        moved: 0,
+        removedFolders: [],
+        error: err?.message ?? "Consolidation failed",
+      });
+    }
+  }
+
+  return { groups: detected.length, moved, removedFolders, details };
+}
+
 function repointDbRows(db: DatabaseManager, oldPath: string, newPath: string) {
   db.drizz.update(schema.episodeFiles)
     .set({ file_path: newPath })
