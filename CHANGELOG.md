@@ -3,9 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.58] - 2026-09-17
 - **Images serve DB-only**: poster routes never touch the network — a miss enqueues a bounded background warm (4 concurrent, 10min failure backoff) and returns 404 immediately; PosterImage retries while warming, then falls back cleanly. No more grid stalls behind live TVDB/TMDB fetches.
 - **Movie-aware scanner**: files under *Movies* library roots that don't look like episodes are skipped silently with a summary count — no more per-file "Show not found / Could not parse" spam every scan.
 - **Smoother library**: memoized poster cards (search keystrokes and backdrop rotation no longer re-render 300 cards) + deferred search query; skip log fires once per stuck task instead of every minute.
+
 ## [v0.1.57] - 2026-09-17
 - **Fix**: vacuum result units (MiB, was mislabeled GiB).
 - **Faster posters**: grid/list thumbs use a `?size=card` lightweight variant (TMDB w342, AniList medium) cached alongside the full poster; detail hero keeps full size.
