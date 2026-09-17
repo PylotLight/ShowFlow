@@ -94,3 +94,53 @@ export function extractReleaseMeta(name: string | null | undefined): ReleaseMeta
   }
   return { hdrFormat, tags: [...new Set(tags)] };
 }
+
+// Tags that look like a trailing release group but are actually codec/source/
+// quality descriptors, so we never mistake them for the scene group.
+const NOT_A_GROUP = /^(?:x\d{2,4}|h\.?26[45]|hevc|avc|hdr(?:10)?(?:plus|p|\+)?|sdr|ddp?[0-9.]*|dd[0-9.]*|aac\d?|ac3|eac3|dts(?:[\s._-]?hd)?(?:[\s._-]?ma)?|truehd|flac|atmos|dts[\s._-]?x|web[\s._-]?dl|webrip|web|dl|bluray|bdrip|bd|remux|hdtv|dsr|dvb|uhd|multi(?:[\s._-]?(?:subs?|audio))?|dual|proper|repack|internal|extended|imax|3d|s\d{1,3}(?:[\s._-]?e\d{1,3})?|ep\d{1,3}|pal|ntsc|60fps|24fps|fps|[57][.]1|\d{3,4}p)$/i;
+
+/**
+ * Trailing scene release group from a release name or filename (the `-GROUP`
+ * after the last separator). Strips a container extension first. Returns ''
+ * when the tail is actually a codec/source/quality tag rather than a group.
+ */
+export function releaseGroup(name: string): string {
+  const base = name.replace(/\.[A-Za-z0-9]{1,5}$/, '');
+  const idx = Math.max(base.lastIndexOf('-'), base.lastIndexOf('_'));
+  if (idx < 0) return '';
+  const g = base.slice(idx + 1).replace(/[._]+/g, ' ').trim();
+  if (g.length < 2 || g.length > 30) return '';
+  if (NOT_A_GROUP.test(g)) return '';
+  return g.toLowerCase();
+}
+
+function normTitle(t: string): string[] {
+  const n = t.normalize('NFKC').replace(/[._-]+/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  return n ? n.split(' ') : [];
+}
+
+/**
+ * Does a grabbed release title refer to the same release as a landed file
+ * (its original filename)? Used to decide whether a grab's provenance may be
+ * attached to a file the scanner/import actually found on disk, instead of
+ * blindly crediting whatever the most recent grab for the show happened to be.
+ *
+ * Primary signal is the trailing scene group — it's the strongest identity
+ * token and exactly what distinguishes a FraMeSToR REMUX from a DirtyHippie
+ * RIFE re-encode of the same movie. When both sides carry a group, they must
+ * agree. Otherwise fall back to token containment: a grabbed title is usually
+ * the "core" of the file name (the file may carry extra codec/audio tokens), so
+ * we measure how much of the smaller token set the larger one contains.
+ */
+export function releaseTitlesMatch(grabTitle: string, landedFileName: string): boolean {
+  if (!grabTitle || !landedFileName) return false;
+  const gGrab = releaseGroup(grabTitle);
+  const gFile = releaseGroup(landedFileName);
+  if (gGrab && gFile) return gGrab === gFile;
+  const a = new Set(normTitle(grabTitle));
+  const b = new Set(normTitle(landedFileName));
+  if (a.size === 0 || b.size === 0) return false;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / Math.min(a.size, b.size) >= 0.8;
+}

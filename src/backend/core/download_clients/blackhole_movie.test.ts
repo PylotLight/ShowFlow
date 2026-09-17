@@ -95,6 +95,47 @@ test("auto import moves a bare film drop into Title (Year)/Title (Year).ext", as
   expect(movieFile?.original_name).toBe(FILM);
 }, 30_000);
 
+test("does not credit an unrelated grab as a movie's provenance", async () => {
+  const uuid = seedMovie();
+  // The most recent grab is a DIFFERENT release (FraMeSToR REMUX) than the file
+  // that actually lands (DirtyHippie RIFE). The old code stamped the grab's
+  // title onto the file; the fix must keep only honest filename provenance.
+  db.recordGrabbedRelease({
+    showId: uuid,
+    releaseTitle: "Thor 2011 2160p BluRay REMUX DV HDR HEVC TrueHD Atmos 7.1-FraMeSToR",
+    indexerName: "SomeIndexer",
+  });
+  fs.writeFileSync(path.join(watchRoot, FILM), `movie-${RUN_ID}`);
+
+  client = makeClient();
+  client.attachFolderForManualOps();
+  expect((await client.forceImport(FILM)).ok).toBe(true);
+
+  const movieFile = db.getMovieFile(uuid);
+  expect(movieFile?.source_kind).toBe("import");
+  expect(movieFile?.release_title).toBeNull();
+  expect(movieFile?.indexer_name).toBeNull();
+}, 30_000);
+
+test("credits a grab whose release name matches the landed movie file", async () => {
+  const uuid = seedMovie();
+  db.recordGrabbedRelease({
+    showId: uuid,
+    releaseTitle: "Thor.2011.2160p.DV.HDR10Plus.HEVC.TrueHD.7.1.Atmos-DirtyHippie",
+    indexerName: "SomeIndexer",
+  });
+  fs.writeFileSync(path.join(watchRoot, FILM), `movie-${RUN_ID}`);
+
+  client = makeClient();
+  client.attachFolderForManualOps();
+  expect((await client.forceImport(FILM)).ok).toBe(true);
+
+  const movieFile = db.getMovieFile(uuid);
+  expect(movieFile?.source_kind).toBe("release");
+  expect(movieFile?.release_title).toInclude("DirtyHippie");
+  expect(movieFile?.indexer_name).toBe("SomeIndexer");
+}, 30_000);
+
 test("manual import with an explicit movie pick uses the movie importer", async () => {
   const uuid = seedMovie();
   fs.writeFileSync(path.join(watchRoot, FILM), `movie-${RUN_ID}`);

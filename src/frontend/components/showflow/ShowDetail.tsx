@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Columns2, DownloadIcon, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, XIcon, Clock } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Columns2, DownloadIcon, ExternalLink, FolderArchive, FolderSearch, GitCompareArrows, Loader2Icon, Maximize2, Minimize2, MoreHorizontal, PencilIcon, RefreshCwIcon, SearchIcon, Star, XIcon, Clock } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
@@ -11,7 +11,7 @@ import { EpisodeDuplicatesDialog } from "@frontend/components/showflow/EpisodeDu
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
-import { formatDelayMinutes } from "@frontend/lib/airtime";
+import { formatDelayMinutes, formatResolution, formatDuration, formatBitrate, formatImportDate } from "@frontend/lib/airtime";
 
 
 interface SeasonStat {
@@ -82,6 +82,47 @@ function formatMovieBytes(bytes: number | null): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+/** 8 channels → "7.1"; 6 → "5.1"; a bare count otherwise. */
+function channelsLabel(ch: number | null | undefined): string {
+  if (ch == null) return "";
+  const map: Record<number, string> = { 2: "2.0", 6: "5.1", 8: "7.1", 4: "4.0", 5: "5.0", 3: "3.0" };
+  return map[ch] ?? `${ch}ch`;
+}
+
+/** ISO 639-2/T → short display code; unknown codes pass through upper-cased. */
+function langLabel(code: string): string {
+  const map: Record<string, string> = {
+    eng: "EN", jpn: "JA", zho: "ZH", chi: "ZH", fra: "FR", fre: "FR",
+    spa: "ES", ger: "DE", deu: "DE", ita: "IT", rus: "RU", por: "PT",
+    kor: "KO", hin: "HI", ara: "AR", dut: "NL", nld: "NL", pol: "PL",
+    swe: "SV", dan: "DA", nor: "NO", nob: "NO", fin: "FI", tur: "TR",
+    ces: "CS", cze: "CS", hun: "HU", ell: "EL", gre: "EL", heb: "HE",
+    tha: "TH", vie: "VI", ind: "ID", ukr: "UK", rum: "RO", ron: "RO",
+  };
+  return map[code.toLowerCase()] ?? code.toUpperCase();
+}
+
+/** One label/value line inside a media/release spec list. Renders nothing when
+ *  the value is empty so missing data collapses cleanly. */
+function SpecRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-white/35">{label}</dt>
+      <dd className="text-right font-mono text-[12px] text-white/80">{value}</dd>
+    </div>
+  );
+}
+
+/** A small section heading with an optional trailing accent icon. */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">
+      {children}
+    </div>
+  );
+}
+
 /**
  * Detail body for films: no seasons/episodes exist, so this shows the
  * metadata + file status with Browse/Auto-grab actions instead of the
@@ -96,7 +137,11 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
 }) {
   const [year, setYear] = React.useState<number | null>(null);
   const [movieFile, setMovieFile] = React.useState<MovieFileInfo | null>(null);
-  const [meta, setMeta] = React.useState<{ overview?: string | null; genres?: string[] | null; rating?: number | null; firstAirDate?: string | null; status?: string | null } | null>(null);
+  const [meta, setMeta] = React.useState<{
+    overview?: string | null; genres?: string[] | null; rating?: number | null; ratingSource?: string | null; ratingVotes?: number | null;
+    firstAirDate?: string | null; status?: string | null; runtime?: number | null; studios?: string[] | null;
+    languages?: string[] | null; links?: { label: string; url: string }[] | null;
+  } | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -120,6 +165,18 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
     return () => { cancelled = true; };
   }, [showId]);
 
+  const media = movieFile?.media ?? null;
+  const releaseTags = media?.releaseTags ?? [];
+  const resolution = (media?.videoHeight || media?.videoWidth)
+    ? formatResolution(media?.videoHeight, media?.videoWidth) : "";
+  const videoLabel = [media?.videoCodec?.toUpperCase(), media?.videoFps && Math.round(media.videoFps) > 24 ? `${Math.round(media.videoFps)}fps` : ""]
+    .filter(Boolean).join(" · ");
+  const audioLabel = media?.audioCodec
+    ? [media.audioCodec.toUpperCase(), channelsLabel(media.audioChannels), releaseTags.includes("Atmos") ? "Atmos" : ""].filter(Boolean).join(" ")
+    : "";
+  const audioLangs = (media?.audioLanguages ?? []).map(langLabel).join(" · ");
+  const hdrLabel = media?.hdrFormat ?? (media?.hdr ? "HDR" : "");
+
   return (
     <GlassPanel className="p-5 flex flex-col gap-4">
       {loading ? (
@@ -129,27 +186,49 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 bg-white/[0.06] border border-white/10 rounded-full px-2 py-0.5">
-              Movie{year ? ` · ${year}` : ""}
-            </span>
-            {meta?.status && (
-              <span className="font-mono text-[10px] uppercase tracking-wider text-white/50">{meta.status}</span>
-            )}
+          {/* Header: kind / status / rating on the left, availability on the right */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 bg-white/[0.06] border border-white/10 rounded-full px-2 py-0.5">
+                Movie{year ? ` · ${year}` : ""}
+              </span>
+              {meta?.status && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-white/50">{meta.status}</span>
+              )}
+              {meta?.rating != null && (
+                <span className="flex items-center gap-1 font-mono text-[11px] text-white/70" title={meta.ratingVotes != null ? `${meta.ratingVotes.toLocaleString()} ratings` : undefined}>
+                  <Star className="size-3 text-accent-amber" fill="currentColor" strokeWidth={0} />
+                  {meta.rating.toFixed(1)}
+                  {meta.ratingSource && <span className="text-white/35">{meta.ratingSource}</span>}
+                </span>
+              )}
+            </div>
             {movieFile ? (
-              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-signal border border-signal/20">
+              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-signal border border-signal/20">
                 <Check className="size-3" strokeWidth={3} />
                 Available{movieFile.size != null ? ` · ${formatMovieBytes(movieFile.size)}` : ""}
               </span>
             ) : (
-              <span className="rounded-full bg-accent-amber/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20">
+              <span className="rounded-full bg-accent-amber/10 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20">
                 Missing — not downloaded
               </span>
             )}
           </div>
-          {meta?.overview && (
-            <p className="text-sm text-white/70 leading-relaxed max-w-3xl">{meta.overview}</p>
+
+          {/* Quick facts line */}
+          {meta && (meta.runtime || meta.firstAirDate || (meta.languages?.length ?? 0) > 0) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 -mt-1 font-mono text-[11px] text-white/45">
+              {meta.runtime != null && <span>{formatDuration(meta.runtime * 60)}</span>}
+              {meta.firstAirDate && <span>{meta.firstAirDate}</span>}
+              {(meta.languages?.length ?? 0) > 0 && <span>{meta.languages!.join(" / ")}</span>}
+              {(meta.studios?.length ?? 0) > 0 && <span className="truncate max-w-[24rem]">{meta.studios!.slice(0, 2).join(", ")}</span>}
+            </div>
           )}
+
+          {meta?.overview && (
+            <p className="text-sm text-white/70 leading-relaxed max-w-3xl line-clamp-4">{meta.overview}</p>
+          )}
+
           {(meta?.genres?.length ?? 0) > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {meta!.genres!.map(g => (
@@ -157,24 +236,54 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
               ))}
             </div>
           )}
+
+          {/* Divider + two-column spec area */}
           {movieFile && (
-            <div className="flex flex-col gap-2">
-              <MediaBadges media={movieFile.media} />
-              <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[11px] text-white/60 break-all space-y-0.5">
-                {movieFile.name && (
-                  <div className="text-white/80">{movieFile.name}</div>
-                )}
-                <div>{movieFile.path}</div>
-                {movieFile.releaseTitle && (
-                  <div className="text-white/35 mt-0.5">from: {movieFile.releaseTitle}</div>
-                )}
-                {!movieFile.releaseTitle && movieFile.originalName && (
-                  <div className="text-white/35 mt-0.5">imported as: {movieFile.originalName}</div>
-                )}
+            <>
+              <div className="h-px bg-white/[0.06]" />
+              <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
+                {/* Media: what the file actually contains */}
+                <div className="flex flex-col gap-2">
+                  <SectionLabel>Media</SectionLabel>
+                  <MediaBadges media={media} />
+                  <dl className="mt-0.5 flex flex-col gap-1.5 border-t border-white/5 pt-3">
+                    <SpecRow label="Resolution" value={resolution} />
+                    <SpecRow label="Video" value={videoLabel} />
+                    <SpecRow label="HDR" value={hdrLabel} />
+                    <SpecRow label="Audio" value={audioLabel} />
+                    <SpecRow label="Audio languages" value={audioLangs} />
+                    <SpecRow label="Container" value={media?.container?.toUpperCase() ?? ""} />
+                    <SpecRow label="Bitrate" value={media?.bitrateKbps ? formatBitrate(media.bitrateKbps) : ""} />
+                    <SpecRow label="Runtime" value={media?.durationSeconds ? formatDuration(media.durationSeconds) : ""} />
+                    {releaseTags.length > 0 && (
+                      <SpecRow label="Flags" value={releaseTags.join(" · ")} />
+                    )}
+                  </dl>
+                </div>
+
+                {/* File: where it lives and how it got here */}
+                <div className="flex flex-col gap-2">
+                  <SectionLabel>File</SectionLabel>
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[12px] text-white/80" title={movieFile.originalName ?? movieFile.name ?? undefined}>
+                      {movieFile.name ?? movieFile.originalName ?? movieFile.path.split(/[\\/]/).pop()}
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-white/40">{movieFile.path}</div>
+                  </div>
+                  <dl className="mt-0.5 flex flex-col gap-1.5 border-t border-white/5 pt-3">
+                    <SpecRow label="Size" value={movieFile.size != null ? formatMovieBytes(movieFile.size) : ""} />
+                    <SpecRow label="Source" value={movieFile.sourceKind === "release" ? "Grabbed" : "Imported"} />
+                    {movieFile.releaseTitle && <SpecRow label="Release" value={movieFile.releaseTitle} />}
+                    <SpecRow label="Indexer" value={movieFile.indexerName ?? ""} />
+                    <SpecRow label="Imported" value={formatImportDate(movieFile.importedAt)} />
+                  </dl>
+                </div>
               </div>
-            </div>
+            </>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+
+          {/* Actions */}
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <button
               type="button"
               onClick={onBrowse}
@@ -191,6 +300,21 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
               {grabbing ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {movieFile ? "Upgrade" : "Auto-grab"}
             </button>
+            {(meta?.links?.length ?? 0) > 0 && (
+              <div className="ml-auto flex items-center gap-1">
+                {meta!.links!.map(l => (
+                  <a
+                    key={l.url}
+                    href={l.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 rounded-full px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                  >
+                    <ExternalLink className="size-3" /> {l.label}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}

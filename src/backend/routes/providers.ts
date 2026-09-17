@@ -174,6 +174,9 @@ export function providerRoutes() {
             creators: toCreators(source, show),
             networks: toNetworks(source, show),
             firstAirDate: toFirstAirDate(source, show),
+            runtime: toRuntime(source, show),
+            studios: toStudios(source, show),
+            languages: toLanguages(source, show),
             seasons: toSeasons(source, show),
             links: toLinks(source, show),
           });
@@ -386,6 +389,33 @@ function toFirstAirDate(source: ProviderType, show: { metadata?: Record<string, 
   if (source === "anilist" && meta.startDate?.year) return String(meta.startDate.year);
   if (source === "tvdb" && typeof meta.first_air_time === "string") return meta.first_air_time.slice(0, 10);
   return null;
+}
+
+/** Runtime in whole minutes; accepts TMDB's numeric `runtime` directly. */
+function toRuntime(source: ProviderType, show: { metadata?: Record<string, any> }): number | null {
+  const meta = metaOf(show);
+  if (!meta) return null;
+  if (source === "tmdb" && typeof meta.runtime === "number" && meta.runtime > 0) return meta.runtime;
+  return null;
+}
+
+/** Production companies / studios (TMDB), first few for a compact display. */
+function toStudios(source: ProviderType, show: { metadata?: Record<string, any> }): string[] | null {
+  const meta = metaOf(show);
+  if (!meta) return null;
+  if (source === "tmdb" && Array.isArray(meta.production_companies)) {
+    return meta.production_companies.map((c: any) => c?.name ?? null).filter(Boolean);
+  }
+  return null;
+}
+
+/** ISO 639-1 codes of audio/spoken languages actually present in the release. */
+function toLanguages(source: ProviderType, show: { metadata?: Record<string, any> }): string[] | null {
+  const meta = metaOf(show);
+  if (!meta) return null;
+  const arr = Array.isArray(meta.spoken_languages) ? meta.spoken_languages : null;
+  if (!arr) return null;
+  return arr.map((l: any) => (typeof l?.iso_639_1 === "string" ? l.iso_639_1.toUpperCase() : null)).filter(Boolean);
 }
 
 function toLinks(source: ProviderType, show: { metadata?: Record<string, any>; id: string }): Array<{ label: string; url: string }> {

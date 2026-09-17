@@ -11,6 +11,7 @@ import {
   QUARANTINE_DIR_NAME,
 } from './junk_quarantine';
 import { probeMediaFile, mediaFromStoredRow, foldProbeToColumns } from './media_probe';
+import { releaseTitlesMatch } from './release_meta';
 import { qualityEngine } from './quality_engine';
 import type { FileMediaColumns, EpisodeFileRow } from '../db/episode_files';
 import fs from 'node:fs';
@@ -44,6 +45,17 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
   db.updateEpisodeFilePath(showId, season, episodeNumber, file);
   try {
     const grab = db.findGrabbedReleaseForShowEpisode(showId, season, episodeNumber, 30);
+    // Only credit the grab as this file's provenance when the landed file name
+    // actually matches it — otherwise the most recent grab for the slot (an
+    // unrelated release) would be mis-stamped onto whatever file we found,
+    // e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE re-encode.
+    // When this is just a move/rename (same byte size) of a file we'd already
+    // attributed to a grab, keep that attribution rather than lose it.
+    const landedName = file.split(/[\\/]/).pop() ?? file;
+    const grabMatchesFile = !!grab && releaseTitlesMatch(grab.release_title ?? '', landedName);
+    const preserveExisting = !!grab && !!live && live.file_size === size
+      && !!live.release_title && !releaseTitlesMatch(live.release_title, landedName);
+    const attributable = grabMatchesFile || preserveExisting;
     // Probe the on-disk file so the episode_files row carries its real
     // resolution/codec/bitrate (media badges + media-aware upgrade compare).
     //
@@ -64,11 +76,11 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
       season,
       episode: episodeNumber,
       filePath: file,
-      originalName: file.split(/[\\/]/).pop() ?? file,
-      sourceKind: grab ? 'release' : 'import',
-      releaseTitle: grab?.release_title ?? null,
-      indexerName: grab?.indexer_name ?? null,
-      publishDate: grab?.publish_date ?? null,
+      originalName: landedName,
+      sourceKind: attributable ? 'release' : 'import',
+      releaseTitle: attributable ? grab!.release_title : null,
+      indexerName: attributable ? grab!.indexer_name : null,
+      publishDate: attributable ? grab!.publish_date : null,
       media,
     });
     return 'changed';

@@ -14,6 +14,7 @@ import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
 import { probeMediaFile, mediaFromStoredRow, foldProbeToColumns } from '../media_probe';
+import { releaseTitlesMatch } from '../release_meta';
 import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
@@ -693,15 +694,20 @@ export class BlackholeClient implements DownloadClient {
     try { fileSize = (await stat(movedTo)).size; } catch {}
     try {
       const grab = db.findMostRecentGrabForShow(showId, 30);
+      // Only credit the grab as this file's provenance when the landed release
+      // name actually matches it. Otherwise the most recent grab for the show
+      // (possibly an unrelated release) would be mis-stamped onto whatever file
+      // landed — e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE file.
+      const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
       db.recordMovieFile({
         showId,
         filePath: movedTo,
         originalName: filename,
         fileSize,
-        sourceKind: grab ? 'release' : 'import',
-        releaseTitle: grab?.release_title ?? null,
-        indexerName: grab?.indexer_name ?? null,
-        publishDate: grab?.publish_date ?? null,
+        sourceKind: attributable ? 'release' : 'import',
+        releaseTitle: attributable ? grab!.release_title : null,
+        indexerName: attributable ? grab!.indexer_name : null,
+        publishDate: attributable ? grab!.publish_date : null,
         media: foldProbeToColumns(mediaProbe, filename),
       });
     } catch (err) {
@@ -1197,6 +1203,7 @@ export class BlackholeClient implements DownloadClient {
       for (const ep of episodes) {
         try {
           const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);
+          const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
           let fileSize: number | null = null;
           try {
             const st = await stat(movedTo);
@@ -1209,10 +1216,10 @@ export class BlackholeClient implements DownloadClient {
             filePath: movedTo,
             originalName: filename,
             fileSize,
-            sourceKind: grab ? 'release' : 'import',
-            releaseTitle: grab?.release_title ?? null,
-            indexerName: grab?.indexer_name ?? null,
-            publishDate: grab?.publish_date ?? null,
+            sourceKind: attributable ? 'release' : 'import',
+            releaseTitle: attributable ? grab!.release_title : null,
+            indexerName: attributable ? grab!.indexer_name : null,
+            publishDate: attributable ? grab!.publish_date : null,
             media: mediaCols,
           });
         } catch (err) {

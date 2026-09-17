@@ -58,6 +58,18 @@ function resolveShowFolder(show: any, rootFolder: string, episodes: any[]) {
 
 // Format the media columns as a compact frontend-usable object, or null
 // when the file hasn't been probed yet.
+function parseJsonArray<T>(raw: unknown): T[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== 'string') return null;
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function serializeFileMedia(f: any) {
   return {
     container: f.container ?? null,
@@ -66,8 +78,12 @@ function serializeFileMedia(f: any) {
     videoCodec: f.video_codec ?? null,
     videoFps: f.video_fps ?? null,
     hdr: !!f.hdr,
+    hdrFormat: f.hdr_format ?? null,
     audioCodec: f.audio_codec ?? null,
     audioChannels: f.audio_channels ?? null,
+    audioTracks: parseJsonArray<{ codec?: string | null; channels?: number | null; language?: string | null; name?: string | null }>(f.audio_tracks),
+    audioLanguages: parseJsonArray<string>(f.audio_languages),
+    releaseTags: parseJsonArray<string>(f.release_tags),
     durationSeconds: f.duration_seconds ?? null,
     bitrateKbps: f.bitrate_kbps ?? null,
     probedAt: f.probed_at ?? null,
@@ -351,11 +367,14 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             releaseDelayMinutes: show.release_delay_minutes,
             movieFile: movieFile ? {
               path: movieFile.file_path,
+              name: cleanReleaseName(movieFile.original_name),
+              originalName: movieFile.original_name,
               size: movieFile.file_size,
               sourceKind: movieFile.source_kind,
               releaseTitle: movieFile.release_title,
               indexerName: movieFile.indexer_name,
               importedAt: movieFile.imported_at,
+              media: serializeFileMedia(movieFile),
             } : null,
             config,
           });

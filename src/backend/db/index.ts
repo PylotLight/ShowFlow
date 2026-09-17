@@ -110,6 +110,21 @@ export class DatabaseManager {
       }
     }
 
+    // One-time fix for misattributed provenance: previously the most recent
+    // grab for a show was stamped onto whatever file landed regardless of
+    // whether it was the same release (e.g. a FraMeSToR REMUX grab shown as the
+    // origin of a DirtyHippie RIFE file). Re-check every attributed row against
+    // its landed file name and drop the grab provenance when they disagree.
+    if (this.getSetting('provenance.reconciled.v1') !== '1') {
+      try {
+        const cleared = episodeFiles.reconcileMismatchedProvenance(this);
+        if (cleared > 0) console.log(`[provenance] Cleared mismatched release provenance on ${cleared} file(s).`);
+        this.setSetting('provenance.reconciled.v1', '1');
+      } catch (err) {
+        console.warn('[provenance] Reconciliation failed:', err);
+      }
+    }
+
     // Kick off a non-blocking media-probe backfill for episode_files rows
     // that exist but were recorded before probing existed (no container yet).
     // Probing happens in the background so startup isn't stalled while the

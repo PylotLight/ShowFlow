@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { extractReleaseMeta } from "./release_meta";
+import { extractReleaseMeta, releaseGroup, releaseTitlesMatch } from "./release_meta";
 
 const THOR = "Thor.2011.2160p.DV.HDR10Plus.Ai-Enhanced.HEVC.TrueHD.7.1.Atmos.MULTI-RIFE.4.25v2-60fps-DirtyHippie.mkv";
 
@@ -36,4 +36,32 @@ test("flags dual/multi audio and source grade", () => {
 test("blank name yields empty metadata, never throws", () => {
   expect(extractReleaseMeta(null)).toEqual({ hdrFormat: null, tags: [] });
   expect(extractReleaseMeta("").tags).toEqual([]);
+});
+
+test("releaseGroup extracts the trailing scene group, not codec/source tags", () => {
+  expect(releaseGroup("Show.S01E01.1080p.WEB.H264-EPiC.mkv")).toBe("epic");
+  expect(releaseGroup("Movie.2020.2160p.x265-HDR10Plus")).toBe("");  // HDR tag, not a group
+  expect(releaseGroup("Movie 2020 1080p")).toBe("");                 // no trailing group
+});
+
+const FRANESTOR_GRAB = "Thor 2011 2160p BluRay REMUX DV HDR HEVC TrueHD Atmos 7.1-FraMeSToR";
+
+test("rejects a misattributed grab whose group differs from the landed file", () => {
+  // The exact bug: a FraMeSToR REMUX grab stamped onto a DirtyHippie RIFE file.
+  expect(releaseTitlesMatch(FRANESTOR_GRAB, THOR)).toBe(false);
+});
+
+test("accepts a grab that names the same release as the landed file", () => {
+  const landed = "Thor.2011.2160p.BluRay.REMUX.DV.HDR.HEVC.TrueHD.7.1.Atmos-FraMeSToR.mkv";
+  expect(releaseTitlesMatch(FRANESTOR_GRAB, landed)).toBe(true);
+});
+
+test("falls back to token overlap when a group can't be parsed from both sides", () => {
+  expect(releaseTitlesMatch("Big Movie 2021 1080p WEB-DL", "Big.Movie.2021.1080p.WEB.DL.DDP5.1.mkv")).toBe(true);
+  expect(releaseTitlesMatch("Big Movie 2021 1080p WEB-DL", "Totally Different 1999 720p")).toBe(false);
+});
+
+test("never claims a match on empty input", () => {
+  expect(releaseTitlesMatch("", THOR)).toBe(false);
+  expect(releaseTitlesMatch(FRANESTOR_GRAB, "")).toBe(false);
 });

@@ -1,6 +1,7 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import * as schema from './schema';
 import type { DatabaseManager } from './index';
+import { releaseTitlesMatch } from '../core/release_meta';
 
 export interface EpisodeFileRow {
   id: number;
@@ -251,6 +252,46 @@ export function listEpisodeFilesMissingReleaseMeta(self: DatabaseManager): Episo
     ))
     .orderBy(desc(schema.episodeFiles.id))
     .all() as EpisodeFileRow[];
+}
+
+/**
+ * One-time reconciliation of the provenance bug where the most recent grab for
+ * a show (possibly an unrelated release) was stamped onto whatever file landed
+ * on disk — e.g. a FraMeSToR REMUX grab shown as the origin of a DirtyHippie
+ * RIFE re-encode of the same movie. For each live row we clear the grabbed
+ * release/indexer/publish provenance when the stored original file name doesn't
+ * actually match the recorded release title, leaving only honest filename-based
+ * info. Returns the number of rows corrected. Idempotent: matched rows are left
+ * untouched so it's safe to re-run.
+ */
+export function reconcileMismatchedProvenance(self: DatabaseManager): number {
+  const rows = self.drizz
+    .select({
+      id: schema.episodeFiles.id,
+      original_name: schema.episodeFiles.original_name,
+      file_path: schema.episodeFiles.file_path,
+      release_title: schema.episodeFiles.release_title,
+    })
+    .from(schema.episodeFiles)
+    .where(and(
+      eq(schema.episodeFiles.is_current, 1),
+      sql`${schema.episodeFiles.release_title} IS NOT NULL`,
+    ))
+    .all() as { id: number; original_name: string | null; file_path: string; release_title: string | null }[];
+
+  let cleared = 0;
+  for (const row of rows) {
+    if (!row.release_title) continue;
+    const landedName = row.original_name || (row.file_path.split(/[\\/]/).pop() ?? row.file_path);
+    if (releaseTitlesMatch(row.release_title, landedName)) continue;
+    self.drizz
+      .update(schema.episodeFiles)
+      .set({ source_kind: 'import', release_title: null, indexer_name: null, publish_date: null })
+      .where(eq(schema.episodeFiles.id, row.id))
+      .run();
+    cleared++;
+  }
+  return cleared;
 }
 
 /**
