@@ -82,8 +82,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract release files from image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
-          IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
+          # GHCR requires a lowercase repository name; github.repository
+          # (PylotLight/ShowFlow) keeps its case, so force-lowercase it here.
+          IMG=${IMAGE,,}@${{ needs.build-and-push.outputs.digest }}
           docker pull "$IMG"
           docker create --name release-files "$IMG"
           docker cp release-files:/bootstrap/showflow ./showflow

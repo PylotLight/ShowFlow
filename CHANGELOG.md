@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix**: release asset publishing no longer dies on `invalid reference format` — the image-extract step pulled the digest under the repo's raw mixed-case name (`PylotLight/ShowFlow`), which Docker rejects; the ref is now lowercased like the tag side already was.
 
 ## [v0.1.60] - 2026-09-17
 - **Full movie support**: add films from TMDB (TV/Movies toggle in Add Show, m- prefixed ids so films never collide with series), library entries with posters/backdrops, per-movie Browse + Auto-grab (title+year index search, remake-safe matching, upgrade-aware), automatic import matching (`Title (Year)/Title (Year).ext`), library scan mapping, and a dedicated detail panel with file status. No migration — films reuse episode_files on a (0,0) sentinel plus nullable grab rows.
