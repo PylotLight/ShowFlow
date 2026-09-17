@@ -260,6 +260,7 @@ export class DatabaseManager {
   findMostRecentGrabForShow(showId: string, withinDays?: number) { return grabs.findMostRecentGrabForShow(this, showId, withinDays); }
   findGrabbedReleaseForShowEpisode(showId: string, season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForShowEpisode(this, showId, season, episode, withinDays); }
   listGrabbedReleasesForShow(showId: string, limit?: number) { return grabs.listGrabbedReleasesForShow(this, showId, limit); }
+  listEpisodesDueForGrab(nowIso: string, grabCooldownIso: string, limit: number) { return grabs.listEpisodesDueForGrab(this, nowIso, grabCooldownIso, limit); }
 
   // ---- Episode files (provenance) ----------------------------------------
 
@@ -299,6 +300,7 @@ export class DatabaseManager {
 
   saveTask(task: Parameters<typeof system.saveTask>[1]) { return system.saveTask(this, task); }
   listTasks() { return system.listTasks(this); }
+  deleteTask(name: string) { return system.deleteTask(this, name); }
   updateTaskExecution(name: string, durationMs: number, nextExecution: string) { return system.updateTaskExecution(this, name, durationMs, nextExecution); }
 
   // ---- Audit logs --------------------------------------------------------

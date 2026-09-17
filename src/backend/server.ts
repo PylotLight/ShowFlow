@@ -223,8 +223,11 @@ process.on("unhandledRejection", (reason) => appendCrashLog(reason, "unhandledRe
 // ---- Server bootstrap -----------------------------------------------------
 
 const config = loadConfig();
-const scheduler = new Scheduler(config);
 const systemManager = new SystemManager(() => loadConfig());
+// The scheduler's auto-grab task needs the watcher's long-lived TorBox
+// client at run time (it may be started/stopped at any moment), hence the
+// lazy getter rather than the instance itself.
+const scheduler = new Scheduler(config, { getDownloadManager: () => systemManager.getWatcher() });
 
 // Merge lazy routes (which need scheduler/systemManager) into routeDefinitions
 Object.assign(routeDefinitions, lazyRoutes());

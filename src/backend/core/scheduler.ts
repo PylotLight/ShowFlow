@@ -4,15 +4,16 @@ import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
 import { maybeForcedGc } from './memory_guard';
 import { runBackup } from "./backup";
-import { GrabberService } from './grabber_service';
+import { runAutoGrabCycle } from './auto_grabber';
 import { JellyfinSync } from '../providers/jellyfin/sync';
 import { pollSystemHealth } from './pipeline/health_poller';
+import type { DownloadManager } from './download_manager';
 
 export type TaskName = 
   | 'sync-shows' 
   | 'scan-library' 
   | 'backup' 
-  | 'rss-scan'
+  | 'auto-grab'
   | 'housekeeping'
   | 'pipeline-cleanup'
   | 'quarantine-cleanup'
@@ -22,6 +23,14 @@ export type TaskName =
   | 'jellyfin-sync'
   | 'episode-mapping-refresh';
 
+/** Ambient services a task action may need beyond the config — the Download
+ *  Manager is resolved lazily per run because the watcher can be
+ *  started/stopped at any time and grabs must route through its long-lived
+ *  TorBox client so the Queue page sees in-flight downloads. */
+export interface TaskContext {
+  getDownloadManager?: () => DownloadManager | null;
+}
+
 export interface TaskDefinition {
   name: TaskName;
   displayName: string;
@@ -29,7 +38,7 @@ export interface TaskDefinition {
   category: 'sync' | 'maintenance' | 'downloading' | 'system';
   intervalMinutes: number;
   defaultEnabled: boolean;
-  action: (config: Config) => Promise<void>;
+  action: (config: Config, ctx: TaskContext) => Promise<void>;
 }
 
 const TASKS: Record<TaskName, TaskDefinition> = {
@@ -70,19 +79,17 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       debugLog(`Task backup complete: ${(result.dbSize / 1024 / 1024).toFixed(1)} MB DB, ${(result.sqlSize / 1024).toFixed(1)} KB seed`);
     },
   },
-  'rss-scan': {
-    name: 'rss-scan',
-    displayName: 'RSS Feed Scan',
-    description: 'Scan RSS feeds from configured indexers for new releases',
+  'auto-grab': {
+    name: 'auto-grab',
+    displayName: 'Auto-Grab Wanted Episodes',
+    description: 'Search indexers and grab tracked episodes that are past their expected release time and missing from disk (replaces the old rss-scan stub, which never actually scanned anything)',
     category: 'downloading',
-    intervalMinutes: 30, // Every 30 minutes
-    defaultEnabled: false,
-    action: async (config) => {
-      // No long-lived DownloadManager in this context — the grabber will
-      // spin up an ephemeral TorBox client if a grab is needed.
-      const grabber = new GrabberService(config);
-      // RSS scanning logic would go here
-      debugLog('Task rss-scan complete: RSS feeds scanned');
+    intervalMinutes: 15, // Sonarr-equivalent RssSync cadence; a no-op cycle is one cheap SQL query
+    defaultEnabled: true,
+    action: async (config, ctx) => {
+      // Route TorBox grabs through the watcher's long-lived client when it's
+      // running so the Queue page and background completion tracking see them.
+      await runAutoGrabCycle(config, ctx.getDownloadManager?.() ?? null);
     },
   },
   'housekeeping': {
@@ -252,7 +259,7 @@ export class Scheduler {
    */
   private skipLogged = new Set<TaskName>();
 
-  constructor(private config: Config) {}
+  constructor(private config: Config, private ctx: TaskContext = {}) {}
 
   /**
    * Get all available task definitions
@@ -269,7 +276,9 @@ export class Scheduler {
   }
 
   /**
-   * Initialize tasks in database if they don't exist
+   * Initialize tasks in database if they don't exist, and drop rows for
+   * tasks that no longer exist in code (e.g. the old `rss-scan` stub that
+   * `auto-grab` replaced) so they don't linger in the /api/tasks listing.
    */
   initializeTasks() {
     const tasks = db.listTasks();
@@ -284,6 +293,13 @@ export class Scheduler {
         });
       }
     }
+
+    for (const task of tasks) {
+      if (!(task.name in TASKS)) {
+        db.deleteTask(task.name);
+        debugLog(`Scheduler removed stale task row: ${task.name}`);
+      }
+    }
   }
 
   /**
@@ -295,7 +311,18 @@ export class Scheduler {
     const dbTasks = db.listTasks();
     const now = new Date();
 
-    for (const task of dbTasks) {
+    // Time-critical work (grabbing episodes whose release window just
+    // opened) goes first within a tick: actions are awaited sequentially,
+    // so an auto-grab queued behind a multi-hour scan-library (see #28)
+    // would otherwise wait for the slow task to finish before its release
+    // window is searched at all.
+    const categoryOf = (name: string) => TASKS[name as TaskName]?.category ?? 'system';
+    const ordered = [...dbTasks].sort((a, b) => {
+      const rank = (n: string) => ({ downloading: 0, sync: 1, system: 2, maintenance: 3 }[categoryOf(n)] ?? 4);
+      return rank(a.name) - rank(b.name);
+    });
+
+    for (const task of ordered) {
       if (!task.enabled) continue;
 
       const nextExecution = task.next_execution ? new Date(task.next_execution) : new Date(0);
@@ -314,7 +341,7 @@ export class Scheduler {
 
         const startTime = Date.now();
         try {
-          await taskDef.action(this.config);
+          await taskDef.action(this.config, this.ctx);
           const duration = Date.now() - startTime;
           
           // Calculate next execution
@@ -379,7 +406,7 @@ export class Scheduler {
     this.running.add(name as TaskName);
     try {
       const startTime = Date.now();
-      await taskDef.action(this.config);
+      await taskDef.action(this.config, this.ctx);
       const duration = Date.now() - startTime;
       
       // Update execution time but keep the existing schedule

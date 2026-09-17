@@ -96,6 +96,11 @@ export function listTasks(self: DatabaseManager) {
   return self.drizz.select().from(schema.scheduledTasks).all();
 }
 
+/** Remove a task row entirely - used to drop tasks that no longer exist in code. */
+export function deleteTask(self: DatabaseManager, name: string) {
+  self.drizz.delete(schema.scheduledTasks).where(eq(schema.scheduledTasks.name, name)).run();
+}
+
 export function updateTaskExecution(self: DatabaseManager, name: string, durationMs: number, nextExecution: string) {
   self.drizz
     .update(schema.scheduledTasks)

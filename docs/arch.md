@@ -27,7 +27,9 @@ Regardless of source, a completed file goes through:
 3. **Decision**: For a single-episode grab, checks the best result is an upgrade over what's already on disk (season-pack grabs skip this — a pack can span episodes at different existing qualities).
 4. **Action**: Grabs via `release.indexer.grab(release)` — routed through TorBox first if configured, otherwise falling back to the indexer's own grab (Prowlarr writes a `.torrent`/`.magnet` to the blackhole folder for the reactive pipeline above to pick up).
 
-This same `searchReleases` → score → grab path backs three surfaces: the fully-automatic per-episode/season grab, and interactive search (the person picks a specific result, which then hits `POST /api/search/grab`).
+This same `searchReleases` → score → grab path backs three surfaces: the fully-automatic per-episode grab, the manual per-episode/season/movie grab buttons, and interactive search (the person picks a specific result, which then hits `POST /api/search/grab`).
+
+The fully-automatic driver is the `auto-grab` scheduled task (`core/auto_grabber.ts`, enabled by default every 15 min). It selects tracked, `search_mode='auto'` episodes with no file on disk whose `expected_release_at` (air_window.ts forecast, falling back to air_date + learned delay) has passed, holds off any episode with a grab recorded in `grabbed_releases` within the last 12h (so in-flight TorBox downloads aren't re-submitted every cycle; a dead download is retried once the cooldown lapses), then calls `grabBestRelease` per episode, capped per cycle by a count and a wall-clock budget.
 
 ## High-Level Components
 
