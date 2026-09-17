@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.64] - 2026-09-17
 - **Full media detail on films and episodes**: the movie page showed only a bare file path and `AVAILABLE · 35.7 GiB`, throwing away the resolution/codec/HDR/audio/bitrate the pipeline had already probed and stored. `GET /api/shows/:id` now returns the probed media (via the same `serializeFileMedia` the episode list uses) plus the original release name, and the movie panel renders the shared `<MediaBadges>` — `2160p · HEVC · Dolby Vision · 60fps · TRUEHD · 7.1 · Atmos · EN/JA · Matroska · … · imported as: Thor.2011.2160p.DV…`.
 - **Filename-derived quality metadata**: a demuxer can't tell Dolby Vision from HDR10+ from plain HDR10, can't see Atmos (it's an object-audio layer on a TrueHD track), nor bit depth, source grade (REMUX/WEB-DL), the language set, or AI/RIFE passes — but the release name carries all of it. New `core/release_meta.ts` extracts those into `hdr_format` + `release_tags` columns alongside the existing probe. The file's own truth still wins on resolution/codec/fps/bitrate; the name only fills what the file can't.
 - **Deeper probe + confirmed languages**: media_probe now reads every audio track's language and title, so multi-language is established from the file (`audio_tracks`/`audio_languages`) rather than trusted from a `MULTI` tag. All three write paths (watch-folder import, library scan, startup backfill) fold probe + name through one shared `foldProbeToColumns` instead of each repeating the column mapping.
