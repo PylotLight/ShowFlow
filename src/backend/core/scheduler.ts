@@ -243,6 +243,12 @@ export class Scheduler {
    * advances when the in-flight run settles.
    */
   private running = new Set<TaskName>();
+  /**
+   * Skip lines are debug-level but a task stuck for hours would log one per
+   * minute — note the first skip per in-flight run, stay quiet after (#31).
+   * Cleared when the run settles so the next overlap is reported once.
+   */
+  private skipLogged = new Set<TaskName>();
 
   constructor(private config: Config) {}
 
@@ -296,7 +302,10 @@ export class Scheduler {
         if (!taskDef) continue;
 
         if (this.running.has(task.name as TaskName)) {
-          debugLog(`Scheduler skipping task ${task.name}: previous run still in flight`);
+          if (!this.skipLogged.has(task.name as TaskName)) {
+            this.skipLogged.add(task.name as TaskName);
+            debugLog(`Scheduler skipping task ${task.name}: previous run still in flight`);
+          }
           continue;
         }
         this.running.add(task.name as TaskName);
@@ -330,6 +339,7 @@ export class Scheduler {
           });
         } finally {
           this.running.delete(task.name as TaskName);
+          this.skipLogged.delete(task.name as TaskName);
         }
       }
     }

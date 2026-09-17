@@ -4,6 +4,7 @@ import { TVDBProvider } from "../providers/tvdb";
 import { TMDBProvider } from "../providers/tmdb";
 import type { ProviderType } from "../providers/factory";
 import { json, errorResponse, loadConfig, isProviderType, extractPosterUrl, extractBackdropUrl, toCardPosterUrl, NO_SIGNAL_SVG } from "./_shared";
+import { warmPoster } from "./artwork_warmer";
 
 export interface BackdropOption {
   index: number;
@@ -86,35 +87,39 @@ export function imageRoutes() {
   return {
 
     "/api/shows/:id/images/poster": {
+      // DB-only serving (issues #31): this route NEVER touches the network.
+      // On a cache miss it enqueues a background warm (artwork_warmer.ts)
+      // and returns 404 + placeholder immediately — the UI retries and the
+      // bytes are here on the next pass. Blocking hundreds of card requests
+      // behind live TVDB/TMDB fetches was the library-grid stall.
       async GET(req: Request & { params: Record<string, string> }) {
         try {
           const show = db.getShow(req.params.id!);
-          if (!show) return new Response(NO_SIGNAL_SVG, { headers: { "Content-Type": "image/svg+xml" } });
+          if (!show) return new Response(NO_SIGNAL_SVG, { status: 404, headers: { "Content-Type": "image/svg+xml" } });
 
-          // ?size=card serves the lightweight variant for grid cells (TMDB
-          // w342, AniList medium) — issues #30. Cache rows are keyed by
-          // exact remote URL so full and card variants coexist; a legacy row
-          // without image_url still serves as fallback.
           const params = new URL(req.url).searchParams;
           const wantCard = params.get("size") === "card";
           const cached = db.getShowArtworks(show.id, 2) as any[];
 
           const serveBytes = (data: Uint8Array, contentType: string, maxAge: number) =>
             new Response(data as unknown as BodyInit, { headers: { "Content-Type": contentType, "Cache-Control": `public, max-age=${maxAge}` } });
+          const miss = () => {
+            warmPoster(show.id);
+            return new Response(NO_SIGNAL_SVG, { status: 404, headers: { "Content-Type": "image/svg+xml" } });
+          };
+
+          if (cached.length === 0) return miss();
 
           // Full remote URL is known without any provider call when a cached
           // row recorded it — the common warm case.
-          let fullUrl: string | null = cached.find(a => a.image_url)?.image_url ?? null;
+          const fullUrl: string | null = cached.find(a => a.image_url)?.image_url ?? null;
           if (!fullUrl) {
-            const config = loadConfig();
-            const provider = ProviderFactory.getProvider(show.provider_type, config);
-            const showData = await provider.getShow(show.provider_id);
-            fullUrl = extractPosterUrl(show.provider_type, showData.metadata);
-          }
-          if (!fullUrl) {
+            // Legacy row without a recorded URL: serve what we have and warm
+            // in the background to backfill proper URL-keyed rows.
             const legacy = cached.find(a => a.data);
+            warmPoster(show.id);
             if (legacy) return serveBytes(legacy.data, legacy.content_type ?? "image/jpeg", 3600);
-            return new Response(NO_SIGNAL_SVG, { headers: { "Content-Type": "image/svg+xml" } });
+            return miss();
           }
 
           const targetUrl = wantCard ? (toCardPosterUrl(show.provider_type, fullUrl) ?? fullUrl) : fullUrl;
@@ -123,21 +128,15 @@ export function imageRoutes() {
             return serveBytes(direct.data, direct.content_type ?? "image/jpeg", 86400);
           }
 
-          const imgRes = await fetch(targetUrl);
-          if (!imgRes.ok) {
-            const fallback = cached.find(a => a.data);
-            if (fallback) return serveBytes(fallback.data, fallback.content_type ?? "image/jpeg", 3600);
-            return new Response(NO_SIGNAL_SVG, { headers: { "Content-Type": "image/svg+xml" } });
-          }
-
-          const contentType = imgRes.headers.get("Content-Type") ?? "image/jpeg";
-          const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
-          db.saveShowArtwork(show.id, 2, targetUrl, undefined, undefined, undefined, imgBytes, contentType);
-
-          return serveBytes(imgBytes, contentType, 21600);
+          // Wrong size cached (e.g. full bytes, card requested): serve it
+          // instantly anyway and warm the missing variant alongside.
+          const fallback = cached.find(a => a.data);
+          warmPoster(show.id);
+          if (fallback) return serveBytes(fallback.data, fallback.content_type ?? "image/jpeg", 3600);
+          return miss();
         } catch (err) {
           console.warn(`[api] poster fetch failed for show ${req.params.id!}:`, err);
-          return new Response(NO_SIGNAL_SVG, { headers: { "Content-Type": "image/svg+xml" } });
+          return new Response(NO_SIGNAL_SVG, { status: 404, headers: { "Content-Type": "image/svg+xml" } });
         }
       },
     },

@@ -8,6 +8,7 @@ import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearch
 import { EpisodeMappingDialog } from "@frontend/components/showflow/EpisodeMappingDialog";
 import { EpisodeDuplicatesDialog } from "@frontend/components/showflow/EpisodeDuplicatesDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
+import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { formatDelayMinutes } from "@frontend/lib/airtime";
 
@@ -882,11 +883,7 @@ function ShowDetail({ show, onBack, modal = false, onToggleExpand, expanded }: {
         )}
         <div className="absolute bottom-0 left-0 right-0 flex items-end gap-4 md:gap-6 px-4 md:px-8 pb-4 md:pb-8 [text-shadow:0_2px_12px_rgba(0,0,0,0.85)]">
           <div className="shrink-0 w-[110px] md:w-[140px] rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
-            <img
-              src={`/api/shows/${show.id}/images/poster?size=card`}
-              alt={show.title}
-              className="w-full aspect-[2/3] object-cover"
-            />
+            <PosterImage showId={show.id} alt={show.title} size="card" className="w-full aspect-[2/3]" />
           </div>
           <div className="min-w-0 flex-1 pb-1.5">
             <h1 className="font-display text-3xl md:text-4xl font-semibold tracking-wide text-white leading-tight">

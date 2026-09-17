@@ -374,6 +374,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 28 | Scan pileup wedges pod (502s): no scheduler overlap guard + non-idempotent scan wrote ~2k rows/run → 3.2M-row tables; TorBox absolute 3min timeout killed slow downloads | 2026-09-17 (pending release) |
 | 29 | In-app DB cleanup (Analytics panel + auto sweep); health log names failing components; TheXem 403 via missing browser UA | 2026-09-17 (pending release) |
 | 30 | Poster loading: card-size variant, session seen-cache kills search skeleton flash, async decode | 2026-09-17 (pending release) |
+| 31 | DB-only image serving + background warmer; movie-aware scanner kills film log spam; memoized cards + deferred search; skip-log once | 2026-09-17 (pending release) |
 
 ---
 

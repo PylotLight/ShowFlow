@@ -103,6 +103,10 @@ export function Library({
     setBackdropShow(show);
   }
 
+  // Defer the keystroke-driven filter so typing stays at full priority and
+  // the 300-card grid reconciles in the background (#31).
+  const deferredQuery = React.useDeferredValue(query);
+
   const filtered = React.useMemo(() => {
     if (!shows) return null;
     let result = shows;
@@ -118,8 +122,8 @@ export function Library({
       result = result.filter((s) => (s.trackedCount || 0) === 0);
     }
     
-    if (query.trim()) {
-      const q = query.toLowerCase();
+    if (deferredQuery.trim()) {
+      const q = deferredQuery.toLowerCase();
       result = result.filter((s) => s.title.toLowerCase().includes(q));
     }
     
@@ -147,7 +151,7 @@ export function Library({
     });
     
     return result;
-  }, [shows, query, filter, seriesTypeFilter, trackingFilter, sortBy, sortOrder]);
+  }, [shows, deferredQuery, filter, seriesTypeFilter, trackingFilter, sortBy, sortOrder]);
 
   function handlePosterSize(e: React.ChangeEvent<HTMLInputElement>) {
     const val = parseInt(e.target.value, 10);

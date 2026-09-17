@@ -197,9 +197,22 @@ export class LibraryScanner {
         }
       }
     }
+    // Movie roots (library types named *movie*) hold films, not episodes.
+    // Files there that don't look like episodes are skipped silently and
+    // counted — previously every movie logged "Show not found in database"
+    // or "Could not parse filename" on EVERY scan (#31). Episode-like files
+    // under a movie root still process normally (misplaced shows).
+    const withSlash = (r: string) => r.endsWith('/') ? r : `${r}/`;
+    const movieRoots = new Set(
+      libraryTypes
+        .filter(lt => lt.root_folder_path && /movie/i.test(lt.name ?? ''))
+        .map(lt => withSlash(lt.root_folder_path!)),
+    );
+    const underMovieRoot = (f: string) => [...movieRoots].some(r => f.startsWith(r));
     let foundCount = 0;
     let unknownCount = 0;
     let quarantinedCount = 0;
+    let moviesSkipped = 0;
     const quarantineDir = resolveQuarantineDir(this.config);
 
     // Per-show duplicate candidates keyed `${showId}|${season}:${episode}`.
@@ -225,8 +238,16 @@ export class LibraryScanner {
       if (!this.shouldScanFile(file)) continue;
       const filename = path.basename(file);
       const parsed = this.parser.parse(filename);
+      // Films don't parse as episodes and never match a show — skip them
+      // quietly when they sit under a movie root (#31).
+      const episodeLike = !!parsed && (
+        (parsed.season !== undefined && (parsed.episodes?.length ?? 0) > 0) ||
+        (parsed.absoluteNumbers?.length ?? 0) > 0
+      );
+      const isMovieFile = underMovieRoot(file) && !episodeLike;
 
       if (!parsed) {
+        if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Could not parse filename: ${filename}`);
         continue;
       }
@@ -252,6 +273,7 @@ export class LibraryScanner {
         }));
       }
       if (shows.length === 0) {
+        if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Show not found in database: ${parsed.show} (${filename})`);
         unknownCount++;
         continue;
@@ -262,6 +284,7 @@ export class LibraryScanner {
       // file to the wrong show.
       const show = shows.find((s: any) => this.titleMatchesShow(parsed.show, s.title, s)) ?? shows[0];
       if (!show) {
+        if (isMovieFile) { moviesSkipped++; continue; }
         debugLog(`Show not found in database: ${parsed.show} (${filename})`);
         unknownCount++;
         continue;
@@ -330,7 +353,7 @@ export class LibraryScanner {
       });
     }
 
-    console.log(`Scan complete. Mapped ${foundCount} episodes, quarantined ${quarantinedCount} junk file(s), deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows.`);
+    console.log(`Scan complete. Mapped ${foundCount} episodes, quarantined ${quarantinedCount} junk file(s), deleted ${deletedDuplicates} duplicate(s). ${unknownCount} files belonged to unknown shows. Skipped ${moviesSkipped} movie file(s).`);
   }
 
   private normalizeForMatch(value: string): string {

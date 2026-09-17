@@ -29,7 +29,7 @@ function preloadHero(showId: string) {
   img.src = `/api/shows/${showId}/images/backdrop`;
 }
 
-function PosterCard({
+function PosterCardInner({
   show,
   selected,
   onClick,
@@ -86,5 +86,28 @@ function PosterCard({
     </button>
   );
 }
+
+/**
+ * Memoized with an output-based comparator: the grid re-renders on every
+ * search keystroke and every backdrop rotation, but a card's output only
+ * depends on the show object identity + display flags — the onClick closure
+ * is deliberately ignored (it just forwards to the parent handler).
+ */
+interface PosterCardProps {
+  show: ShowSummary;
+  selected?: boolean;
+  onClick?: () => void;
+  showProvider?: boolean;
+  showStats?: boolean;
+}
+
+const PosterCard = React.memo(
+  PosterCardInner,
+  (prev: PosterCardProps, next: PosterCardProps) =>
+    prev.show === next.show &&
+    prev.selected === next.selected &&
+    (prev.showProvider ?? true) === (next.showProvider ?? true) &&
+    (prev.showStats ?? true) === (next.showStats ?? true),
+);
 
 export { PosterCard };
