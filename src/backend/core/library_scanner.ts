@@ -10,7 +10,7 @@ import {
 } from './junk_quarantine';
 import { probeMediaFile, mediaFromStoredRow } from './media_probe';
 import { qualityEngine } from './quality_engine';
-import type { FileMediaColumns } from '../db/episode_files';
+import type { FileMediaColumns, EpisodeFileRow } from '../db/episode_files';
 import fs from 'node:fs';
 import path from 'node:path';
 import { unlink } from 'node:fs/promises';
@@ -19,7 +19,26 @@ import { unlink } from 'node:fs/promises';
 // episode_files provenance table. Scanned files have no release provenance
 // (they were placed directly on disk), so source_kind stays 'import' unless
 // a matching grab exists.
-async function mapScannedFile(showId: string, season: number, episodeNumber: number, file: string) {
+//
+// Idempotency (issues-tracking #28): a steady-state scan must be ~free. When
+// the live episode_files row already points at this exact path with the same
+// size and probed media, nothing changed — skip all writes AND the audit
+// event. Previously every scan rewrote every row and logged an event per
+// file, appending ~2k rows to episode_files + audit_logs per run; combined
+// with overlapping scheduler runs that grew both tables past 3.2M rows and
+// wedged the event loop behind synchronous SQLite writes (502s).
+// Returns 'changed' when a row was recorded, 'unchanged' when skipped.
+async function mapScannedFile(showId: string, season: number, episodeNumber: number, file: string): Promise<'changed' | 'unchanged'> {
+  let live: EpisodeFileRow | null = null;
+  let size: number | null = null;
+  try {
+    const st = await fs.promises.stat(file);
+    size = st.size;
+    live = db.getCurrentEpisodeFile(showId, season, episodeNumber);
+  } catch {}
+  if (live && live.file_path === file && live.container && live.file_size === size) {
+    return 'unchanged';
+  }
   db.updateEpisodeFilePath(showId, season, episodeNumber, file);
   try {
     const grab = db.findGrabbedReleaseForShowEpisode(showId, season, episodeNumber, 30);
@@ -30,26 +49,23 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
     // live row already has media for an unchanged file (same size on disk),
     // reusing the stored media columns instead. This still backfills the 100s
     // of pre-existing library files on the first scan after the feature ships
-    // (their live rows have no container yet).
+    // (their live rows have no container yet). `live`/`size` were fetched
+    // above for the unchanged fast-path — reuse them here.
     let reuseMedia: FileMediaColumns | null = null;
-    try {
-      const st = await fs.promises.stat(file);
-      const live = db.getCurrentEpisodeFile(showId, season, episodeNumber);
-      if (live && live.container && live.file_size === st.size) {
-        reuseMedia = {
-          container: live.container,
-          video_width: live.video_width,
-          video_height: live.video_height,
-          video_codec: live.video_codec,
-          video_fps: live.video_fps,
-          hdr: live.hdr,
-          audio_codec: live.audio_codec,
-          audio_channels: live.audio_channels,
-          duration_seconds: live.duration_seconds,
-          bitrate_kbps: live.bitrate_kbps,
-        };
-      }
-    } catch {}
+    if (live && live.container && live.file_size === size) {
+      reuseMedia = {
+        container: live.container,
+        video_width: live.video_width,
+        video_height: live.video_height,
+        video_codec: live.video_codec,
+        video_fps: live.video_fps,
+        hdr: live.hdr,
+        audio_codec: live.audio_codec,
+        audio_channels: live.audio_channels,
+        duration_seconds: live.duration_seconds,
+        bitrate_kbps: live.bitrate_kbps,
+      };
+    }
 
     const media = reuseMedia ?? await probeToMediaColumns(file);
     db.recordEpisodeFile({
@@ -64,8 +80,10 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
       publishDate: grab?.publish_date ?? null,
       media,
     });
+    return 'changed';
   } catch (err) {
     debugLog(`Failed to record provenance for ${file}: ${err}`);
+    return 'unchanged';
   }
 }
 
@@ -253,7 +271,9 @@ export class LibraryScanner {
       if (parsed.season !== undefined && parsed.episodes) {
         for (const epNum of parsed.episodes) {
           addCandidate(showId, parsed.season, epNum, file);
-          await mapScannedFile(showId, parsed.season, epNum, file);
+          // Unchanged files are skipped silently — no row rewrite, no audit
+          // event (issues-tracking #28). Only real changes get logged.
+          if (await mapScannedFile(showId, parsed.season, epNum, file) !== 'changed') continue;
           foundCount++;
           db.logEvent({
             type: 'scan',
@@ -271,7 +291,7 @@ export class LibraryScanner {
           const ep = episodes.find(e => e.absolute_number === absNum);
           if (ep) {
             addCandidate(showId, ep.season_number, ep.episode_number, file);
-            await mapScannedFile(showId, ep.season_number, ep.episode_number, file);
+            if (await mapScannedFile(showId, ep.season_number, ep.episode_number, file) !== 'changed') continue;
             foundCount++;
             db.logEvent({
               type: 'scan',
@@ -409,7 +429,7 @@ export class LibraryScanner {
         if (parsed.season !== undefined && parsed.episodes) {
           for (const epNum of parsed.episodes) {
             addCandidate(parsed.season, epNum, file);
-            await mapScannedFile(showId, parsed.season, epNum, file);
+            if (await mapScannedFile(showId, parsed.season, epNum, file) !== 'changed') continue;
             foundCount++;
             db.logEvent({
               type: 'scan',
@@ -424,7 +444,7 @@ export class LibraryScanner {
             const ep = episodes.find((e: any) => e.absolute_number === absNum);
             if (ep) {
               addCandidate(ep.season_number, ep.episode_number, file);
-              await mapScannedFile(showId, ep.season_number, ep.episode_number, file);
+              if (await mapScannedFile(showId, ep.season_number, ep.episode_number, file) !== 'changed') continue;
               foundCount++;
               db.logEvent({
                 type: 'scan',

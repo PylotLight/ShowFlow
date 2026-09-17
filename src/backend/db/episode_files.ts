@@ -218,6 +218,25 @@ export function listUnprobedEpisodeFiles(self: DatabaseManager): EpisodeFileRow[
     .all() as EpisodeFileRow[];
 }
 
+/**
+ * Retention for the upgrade-history design (issues-tracking #28): superseded
+ * (is_current=0) rows accumulate one per episode per scan when scans aren't
+ * idempotent — production reached 3.2M dead rows vs 2k live ones. Keeps the
+ * single most recent superseded row per episode (last-upgrade history) and
+ * deletes the rest. Returns the number of rows removed.
+ */
+export function pruneSupersededEpisodeFiles(self: DatabaseManager): number {
+  const result = self.db.query(`
+    DELETE FROM episode_files
+    WHERE is_current = 0 AND id NOT IN (
+      SELECT MAX(id) FROM episode_files
+      WHERE is_current = 0
+      GROUP BY show_id, season_number, episode_number
+    )
+  `).run() as unknown as { changes: number };
+  return result.changes ?? 0;
+}
+
 /** The live file for one episode, if any. */
 export function getCurrentEpisodeFile(
   self: DatabaseManager,

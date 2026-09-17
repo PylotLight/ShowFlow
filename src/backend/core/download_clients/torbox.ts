@@ -55,6 +55,26 @@ const RETRY_BACKOFF_MS = [10_000, 30_000, 60_000, 120_000];
 // serving a multi-GB file from a cold edge — 90s proved too twitchy in
 // production (back-to-back header timeouts on a 10GB file), so give it 3min.
 // Post-first-byte stalls are still caught by the 2min stall watchdog.
+/**
+ * fetch() with a FIRST-BYTE timeout (issues-tracking #28): the timer is
+ * cancelled as soon as response headers arrive, so a slow-but-moving
+ * multi-GB body is never killed mid-stream. Previously
+ * AbortSignal.timeout(HEADER_TIMEOUT_MS) applied to the WHOLE download, so
+ * any file slower than 3 minutes failed all 5 attempts with "The operation
+ * timed out". Body stalls remain covered by fetchToFile's stall watchdog.
+ */
+async function fetchWithHeaderTimeout(url: string, headers: Record<string, string>): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(
+    () => ctrl.abort(new Error(`No response headers within ${HEADER_TIMEOUT_MS / 1000}s`)),
+    HEADER_TIMEOUT_MS,
+  );
+  try {
+    return await fetch(url, { headers, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const HEADER_TIMEOUT_MS = 180_000;
 const STALL_TIMEOUT_MS = 120_000;
 
@@ -484,14 +504,14 @@ export class TorboxDownloadClient implements DownloadClient {
 
       try {
         const headers: Record<string, string> = startOffset > 0 ? { Range: `bytes=${startOffset}-` } : {};
-        const res = await fetch(url, { headers, signal: AbortSignal.timeout(HEADER_TIMEOUT_MS) });
+        const res = await fetchWithHeaderTimeout(url, headers);
 
         if (startOffset > 0 && res.status !== 206) {
           // Server ignored Range — restart from zero rather than corrupt.
           console.warn(`[${this.name}] ${tag} Range ignored (HTTP ${res.status}) for ${fileName}; restarting`);
           await unlink(partPath).catch(() => {});
           startOffset = 0;
-          const res2 = await fetch(url, { signal: AbortSignal.timeout(HEADER_TIMEOUT_MS) });
+          const res2 = await fetchWithHeaderTimeout(url, {});
           if (!res2.ok) {
             lastError = `HTTP ${res2.status} ${res2.statusText}`;
             if (!RETRYABLE_STATUS.has(res2.status)) break;

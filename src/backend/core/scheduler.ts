@@ -124,7 +124,11 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     action: async () => {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const result = db.cleanupOldPipelineEvents(cutoff);
-      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days`);
+      // Superseded episode_files rows (upgrade history beyond the latest)
+      // accumulate one per episode per non-idempotent scan — prune daily so
+      // the table can't bloat to millions of dead rows again (#28).
+      const pruned = db.pruneSupersededEpisodeFiles();
+      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days, pruned ${pruned} superseded episode file row(s)`);
     },
   },
   'quarantine-cleanup': {
@@ -215,6 +219,16 @@ const TASKS: Record<TaskName, TaskDefinition> = {
 export class Scheduler {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private gcHandle: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Overlap guard (issues-tracking #28): a task whose action outlives its
+   * interval must not pile up. Previously a 9.8-hour scan-library run was
+   * re-fired on every 60s tick (next_execution only advances on completion),
+   * stacking ~92 concurrent full scans that contended on synchronous SQLite
+   * writes until the event loop starved and readiness probes failed (502s).
+   * A due task that is already running is skipped; its next_execution still
+   * advances when the in-flight run settles.
+   */
+  private running = new Set<TaskName>();
 
   constructor(private config: Config) {}
 
@@ -267,6 +281,12 @@ export class Scheduler {
         const taskDef = TASKS[task.name as TaskName];
         if (!taskDef) continue;
 
+        if (this.running.has(task.name as TaskName)) {
+          debugLog(`Scheduler skipping task ${task.name}: previous run still in flight`);
+          continue;
+        }
+        this.running.add(task.name as TaskName);
+
         const startTime = Date.now();
         try {
           await taskDef.action(this.config);
@@ -294,6 +314,8 @@ export class Scheduler {
             entityId: task.name,
             message: `Task ${task.name} failed: ${err}`,
           });
+        } finally {
+          this.running.delete(task.name as TaskName);
         }
       }
     }
@@ -324,7 +346,11 @@ export class Scheduler {
     if (!taskDef) {
       return { success: false, message: `Task ${name} not found` };
     }
+    if (this.running.has(name as TaskName)) {
+      return { success: false, message: `Task ${name} is already running — wait for the in-flight run to finish` };
+    }
 
+    this.running.add(name as TaskName);
     try {
       const startTime = Date.now();
       await taskDef.action(this.config);
@@ -347,6 +373,8 @@ export class Scheduler {
     } catch (err) {
       debugLog(`Manual task run error for ${name}: ${err}`);
       return { success: false, message: `Task ${name} failed: ${err}` };
+    } finally {
+      this.running.delete(name as TaskName);
     }
   }
 

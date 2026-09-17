@@ -246,6 +246,7 @@ export class DatabaseManager {
   updateEpisodeFileMedia(rowId: number, media: Parameters<typeof episodeFiles.updateEpisodeFileMedia>[2]) { return episodeFiles.updateEpisodeFileMedia(this, rowId, media); }
   updateEpisodeFileRowPath(rowId: number, filePath: string) { return episodeFiles.updateEpisodeFileRowPath(this, rowId, filePath); }
   listUnprobedEpisodeFiles() { return episodeFiles.listUnprobedEpisodeFiles(this); }
+  pruneSupersededEpisodeFiles() { return episodeFiles.pruneSupersededEpisodeFiles(this); }
 
   // ---- Episode mapping (anime season-splits, issues-tracking.md #4) --------
 

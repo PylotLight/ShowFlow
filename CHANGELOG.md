@@ -3,7 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-
+- **Fix**: scheduler no longer stacks overlapping runs — a due task already in flight is skipped, so one slow library scan can't snowball into 92 concurrent scans that wedge the event loop (the 502s).
+- **Fix**: library scan is idempotent — unchanged files skip all writes and audit events (was ~2k new rows in `episode_files` + `audit_logs` per scan, 3.2M rows each).
+- **Fix**: TorBox download timeout is first-byte only — slow multi-GB bodies stream under the stall watchdog instead of dying at 3min on every attempt.
+- **Maintenance**: daily pipeline cleanup now prunes superseded episode-file rows, keeping the latest per episode.
 ## [v0.1.54] - 2026-09-16
 - **Fix**: backdrop counter (`1/7`) lifted clear of the content overlap the taller banner introduced.
 

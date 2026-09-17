@@ -371,6 +371,7 @@ New top-level **Indexer Search** page: release-disconnected search across Prowla
 | 25 | TorBox API hang wedges link requests; View reloads page; 90s first-byte too twitchy | 2026-09-16 (pending release) |
 | 26 | Agenda: wrong tz, provenance overflow, history placement, past-day filter, per-ep search | 2026-09-16 (pending release) |
 | 27 | Taller banner buried backdrop counter — lifted to bottom-16 | 2026-09-16 (pending release) |
+| 28 | Scan pileup wedges pod (502s): no scheduler overlap guard + non-idempotent scan wrote ~2k rows/run → 3.2M-row tables; TorBox absolute 3min timeout killed slow downloads | 2026-09-17 (pending release) |
 
 ---
 
