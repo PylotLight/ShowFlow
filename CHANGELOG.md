@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.67] - 2026-09-17
 - **Fix**: episodes no longer silently go ungrabbed. The "fully-automatic grab" was never wired to anything: the only periodic hook was the `rss-scan` task, which shipped *disabled* and whose body was a stub (`// RSS scanning logic would go here`) — every grab required someone clicking Auto in the UI, so anything airing overnight aged past its release window unnoticed. New `auto-grab` scheduled task (every 15 min, on by default) drives the existing pipeline: tracked episodes in auto search mode, missing from disk, past their `expected_release_at` — the air-window forecast that had been computed on every sync but never used for grabbing — newest-due first, capped per cycle so one tick can't hammer indexers after a long outage.
 - **Re-grab guard**: an episode with a successful grab in the last 12h is skipped, so in-flight TorBox downloads aren't re-submitted every cycle (a download that died gets retried once the cooldown lapses; failed *searches* always retry, catching releases published after the last look). This also surfaced `grabbed_at` rows written by the column's `datetime('now')` default — space-separated timestamps sort *below* ISO cutoffs on the same day, so cooldown math silently misses; new writes are explicit ISO and queries normalize legacy rows.
 - Scheduled ticks now run `downloading` tasks ahead of sync/maintenance work (actions are awaited sequentially, so an auto-grab queued behind a multi-hour scan would otherwise wait on it); the stale `rss-scan` row is dropped from the task list on boot, and scheduled grabs route through the watcher's long-lived TorBox client so the Queue page sees them.
