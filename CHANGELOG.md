@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.63] - 2026-09-17
 - **Cancel active downloads**: every in-flight item on the Queue page gains a cancel button. TorBox grabs are aborted mid-flight — the poll loop, retry backoffs, and any streaming file fetch all interrupt immediately, the torrent is deleted from the TorBox account so it stops caching/seeding, and the staged `.part` file is cleaned up. Watch-folder imports can likewise be stopped and deleted from the drop folder. Each cancel surfaces a "Cancelled by user" job failure and a log event, so nothing vanishes silently. New `POST /api/system/processing/cancel`; queue item ids are now stable (`torbox:<torrentId>` / `blackhole:<file>`).
 
 ## [v0.1.62] - 2026-09-17
