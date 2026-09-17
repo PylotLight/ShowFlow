@@ -57,7 +57,14 @@ export class TheXemClient {
     let resp: Response;
     try {
       resp = await fetch(url, {
-        headers: { Accept: 'application/json' },
+        // thexem.info sits behind Cloudflare, which 403s Bun's default UA —
+        // send the same browser-like UA every other outbound client uses
+        // (native/indexers, updates, feedback). This was the "HTTP 403
+        // Forbidden" degraded state in system health (#29).
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ShowFlow/1.0',
+        },
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {

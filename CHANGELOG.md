@@ -3,7 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-
+- **Database Cleanup panel (Analytics)**: manual sweeps that run as background jobs — prune episode-file history (keeps live + latest per episode), purge scan-log spam (you pick keep-days 1–30, errors/grabs untouched), and vacuum to reclaim space. Reports rows removed and size before/after.
+- **Automatic**: daily pipeline cleanup now also purges scan-type audit rows older than 7 days, so a future write storm self-drains.
+- **Health clarity**: the scheduler log names failing components (`overall down — failing: indexer:nyaa(down), metadata_provider:thexem(degraded)`) instead of a bare "down".
+- **Fix**: TheXem requests now send the same browser-like User-Agent as every other outbound client — Cloudflare was 403ing Bun's default UA, which read as permanently "degraded".
 ## [v0.1.55] - 2026-09-17
 - **Fix**: scheduler no longer stacks overlapping runs — a due task already in flight is skipped, so one slow library scan can't snowball into 92 concurrent scans that wedge the event loop (the 502s).
 - **Fix**: library scan is idempotent — unchanged files skip all writes and audit events (was ~2k new rows in `episode_files` + `audit_logs` per scan, 3.2M rows each).

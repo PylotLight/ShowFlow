@@ -1,5 +1,5 @@
 import * as React from "react";
-import { DatabaseIcon, Loader2Icon, RefreshCwIcon, ActivityIcon, FlameIcon, ArchiveIcon } from "lucide-react";
+import { DatabaseIcon, Loader2Icon, RefreshCwIcon, ActivityIcon, FlameIcon, ArchiveIcon, Trash2Icon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { StatTile } from "@frontend/components/showflow/StatTile";
 import { Button } from "@frontend/components/ui/button";
@@ -128,6 +128,139 @@ function Sparkline({ buckets }: { buckets: HourlyBucket[] }) {
   );
 }
 
+type CleanupAction = "prune-episode-files" | "purge-scan-logs" | "vacuum";
+
+const KEEP_DAY_OPTIONS = [1, 2, 7, 14, 30];
+
+/**
+ * Manual database sweeps (issues-tracking #29). Each action runs as a
+ * background job because big-table purges and VACUUM take minutes — the
+ * button returns immediately with a jobId and this polls the job until it
+ * settles, then refreshes the page stats.
+ */
+function DatabaseCleanup({ sweepTask, onDone }: { sweepTask: any; onDone: () => void }) {
+  const [keepDays, setKeepDays] = React.useState(7);
+  const [busyAction, setBusyAction] = React.useState<CleanupAction | null>(null);
+  const [jobDetail, setJobDetail] = React.useState<string | null>(null);
+  const [jobError, setJobError] = React.useState<string | null>(null);
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  React.useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  function pollJob(jobId: string, action: CleanupAction) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const job = await fetch(`/api/background-jobs/${jobId}`).then(r => r.json()).catch(() => null);
+      if (!job) return;
+      if (job.status === "running") {
+        setJobDetail(job.progress?.detail ?? "Working…");
+        return;
+      }
+      if (pollRef.current) clearInterval(pollRef.current);
+      setBusyAction(null);
+      if (job.status === "done") {
+        setJobDetail(job.progress?.detail ?? "Done.");
+        setJobError(null);
+      } else {
+        setJobError(job.error ?? "Cleanup failed.");
+      }
+      onDone();
+    }, 2000);
+  }
+
+  async function start(action: CleanupAction) {
+    if (action === "vacuum" && !confirm(
+      "Vacuum rewrites the whole database file to reclaim space. It locks the database for a few minutes — the UI will show 502s until it finishes, then recover on its own. Continue?"
+    )) return;
+    setBusyAction(action);
+    setJobDetail("Starting…");
+    setJobError(null);
+    const res = await fetch("/api/system/db-cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, keepDays }),
+    }).then(r => r.json()).catch(() => null);
+    if (!res?.jobId) {
+      setBusyAction(null);
+      setJobError("Couldn't start cleanup.");
+      return;
+    }
+    pollJob(res.jobId, action);
+  }
+
+  const busy = busyAction !== null;
+
+  return (
+    <GlassPanel className="overflow-hidden">
+      <div className="px-6 py-4 border-b border-white/5 flex items-center gap-2">
+        <Trash2Icon className="size-4 text-signal" />
+        <h4 className="font-display text-sm font-semibold text-white/90">Database Cleanup</h4>
+      </div>
+      <div className="px-6 py-4 space-y-4">
+        <p className="text-muted-foreground text-xs">
+          Manual sweeps — the automatic daily sweep ({sweepTask ? (sweepTask.enabled ? "enabled" : "disabled in Tasks") : "pipeline-cleanup"}
+          {sweepTask?.lastExecution ? `, last ran ${formatRelative(sweepTask.lastExecution, "ago")}` : ""}) purges pipeline events older than 14 days,
+          scan logs older than 7 days, and superseded episode-file rows. These buttons do the same on demand, plus vacuum.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-2">
+            <div className="font-mono text-xs text-foreground/90">Prune episode history</div>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Drops superseded file rows beyond the latest per episode. Live mappings are never touched.
+            </p>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => start("prune-episode-files")}>
+              {busyAction === "prune-episode-files" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              Prune
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-2">
+            <div className="font-mono text-xs text-foreground/90">Purge scan logs</div>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Deletes per-file "mapped file" audit spam. Errors, grabs and other events are kept.
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground text-[11px]">Keep</span>
+              {KEEP_DAY_OPTIONS.map(d => (
+                <button
+                  key={d}
+                  disabled={busy}
+                  onClick={() => setKeepDays(d)}
+                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${keepDays === d ? "bg-signal/20 text-signal" : "text-muted-foreground hover:text-foreground/80"}`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => start("purge-scan-logs")}>
+              {busyAction === "purge-scan-logs" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              Purge
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-2">
+            <div className="font-mono text-xs text-foreground/90">Vacuum</div>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Rewrites the database file to reclaim space after big purges. Locks the DB for minutes.
+            </p>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => start("vacuum")}>
+              {busyAction === "vacuum" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              Vacuum
+            </Button>
+          </div>
+        </div>
+
+        {(jobDetail || jobError) && (
+          <p className={`font-mono text-xs ${jobError ? "text-red-400" : "text-signal"}`}>
+            {jobError ?? jobDetail}
+          </p>
+        )}
+      </div>
+    </GlassPanel>
+  );
+}
+
 export function AnalyticsPanel() {
   const [data, setData] = React.useState<AnalyticsData | null>(null);
   const [cleanupTask, setCleanupTask] = React.useState<any>(null);
@@ -171,7 +304,7 @@ export function AnalyticsPanel() {
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Database Usage</h3>
           <p className="text-muted-foreground text-xs mt-0.5">
-            Row counts and pipeline event activity — the pipeline event log (search/grab/rejection history) is by far the highest-write table.
+            Row counts, activity, and manual cleanup sweeps — the scan/audit and episode-file history tables are the highest-write ones when scans misbehave.
             {cleanupTask && (
               <> Auto-cleaned {cleanupTask.enabled ? "daily" : "— currently disabled, see Tasks"}, last ran {formatRelative(cleanupTask.lastExecution, "ago")}.</>
             )}
@@ -189,6 +322,8 @@ export function AnalyticsPanel() {
         <StatTile label="Pipeline Events (24h)" value={data.pipelineEvents.last24h.toLocaleString()} accent="amber" />
         <StatTile label="Oldest Event" value={formatAge(data.pipelineEvents.oldestEventAt)} />
       </div>
+
+      <DatabaseCleanup sweepTask={cleanupTask} onDone={load} />
 
       <GlassPanel className="p-6 space-y-3">
         <div className="flex items-center gap-2">

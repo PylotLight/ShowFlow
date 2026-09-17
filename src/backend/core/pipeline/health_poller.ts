@@ -34,7 +34,12 @@ export async function pollSystemHealth(config: Config): Promise<void> {
 async function pollMetadataProviders() {
   try {
     const resp = await fetch('https://thexem.info/map/all?id=367063&origin=tvdb', {
-      headers: { Accept: 'application/json' },
+      // Same browser-like UA as TheXemClient — Cloudflare 403s the default
+      // Bun UA, which read as a permanent "degraded" in system health (#29).
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ShowFlow/1.0',
+      },
       signal: AbortSignal.timeout(10_000),
     });
     if (resp.ok) {

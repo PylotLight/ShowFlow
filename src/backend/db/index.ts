@@ -276,6 +276,8 @@ export class DatabaseManager {
   // ---- Audit logs --------------------------------------------------------
 
   logEvent(event: Parameters<typeof system.logEvent>[1]) { return system.logEvent(this, event); }
+  ensureCleanupIndexes() { return system.ensureCleanupIndexes(this); }
+  purgeOldScanLogs(beforeIso: string, limit?: number) { return system.purgeOldScanLogs(this, beforeIso, limit); }
   listRecentEvents(limit?: number) { return system.listRecentEvents(this, limit); }
   cleanupOldLogs(beforeDate: string) { return system.cleanupOldLogs(this, beforeDate); }
   cleanupExpiredCache() { return system.cleanupExpiredCache(this); }

@@ -143,6 +143,35 @@ export function cleanupOldLogs(self: DatabaseManager, beforeDate: string) {
   return result.changes;
 }
 
+/**
+ * One-time safety net for tables that outgrow their indexes
+ * (issues-tracking #28/#29): the audit_logs table has no covering index for
+ * (event_type, timestamp), so purges on a multi-million-row table would each
+ * take a full scan. Created lazily by the cleanup job — not as a boot
+ * migration — so a huge existing table can't stall release activation.
+ */
+export function ensureCleanupIndexes(self: DatabaseManager) {
+  self.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_type_time ON audit_logs (event_type, timestamp)`);
+}
+
+/**
+ * Delete scan-type audit rows older than `beforeIso`, in chunks so a
+ * multi-million-row purge yields the event loop between chunks instead of
+ * holding one giant write transaction (which starves HTTP + readiness).
+ * Returns rows removed in this call; callers loop until it returns < limit.
+ * Non-scan audit rows (errors, grabs, scheduler, updates) are never touched.
+ */
+export function purgeOldScanLogs(self: DatabaseManager, beforeIso: string, limit = 100_000): number {
+  const result = self.db.query(`
+    DELETE FROM audit_logs WHERE id IN (
+      SELECT id FROM audit_logs
+      WHERE event_type = 'scan' AND timestamp < ?
+      LIMIT ?
+    )
+  `).run(beforeIso, limit) as unknown as { changes: number };
+  return result.changes ?? 0;
+}
+
 export function cleanupExpiredCache(self: DatabaseManager) {
   const result = self.drizz
     .delete(schema.metadataCache)

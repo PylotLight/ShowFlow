@@ -128,7 +128,12 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       // accumulate one per episode per non-idempotent scan — prune daily so
       // the table can't bloat to millions of dead rows again (#28).
       const pruned = db.pruneSupersededEpisodeFiles();
-      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days, pruned ${pruned} superseded episode file row(s)`);
+      // Scan-type audit rows are per-file noise ("Mapped file X"); steady
+      // state writes ~zero of them since scans went idempotent, but sweep
+      // anything older than 7d so a future storm self-drains (#29).
+      const scanCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const purgedScans = db.purgeOldScanLogs(scanCutoff);
+      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days, pruned ${pruned} superseded episode file row(s), purged ${purgedScans} scan log row(s)`);
     },
   },
   'quarantine-cleanup': {
@@ -159,7 +164,16 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     action: async (config) => {
       await pollSystemHealth(config);
       const snapshot = db.getHealthSnapshot();
-      debugLog(`Task health-check complete: overall ${snapshot.overallStatus}`);
+      // Name the failing components, not just "down" — a bare "overall
+      // down" line sends everyone hunting through the dashboard (#29).
+      const bad: string[] = [];
+      (Object.keys(snapshot.byType) as (keyof typeof snapshot.byType)[]).forEach((type) => {
+        for (const row of snapshot.byType[type]) {
+          if (row.status !== 'healthy') bad.push(`${type}:${row.component_id}(${row.status})`);
+        }
+      });
+      const suffix = bad.length > 0 ? ` — failing: ${bad.join(', ')}` : '';
+      debugLog(`Task health-check complete: overall ${snapshot.overallStatus}${suffix}`);
     },
   },
   'watcher-monitor': {
