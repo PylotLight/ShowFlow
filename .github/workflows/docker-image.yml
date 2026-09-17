@@ -60,47 +60,36 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # On every published GitHub Release, package the already-built release
-  # files (binary + manifest + migrations, all baked into the image above)
-  # into the standalone tarball (showflow-<sha>.tar.gz) and upload it.
-  # Extracting from the image skips a second checkout + bun install +
-  # compile on a fresh runner (~1-2min) and guarantees the tarball bytes
-  # are identical to what's in the image.
+  # On every published GitHub Release, compile the release files (binary +
+  # manifest + migrations) and package them into the standalone tarball
+  # (showflow-<sha>.tar.gz), then upload it. This is a plain checkout + bun
+  # install + build on a fresh runner. (The v0.1.59 "faster releases" variant
+  # that extracted the tarball from the just-built image was reverted: it
+  # dropped this job's checkout, which broke `gh release upload`, and coupled
+  # the update artifact to the heavyweight Docker build for ~1-2min saved.)
   publish-release-assets:
     needs: build-and-push
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: read
     steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Extract release files from image
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        run: |
-          # GHCR requires a lowercase repository name; github.repository
-          # (PylotLight/ShowFlow) keeps its case, so force-lowercase it here.
-          IMG=${IMAGE,,}@${{ needs.build-and-push.outputs.digest }}
-          docker pull "$IMG"
-          docker create --name release-files "$IMG"
-          docker cp release-files:/bootstrap/showflow ./showflow
-          docker cp release-files:/bootstrap/manifest.json ./manifest.json
-          docker cp release-files:/bootstrap/migrations ./migrations
-          docker rm release-files
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build release binary + manifest
+        run: GITHUB_SHA=${{ github.sha }} GITHUB_REF_NAME=${{ github.ref_name }} BUILD_TARGET=bun-linux-x64 bun run build.ts
 
       - name: Package release assets
-        run: tar -czf showflow-${{ github.sha }}.tar.gz -C "$PWD" showflow manifest.json migrations
+        run: tar -czf showflow-${{ github.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations
 
       - name: Upload release asset
-        # No checkout in this job (files come from the image), so gh can't
-        # resolve the repo from a git remote — pass it explicitly.
-        run: gh release upload --repo ${{ github.repository }} ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
+        run: gh release upload ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
