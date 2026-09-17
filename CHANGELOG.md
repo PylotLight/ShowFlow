@@ -3,9 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- **Fix**: release asset upload no longer fails with `not a git repository`. The v0.1.59 "faster releases" change dropped the `publish-release-assets` job's checkout, but `gh release upload` still resolved the repo from a git remote — so every release since built the image yet uploaded nothing. The command now passes `--repo` explicitly. (v0.1.61 shipped with no tarball; re-released as v0.1.62.)
 
 ## [v0.1.61] - 2026-09-17
+- **Fix**: release asset upload no longer fails with `not a git repository` — the v0.1.59 "faster releases" change dropped the `publish-release-assets` job's checkout, but `gh release upload` still resolved the repo from a git remote, so every release since built the image yet uploaded nothing. `gh` now gets `--repo` explicitly. (The first v0.1.61 publish hit this and shipped no tarball; re-cut.)
 - **Fix**: release asset publishing no longer dies on `invalid reference format` — the image-extract step pulled the digest under the repo's raw mixed-case name (`PylotLight/ShowFlow`), which Docker rejects; the ref is now lowercased like the tag side already was.
 - **Fix**: show/movie folder names no longer split into duplicates. Five separate title→path sanitizers (blackhole client, library scanner, Oracle, shows route, episode-naming engine) each handled illegal characters — especially colons — slightly differently, so a grab could land in a folder that didn't match where the scanner looked. They now share one `sanitizeTitle` (colon → space, matching the naming engine's smart default), which also stops Samba exposing colon-named folders as 8.3 mangled names (e.g. `REJ1JG~5`) to Finder.
 - **Bulk folder repair**: the Overlaps dialog gains a "Consolidate all" action that merges every detected overlapping-folder group in one pass (previously one group per click). New `POST /api/shows/duplicates/consolidate-all`; per-group review still available.
