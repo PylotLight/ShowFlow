@@ -410,15 +410,41 @@ export const episodeFiles = sqliteTable('episode_files', {
   video_fps: integer('video_fps'),
   /** 1 if the video carries HDR color metadata. */
   hdr: integer('hdr'),
+  /**
+   * Most specific HDR presentation advertised by the release name —
+   * 'Dolby Vision' | 'HDR10+' | 'HDR10' | 'HLG' | null. The probe only answers
+   * HDR-yes/no; the *format* isn't reliably readable from a demuxer, so this
+   * is filename-derived (see core/release_meta.ts).
+   */
+  hdr_format: text('hdr_format'),
   /** Audio codec of the first audio track, e.g. 'eac3' / 'truehd' / 'aac'. */
   audio_codec: text('audio_codec'),
   /** Channel count of the first audio track (6 == 5.1). */
   audio_channels: integer('audio_channels'),
+  /**
+   * JSON array of every audio track the probe found:
+   * [{ codec, channels, language, name }]. audio_codec/audio_channels above
+   * hold the primary track for backwards-compatible comparisons; this carries
+   * the full set for the detail view.
+   */
+  audio_tracks: text('audio_tracks'),
+  /**
+   * JSON array of distinct real audio languages ('eng','jpn', …) read from the
+   * container. >1 confirms a MULTI/DUAL release from the file itself, not the
+   * name. Null when never probed.
+   */
+  audio_languages: text('audio_languages'),
   /** Duration in seconds. */
   duration_seconds: integer('duration_seconds'),
   /** Overall average bitrate in bits/sec (fileSize*8/duration when the
    *  container carries none). */
   bitrate_kbps: integer('bitrate_kbps'),
+  /**
+   * JSON array of filename-derived display tags the probe can't see —
+   * Atmos, 10-bit, Remux, WEB-DL, Multi-Subs, AI-Enhanced, RIFE, Extended …
+   * (see core/release_meta.ts). Null when never extracted.
+   */
+  release_tags: text('release_tags'),
   /** When the file was last probed (null = never). */
   probed_at: text('probed_at'),
 }, (table) => ({

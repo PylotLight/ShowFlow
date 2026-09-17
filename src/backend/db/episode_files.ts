@@ -22,10 +22,14 @@ export interface EpisodeFileRow {
   video_codec: string | null;
   video_fps: number | null;
   hdr: number | null;
+  hdr_format: string | null;
   audio_codec: string | null;
   audio_channels: number | null;
+  audio_tracks: string | null;
+  audio_languages: string | null;
   duration_seconds: number | null;
   bitrate_kbps: number | null;
+  release_tags: string | null;
   probed_at: string | null;
 }
 
@@ -37,10 +41,14 @@ export type FileMediaColumns = {
   video_codec: string | null;
   video_fps: number | null;
   hdr: number | null;
+  hdr_format: string | null;
   audio_codec: string | null;
   audio_channels: number | null;
+  audio_tracks: string | null;
+  audio_languages: string | null;
   duration_seconds: number | null;
   bitrate_kbps: number | null;
+  release_tags: string | null;
 };
 
 export type RecordEpisodeFileInput = {
@@ -153,10 +161,14 @@ export function recordEpisodeFile(self: DatabaseManager, input: RecordEpisodeFil
       video_codec: m?.video_codec ?? null,
       video_fps: m?.video_fps ?? null,
       hdr: m?.hdr ?? null,
+      hdr_format: m?.hdr_format ?? null,
       audio_codec: m?.audio_codec ?? null,
       audio_channels: m?.audio_channels ?? null,
+      audio_tracks: m?.audio_tracks ?? null,
+      audio_languages: m?.audio_languages ?? null,
       duration_seconds: m?.duration_seconds ?? null,
       bitrate_kbps: m?.bitrate_kbps ?? null,
+      release_tags: m?.release_tags ?? null,
       probed_at: m ? sql`(datetime('now'))` : null,
     })
     .run();
@@ -177,10 +189,14 @@ export function updateEpisodeFileMedia(self: DatabaseManager, rowId: number, med
       ...(media.video_codec !== undefined ? { video_codec: media.video_codec } : {}),
       ...(media.video_fps !== undefined ? { video_fps: media.video_fps } : {}),
       ...(media.hdr !== undefined ? { hdr: media.hdr } : {}),
+      ...(media.hdr_format !== undefined ? { hdr_format: media.hdr_format } : {}),
       ...(media.audio_codec !== undefined ? { audio_codec: media.audio_codec } : {}),
       ...(media.audio_channels !== undefined ? { audio_channels: media.audio_channels } : {}),
+      ...(media.audio_tracks !== undefined ? { audio_tracks: media.audio_tracks } : {}),
+      ...(media.audio_languages !== undefined ? { audio_languages: media.audio_languages } : {}),
       ...(media.duration_seconds !== undefined ? { duration_seconds: media.duration_seconds } : {}),
       ...(media.bitrate_kbps !== undefined ? { bitrate_kbps: media.bitrate_kbps } : {}),
+      ...(media.release_tags !== undefined ? { release_tags: media.release_tags } : {}),
       probed_at: sql`(datetime('now'))`,
     })
     .where(eq(schema.episodeFiles.id, rowId))
@@ -213,6 +229,25 @@ export function listUnprobedEpisodeFiles(self: DatabaseManager): EpisodeFileRow[
     .where(and(
       eq(schema.episodeFiles.is_current, 1),
       sql`${schema.episodeFiles.container} IS NULL`,
+    ))
+    .orderBy(desc(schema.episodeFiles.id))
+    .all() as EpisodeFileRow[];
+}
+
+/**
+ * Live rows that carry a file name but haven't had their filename-derived
+ * metadata (HDR format / release tags) extracted yet — the cheap, disk-free
+ * backfill target. Includes rows an earlier probe already filled but that
+ * predate the release-metadata feature.
+ */
+export function listEpisodeFilesMissingReleaseMeta(self: DatabaseManager): EpisodeFileRow[] {
+  return self.drizz
+    .select()
+    .from(schema.episodeFiles)
+    .where(and(
+      eq(schema.episodeFiles.is_current, 1),
+      sql`${schema.episodeFiles.hdr_format} IS NULL`,
+      sql`${schema.episodeFiles.release_tags} IS NULL`,
     ))
     .orderBy(desc(schema.episodeFiles.id))
     .all() as EpisodeFileRow[];

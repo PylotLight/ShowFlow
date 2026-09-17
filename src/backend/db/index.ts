@@ -10,6 +10,7 @@ import * as schema from './schema';
 
 import { seedDefaults, migrateQualityIds } from './init';
 import { backfillShowTitles } from './shows';
+import { extractReleaseMeta } from '../core/release_meta';
 import * as shows from './shows';
 import * as config from './config';
 import * as system from './system';
@@ -116,11 +117,31 @@ export class DatabaseManager {
     // skipped by listUnprobedEpisodeFiles.
     if ((efCol?.c ?? 0) > 0) {
       try {
+        // Cheap, disk-free pass first: derive filename metadata (HDR format +
+        // release tags) for every live row still missing it, including rows an
+        // earlier probe already filled. Runs before the expensive re-probe so
+        // the badges light up instantly.
+        try {
+          const untagged = episodeFiles.listEpisodeFilesMissingReleaseMeta(this);
+          let tagged = 0;
+          for (const row of untagged) {
+            const meta = extractReleaseMeta(row.original_name ?? row.release_title);
+            episodeFiles.updateEpisodeFileMedia(this, row.id, {
+              hdr_format: meta.hdrFormat,
+              release_tags: JSON.stringify(meta.tags),
+            });
+            tagged++;
+          }
+          if (tagged > 0) console.log(`[probe] Release-metadata backfill: tagged ${tagged} file(s).`);
+        } catch {
+          // non-fatal
+        }
+
         const unprobed = episodeFiles.listUnprobedEpisodeFiles(this);
         if (unprobed.length > 0) {
           setImmediate(() => {
             void (async () => {
-              const { probeMediaFile } = await import('../core/media_probe');
+              const { probeMediaFile, foldProbeToColumns } = await import('../core/media_probe');
               let probed = 0;
               for (const row of unprobed) {
                 try {
@@ -128,18 +149,8 @@ export class DatabaseManager {
                   if (!st) continue;
                   const m = await probeMediaFile(row.file_path);
                   if (!m) continue;
-                  episodeFiles.updateEpisodeFileMedia(this, row.id, {
-                    container: m.container,
-                    video_width: m.video?.width ?? null,
-                    video_height: m.video?.height ?? null,
-                    video_codec: m.video?.codec?.toLowerCase() ?? null,
-                    video_fps: m.video?.fps ? Math.round(m.video.fps) : null,
-                    hdr: m.video?.hdr ? 1 : null,
-                    audio_codec: m.audio?.[0]?.codec?.toLowerCase() ?? null,
-                    audio_channels: m.audio?.[0]?.channels ?? null,
-                    duration_seconds: m.durationSeconds ? Math.round(m.durationSeconds) : null,
-                    bitrate_kbps: m.overallBitrate ? Math.round(m.overallBitrate / 1000) : null,
-                  });
+                  const cols = foldProbeToColumns(m, row.original_name ?? row.release_title);
+                  if (cols) episodeFiles.updateEpisodeFileMedia(this, row.id, cols);
                   probed++;
                 } catch {
                   // skip on individual probe failure

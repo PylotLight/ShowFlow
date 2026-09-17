@@ -2,7 +2,8 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, Columns2, DownloadIcon, 
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
-import { EpisodeRow, type EpisodeData, type ColumnDef } from "@frontend/components/showflow/EpisodeRow";
+import { EpisodeRow, type EpisodeData, type ColumnDef, type FileMedia } from "@frontend/components/showflow/EpisodeRow";
+import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 import { ManageSourcesDialog } from "@frontend/components/showflow/ManageSourcesDialog";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
 import { EpisodeMappingDialog } from "@frontend/components/showflow/EpisodeMappingDialog";
@@ -64,11 +65,14 @@ interface SearchTarget {
 
 interface MovieFileInfo {
   path: string;
+  name?: string | null;
+  originalName?: string | null;
   size: number | null;
   sourceKind: string | null;
   releaseTitle: string | null;
   indexerName: string | null;
   importedAt: string | null;
+  media?: FileMedia | null;
 }
 
 function formatMovieBytes(bytes: number | null): string {
@@ -154,9 +158,20 @@ function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }: {
             </div>
           )}
           {movieFile && (
-            <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[11px] text-white/60 break-all">
-              {movieFile.path}
-              {movieFile.releaseTitle && <span className="block text-white/35 mt-0.5">from: {movieFile.releaseTitle}</span>}
+            <div className="flex flex-col gap-2">
+              <MediaBadges media={movieFile.media} />
+              <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-[11px] text-white/60 break-all space-y-0.5">
+                {movieFile.name && (
+                  <div className="text-white/80">{movieFile.name}</div>
+                )}
+                <div>{movieFile.path}</div>
+                {movieFile.releaseTitle && (
+                  <div className="text-white/35 mt-0.5">from: {movieFile.releaseTitle}</div>
+                )}
+                {!movieFile.releaseTitle && movieFile.originalName && (
+                  <div className="text-white/35 mt-0.5">imported as: {movieFile.originalName}</div>
+                )}
+              </div>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">

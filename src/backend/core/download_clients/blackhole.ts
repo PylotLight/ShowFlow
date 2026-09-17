@@ -13,7 +13,7 @@ import type { Episode } from '../types';
 import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
-import { probeMediaFile, mediaFromStoredRow } from '../media_probe';
+import { probeMediaFile, mediaFromStoredRow, foldProbeToColumns } from '../media_probe';
 import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
@@ -702,18 +702,7 @@ export class BlackholeClient implements DownloadClient {
         releaseTitle: grab?.release_title ?? null,
         indexerName: grab?.indexer_name ?? null,
         publishDate: grab?.publish_date ?? null,
-        media: mediaProbe ? {
-          container: mediaProbe.container,
-          video_width: mediaProbe.video?.width ?? null,
-          video_height: mediaProbe.video?.height ?? null,
-          video_codec: mediaProbe.video?.codec?.toLowerCase() ?? null,
-          video_fps: mediaProbe.video?.fps ? Math.round(mediaProbe.video.fps) : null,
-          hdr: mediaProbe.video?.hdr ? 1 : null,
-          audio_codec: mediaProbe.audio?.[0]?.codec?.toLowerCase() ?? null,
-          audio_channels: mediaProbe.audio?.[0]?.channels ?? null,
-          duration_seconds: mediaProbe.durationSeconds ? Math.round(mediaProbe.durationSeconds) : null,
-          bitrate_kbps: mediaProbe.overallBitrate ? Math.round(mediaProbe.overallBitrate / 1000) : null,
-        } : null,
+        media: foldProbeToColumns(mediaProbe, filename),
       });
     } catch (err) {
       console.warn(`[${this.name}] Failed to record movie provenance for ${filename}:`, err);
@@ -1204,20 +1193,7 @@ export class BlackholeClient implements DownloadClient {
       // Probing the moved file once gives us its real resolution/codec/bitrate
       // for the media badges + upgrade decisions later.
       const mediaProbe = await probeMediaFile(movedTo);
-      const mediaCols = mediaProbe
-        ? {
-            container: mediaProbe.container,
-            video_width: mediaProbe.video?.width ?? null,
-            video_height: mediaProbe.video?.height ?? null,
-            video_codec: mediaProbe.video?.codec?.toLowerCase() ?? null,
-            video_fps: mediaProbe.video?.fps ? Math.round(mediaProbe.video.fps) : null,
-            hdr: mediaProbe.video?.hdr ? 1 : null,
-            audio_codec: mediaProbe.audio?.[0]?.codec?.toLowerCase() ?? null,
-            audio_channels: mediaProbe.audio?.[0]?.channels ?? null,
-            duration_seconds: mediaProbe.durationSeconds ? Math.round(mediaProbe.durationSeconds) : null,
-            bitrate_kbps: mediaProbe.overallBitrate ? Math.round(mediaProbe.overallBitrate / 1000) : null,
-          }
-        : null;
+      const mediaCols = foldProbeToColumns(mediaProbe, filename);
       for (const ep of episodes) {
         try {
           const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);

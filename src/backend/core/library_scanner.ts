@@ -10,7 +10,7 @@ import {
   quarantineFile,
   QUARANTINE_DIR_NAME,
 } from './junk_quarantine';
-import { probeMediaFile, mediaFromStoredRow } from './media_probe';
+import { probeMediaFile, mediaFromStoredRow, foldProbeToColumns } from './media_probe';
 import { qualityEngine } from './quality_engine';
 import type { FileMediaColumns, EpisodeFileRow } from '../db/episode_files';
 import fs from 'node:fs';
@@ -55,18 +55,7 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
     // above for the unchanged fast-path — reuse them here.
     let reuseMedia: FileMediaColumns | null = null;
     if (live && live.container && live.file_size === size) {
-      reuseMedia = {
-        container: live.container,
-        video_width: live.video_width,
-        video_height: live.video_height,
-        video_codec: live.video_codec,
-        video_fps: live.video_fps,
-        hdr: live.hdr,
-        audio_codec: live.audio_codec,
-        audio_channels: live.audio_channels,
-        duration_seconds: live.duration_seconds,
-        bitrate_kbps: live.bitrate_kbps,
-      };
+      reuseMedia = mediaColumnsFromRow(live);
     }
 
     const media = reuseMedia ?? await probeToMediaColumns(file);
@@ -89,19 +78,28 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
   }
 }
 
-async function probeToMediaColumns(file: string): Promise<FileMediaColumns | null> {  const probe = await probeMediaFile(file);
-  if (!probe) return null;
+async function probeToMediaColumns(file: string): Promise<FileMediaColumns | null> {
+  const probe = await probeMediaFile(file);
+  return foldProbeToColumns(probe, file.split(/[\\/]/).pop());
+}
+
+/** Reuse stored media columns from a live row (unchanged file fast-path). */
+function mediaColumnsFromRow(row: EpisodeFileRow): FileMediaColumns {
   return {
-    container: probe.container,
-    video_width: probe.video?.width ?? null,
-    video_height: probe.video?.height ?? null,
-    video_codec: probe.video?.codec?.toLowerCase() ?? null,
-    video_fps: probe.video?.fps ? Math.round(probe.video.fps) : null,
-    hdr: probe.video?.hdr ? 1 : null,
-    audio_codec: probe.audio?.[0]?.codec?.toLowerCase() ?? null,
-    audio_channels: probe.audio?.[0]?.channels ?? null,
-    duration_seconds: probe.durationSeconds ? Math.round(probe.durationSeconds) : null,
-    bitrate_kbps: probe.overallBitrate ? Math.round(probe.overallBitrate / 1000) : null,
+    container: row.container,
+    video_width: row.video_width,
+    video_height: row.video_height,
+    video_codec: row.video_codec,
+    video_fps: row.video_fps,
+    hdr: row.hdr,
+    hdr_format: row.hdr_format,
+    audio_codec: row.audio_codec,
+    audio_channels: row.audio_channels,
+    audio_tracks: row.audio_tracks,
+    audio_languages: row.audio_languages,
+    duration_seconds: row.duration_seconds,
+    bitrate_kbps: row.bitrate_kbps,
+    release_tags: row.release_tags,
   };
 }
 
@@ -201,12 +199,7 @@ export class LibraryScanner {
     try {
       const grab = db.findMostRecentGrabForShow(showId, 30);
       const media = (live && live.container && live.file_size === size)
-        ? {
-          container: live.container, video_width: live.video_width, video_height: live.video_height,
-          video_codec: live.video_codec, video_fps: live.video_fps, hdr: live.hdr,
-          audio_codec: live.audio_codec, audio_channels: live.audio_channels,
-          duration_seconds: live.duration_seconds, bitrate_kbps: live.bitrate_kbps,
-        }
+        ? mediaColumnsFromRow(live)
         : await probeToMediaColumns(file);
       db.recordMovieFile({
         showId,
