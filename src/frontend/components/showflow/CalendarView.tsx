@@ -393,6 +393,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                     <PosterImage
                                       showId={showObj.id}
                                       alt={ep.showTitle}
+                                      size="card"
                                       className="w-7 h-10 shrink-0 rounded bg-white/5 object-cover"
                                     />
                                   ) : (

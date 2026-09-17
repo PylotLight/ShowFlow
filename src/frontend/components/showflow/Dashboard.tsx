@@ -555,6 +555,7 @@ function Dashboard({
                               <PosterImage
                                 showId={showObj.id}
                                 alt={ep.showTitle}
+                                size="card"
                                 className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/5 object-cover opacity-50"
                               />
                             ) : (
@@ -750,7 +751,8 @@ function Dashboard({
                             <PosterImage
                               showId={showObj.id}
                               alt={ep.showTitle}
-                              className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/5 object-cover"
+                              size="card"
+                                className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/5 object-cover"
                             />
                           ) : (
                             <div className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center">

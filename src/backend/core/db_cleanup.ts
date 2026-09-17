@@ -85,6 +85,6 @@ export async function runDbCleanup(action: DbCleanupAction, opts: DbCleanupOptio
   debugLog(`DB vacuum complete: ${(sizeBeforeBytes / 1024 / 1024).toFixed(0)}MB -> ${(sizeAfterBytes / 1024 / 1024).toFixed(0)}MB`);
   return {
     action, removedRows: 0, sizeBeforeBytes, sizeAfterBytes,
-    detail: `Vacuum complete: ${(sizeBeforeBytes / 1048576).toFixed(1)} GiB -> ${(sizeAfterBytes / 1048576).toFixed(1)} GiB`,
+    detail: `Vacuum complete: ${(sizeBeforeBytes / 1048576).toFixed(1)} MiB → ${(sizeAfterBytes / 1048576).toFixed(1)} MiB`,
   };
 }

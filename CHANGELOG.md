@@ -3,7 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-
+- **Fix**: vacuum result units (MiB, was mislabeled GiB).
+- **Faster posters**: grid/list thumbs use a `?size=card` lightweight variant (TMDB w342, AniList medium) cached alongside the full poster; detail hero keeps full size.
+- **No more image flash on search/filter**: PosterImage remembers already-loaded URLs for the session, so remounts render instantly instead of flashing skeletons; images also decode off the main thread.
 ## [v0.1.56] - 2026-09-17
 - **Database Cleanup panel (Analytics)**: manual sweeps that run as background jobs — prune episode-file history (keeps live + latest per episode), purge scan-log spam (you pick keep-days 1–30, errors/grabs untouched), and vacuum to reclaim space. Reports rows removed and size before/after.
 - **Automatic**: daily pipeline cleanup now also purges scan-type audit rows older than 7 days, so a future write storm self-drains.

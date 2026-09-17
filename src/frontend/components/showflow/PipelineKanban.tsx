@@ -181,7 +181,7 @@ function KanbanCard({
     >
       {/* Top row: poster + info */}
       <div className="flex gap-2.5">
-        <PosterImage showId={ep.showId} alt={ep.showTitle} className="w-8 h-12 shrink-0 rounded" />
+        <PosterImage showId={ep.showId} alt={ep.showTitle} size="card" className="w-8 h-12 shrink-0 rounded" />
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="truncate text-xs font-semibold text-white/90" title={ep.showTitle}>
             {ep.showTitle}
@@ -277,7 +277,7 @@ function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbe
                 title="Open show"
                 className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
               >
-                <PosterImage showId={group.showId} alt={group.showTitle} className="w-7 h-10 shrink-0 rounded" />
+                <PosterImage showId={group.showId} alt={group.showTitle} size="card" className="w-7 h-10 shrink-0 rounded" />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="truncate text-xs font-semibold text-white/90">{group.showTitle}</p>
                   <p className="text-[10px] text-muted-foreground/70">

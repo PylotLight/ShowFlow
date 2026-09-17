@@ -55,7 +55,7 @@ function PosterCard({
         selected && "ring-2 ring-signal",
       )}
     >
-      <PosterImage showId={show.id} alt={show.title} className="size-full" />
+      <PosterImage showId={show.id} alt={show.title} className="size-full" size="card" />
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent opacity-90 transition-opacity group-hover:opacity-100" />
 

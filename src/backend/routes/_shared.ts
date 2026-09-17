@@ -148,6 +148,26 @@ export function extractPosterUrl(providerType: ProviderType, metadata: any): str
   }
 }
 
+/**
+ * Lightweight poster variant for grid cells and list thumbs (issues #30):
+ * a 200px card doesn't need TMDB w500 (~500KB) or AniList large (~300KB).
+ * TVDB serves its own mid-size posters with no smaller variant, so those
+ * pass through unchanged. Pure string rewrite — no extra provider calls.
+ */
+export function toCardPosterUrl(providerType: ProviderType, url: string | null): string | null {
+  if (!url) return null;
+  switch (providerType) {
+    case "tmdb":
+      return url.replace('/t/p/w500', '/t/p/w342').replace('/t/p/original', '/t/p/w342');
+    case "anilist":
+      // AniList coverImage.large (~460px) vs medium (~230px) — same mapping,
+      // smaller file. Only rewrites the known size path segments.
+      return url.replace('/large/', '/medium/');
+    default:
+      return url;
+  }
+}
+
 export function extractBackdropUrl(providerType: ProviderType, metadata: any): string | null {
   if (!metadata) return null;
   switch (providerType) {
