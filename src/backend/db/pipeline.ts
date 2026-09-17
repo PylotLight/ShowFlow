@@ -137,6 +137,7 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
       e.episode_number,
       e.title              AS episode_title,
       e.air_date,
+      e.expected_release_at,
       e.file_path,
       e.search_mode,
       s.title              AS show_title,
@@ -187,6 +188,8 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
   return rows.map(r => {
     const hasFile = r.file_path !== null && r.file_path !== '';
     const isFuture = r.air_date !== null && new Date(r.air_date) > new Date();
+    const airDateKnown = r.air_date !== null && r.air_date !== '' && !isNaN(new Date(r.air_date).getTime());
+    const hasExpectedRelease = r.expected_release_at !== null && r.expected_release_at !== '';
 
     if (hasFile) {
       return {
@@ -211,7 +214,10 @@ export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
 
     const stage = r.current_stage ?? 'WANTED';
 
-    if (stage === 'WANTED' && (isFuture || !startedSeasons.has(seasonKey(r.show_id, r.season_number)))) {
+    // A dateless ("TBA") episode with no release forecast is unsearchable -
+    // the auto-grabber's due-for-grab query requires a date - so it must not
+    // count as WANTED either, even mid-season.
+    if (stage === 'WANTED' && (isFuture || (!airDateKnown && !hasExpectedRelease) || !startedSeasons.has(seasonKey(r.show_id, r.season_number)))) {
       return null;
     }
 
