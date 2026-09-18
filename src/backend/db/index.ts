@@ -285,6 +285,9 @@ export class DatabaseManager {
   listEpisodeMappings(showId: string) { return mappings.listEpisodeMappings(this, showId); }
   findSceneMapping(showId: string, season: number, episode: number) { return mappings.findSceneMapping(this, showId, season, episode); }
   findAbsoluteMapping(showId: string, absolute: number) { return mappings.findAbsoluteMapping(this, showId, absolute); }
+  findTargetMapping(showId: string, season: number, episode: number) { return mappings.findTargetMapping(this, showId, season, episode); }
+  findTargetAbsoluteMapping(showId: string, absolute: number) { return mappings.findTargetAbsoluteMapping(this, showId, absolute); }
+  listSceneSeasonsForTarget(showId: string, targetSeason: number) { return mappings.listSceneSeasonsForTarget(this, showId, targetSeason); }
   replaceThexemMappings(showId: string, tvdbId: string, rows: Parameters<typeof mappings.replaceThexemMappings>[3]) { return mappings.replaceThexemMappings(this, showId, tvdbId, rows); }
   lockMappingRow(showId: string, rowId: number, target: Parameters<typeof mappings.lockMappingRow>[3]) { return mappings.lockMappingRow(this, showId, rowId, target); }
   deleteEpisodeMappingsForShow(showId: string) { return mappings.deleteMappingsForShow(this, showId); }

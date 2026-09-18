@@ -55,6 +55,10 @@ test('replaceThexemMappings stores scene->target rows and resolves via service',
   expect(svc.resolveScene(showId, 4, 17)).toEqual({ season: 1, episode: 53, absolute: 53, source: 'thexem' });
   expect(svc.resolveScene(showId, 4, 99)).toBeNull();
   expect(svc.resolveAbsolute(showId, 54)).toEqual({ season: 1, episode: 54, absolute: 54, source: 'thexem' });
+  // Reverse (search) direction: provider S01E53 -> scene S04E17.
+  expect(svc.resolveTarget(showId, 1, 53)).toEqual({ season: 4, episode: 17, absolute: 53, source: 'thexem' });
+  expect(svc.resolveTarget(showId, 1, 99)).toBeNull();
+  expect(svc.sceneSeasonsForTarget(showId, 1)).toEqual([4]);
 
   mgr.close();
 });

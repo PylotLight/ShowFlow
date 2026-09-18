@@ -123,6 +123,43 @@ export class EpisodeMappingService {
   }
 
   /**
+   * Reverse lookup for searching: provider-native S/E (the episode row) ->
+   * scene S/E (what release files/indexers use). Returns null when the
+   * mapping is disabled or has no row for this episode, in which case the
+   * caller falls back to provider numbering.
+   */
+  resolveTarget(showId: string, season: number, episode: number): AppliedMapping | null {
+    if (!this.isEnabled(showId)) return null;
+    const row = this.manager.findTargetMapping(showId, season, episode);
+    if (!row || row.scene_season == null || row.scene_episode == null) return null;
+    return {
+      season: row.scene_season,
+      episode: row.scene_episode,
+      absolute: row.scene_absolute ?? null,
+      source: row.source,
+    };
+  }
+
+  /** Reverse absolute lookup: provider absolute -> scene absolute. */
+  resolveTargetAbsolute(showId: string, absolute: number): AppliedMapping | null {
+    if (!this.isEnabled(showId)) return null;
+    const row = this.manager.findTargetAbsoluteMapping(showId, absolute);
+    if (!row || row.scene_season == null || row.scene_episode == null) return null;
+    return {
+      season: row.scene_season,
+      episode: row.scene_episode,
+      absolute: row.scene_absolute ?? null,
+      source: row.source,
+    };
+  }
+
+  /** Scene seasons that map onto a provider season (season-pack searches). */
+  sceneSeasonsForTarget(showId: string, targetSeason: number): number[] {
+    if (!this.isEnabled(showId)) return [];
+    return this.manager.listSceneSeasonsForTarget(showId, targetSeason);
+  }
+
+  /**
    * Fetch + persist the full TheXem mapping for a show (tier 1) and refresh
    * its health badge. Returns the updated mapping summary.
    */

@@ -184,6 +184,91 @@ export function findAbsoluteMapping(
 }
 
 /**
+ * Reverse lookup: provider-native S/E (what the episode table stores) ->
+ * scene S/E (what release files/indexers actually use). Used by the grabber
+ * when building search queries so a provider-flat episode like S01E58 is
+ * searched as its scene name (e.g. S04E22).
+ */
+export function findTargetMapping(
+  self: DatabaseManager,
+  showId: string,
+  season: number,
+  episode: number,
+): EpisodeMappingRow | null {
+  const rows = self.drizz
+    .select()
+    .from(schema.episodeMappings)
+    .where(
+      and(
+        eq(schema.episodeMappings.show_id, showId),
+        eq(schema.episodeMappings.target_season, season),
+        eq(schema.episodeMappings.target_episode, episode),
+      ),
+    )
+    .all() as EpisodeMappingRow[];
+  // Locked (manual) rows win; otherwise prefer thexem over ad-hoc rows.
+  return (
+    rows.find(r => r.locked === 1) ??
+    rows.find(r => r.source === 'thexem') ??
+    rows[0] ??
+    null
+  );
+}
+
+/**
+ * Reverse absolute lookup: provider absolute -> scene absolute/row.
+ */
+export function findTargetAbsoluteMapping(
+  self: DatabaseManager,
+  showId: string,
+  absolute: number,
+): EpisodeMappingRow | null {
+  const rows = self.drizz
+    .select()
+    .from(schema.episodeMappings)
+    .where(
+      and(
+        eq(schema.episodeMappings.show_id, showId),
+        eq(schema.episodeMappings.target_absolute, absolute),
+      ),
+    )
+    .all() as EpisodeMappingRow[];
+  return (
+    rows.find(r => r.locked === 1) ??
+    rows.find(r => r.source === 'thexem') ??
+    rows[0] ??
+    null
+  );
+}
+
+/**
+ * All scene seasons that map onto a given provider season. Used for
+ * season-pack searches where one provider season spans several scene
+ * seasons (e.g. provider S01 <-> scene S01-S04).
+ */
+export function listSceneSeasonsForTarget(
+  self: DatabaseManager,
+  showId: string,
+  targetSeason: number,
+): number[] {
+  const rows = self.drizz
+    .select()
+    .from(schema.episodeMappings)
+    .where(
+      and(
+        eq(schema.episodeMappings.show_id, showId),
+        eq(schema.episodeMappings.target_season, targetSeason),
+      ),
+    )
+    .all() as EpisodeMappingRow[];
+  const set = new Set<number>();
+  for (const r of rows) {
+    if (r.scene_season != null) set.add(r.scene_season);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+/**
  * Replace the tier-1 rows for a show. Locked rows are preserved, unlocked
  * rows are deleted then re-inserted so stale scene numbering never lingers.
  */

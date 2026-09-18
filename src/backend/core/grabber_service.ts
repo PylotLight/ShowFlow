@@ -155,12 +155,86 @@ export class GrabberService {
     // suffix poisons the query — release names never contain the parens.
     // Search the bare title; isRelevantMatch still guards the year.
     const queryTitle = show.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() || show.title;
-    const query =
+
+    // Anime season-split translation (provider -> scene): the episode table
+    // stores provider-native numbering (e.g. TVDB flat S01E58) but release
+    // files/indexers use scene numbering (e.g. S04E22). When the mapping is
+    // enabled and has a row for this episode, search the scene name —
+    // searching the provider name finds nothing (the reported Honzuki bug:
+    // "searching S01 instead of S04").
+    let searchSeason = season;
+    let searchEpisode = episode;
+    let searchAbsolute: number | null = null;
+    let mappedLabel: string | null = null;
+    if (episode != null && seriesType !== 'absolute') {
+      try {
+        if (db.isEpisodeMappingEnabled(showId)) {
+          const row = db.findTargetMapping(showId, season, episode);
+          if (row && row.scene_season != null && row.scene_episode != null) {
+            searchSeason = row.scene_season;
+            searchEpisode = row.scene_episode;
+            mappedLabel = `S${pad(row.scene_season)}E${pad(row.scene_episode)}`;
+          }
+        }
+      } catch {
+        // Mapping lookup is best-effort; fall back to provider numbering.
+      }
+    } else if (episode != null && seriesType === 'absolute') {
+      try {
+        if (db.isEpisodeMappingEnabled(showId)) {
+          const row = db.findTargetAbsoluteMapping(showId, episode);
+          if (row && row.scene_absolute != null && row.scene_absolute !== episode) {
+            searchAbsolute = row.scene_absolute;
+            mappedLabel = `#${row.scene_absolute}`;
+          }
+        }
+      } catch {
+        // Best-effort only.
+      }
+    }
+
+    const providerQuery =
       episode != null
         ? seriesType === 'absolute'
           ? `${queryTitle} ${String(episode).padStart(3, '0')}`
           : `${queryTitle} S${pad(season)}E${pad(episode)}`
         : `${queryTitle} S${pad(season)}`;
+    const sceneQuery =
+      episode != null
+        ? seriesType === 'absolute'
+          ? searchAbsolute != null
+            ? `${queryTitle} ${String(searchAbsolute).padStart(3, '0')}`
+            : providerQuery
+          : (searchEpisode != null
+              ? `${queryTitle} S${pad(searchSeason)}E${pad(searchEpisode)}`
+              : providerQuery)
+        : providerQuery;
+
+    // Season-pack searches span scene seasons: one provider season (e.g.
+    // S01) can map to several scene seasons (S01-S04). Search each scene
+    // season plus the provider season so packs under either naming are found.
+    let queries: string[];
+    let packSceneSeasons: number[] = [];
+    if (episode == null && seriesType !== 'absolute') {
+      queries = [providerQuery];
+      try {
+        if (db.isEpisodeMappingEnabled(showId)) {
+          const sceneSeasons = db.listSceneSeasonsForTarget(showId, season);
+          packSceneSeasons = sceneSeasons;
+          for (const ss of sceneSeasons) {
+            const q = `${queryTitle} S${pad(ss)}`;
+            if (!queries.includes(q)) queries.push(q);
+          }
+          if (sceneSeasons.length > 0) {
+            mappedLabel = sceneSeasons.map(s => `S${pad(s)}`).join(', ');
+          }
+        }
+      } catch {
+        // Best-effort only.
+      }
+    } else {
+      queries = mappedLabel && sceneQuery !== providerQuery ? [sceneQuery, providerQuery] : [providerQuery];
+    }
 
     const label = episode != null
       ? `S${pad(season)}E${pad(episode)}`
@@ -170,52 +244,89 @@ export class GrabberService {
       type: 'grabber',
       level: 'info',
       source: 'GrabberService',
-      message: `Searching ${indexers.length} indexers for "${show.title} ${label}" (query: "${query}")`,
+      message: mappedLabel
+        ? `Searching ${indexers.length} indexers for "${show.title} ${label}" (scene: "${mappedLabel}", queries: ${queries.map(q => `"${q}"`).join(', ')})`
+        : `Searching ${indexers.length} indexers for "${show.title} ${label}" (query: "${providerQuery}")`,
     });
 
     const category = anime ? 5070 : TV_CATEGORY;
     const allReleases: (IndexerResult & { indexer: Indexer })[] = [];
     for (const indexer of indexers) {
-      try {
-        const results = await indexer.search(query, { type: 'tvsearch', categories: [category] });
-        logDebug({
-          type: 'grabber',
-          level: results.length > 0 ? 'info' : 'debug',
-          source: indexer.name,
-          message: `Found ${results.length} releases for "${query}"`,
-        });
-        allReleases.push(...results.map(r => ({ ...r, indexer })));
-      } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        logDebug({
-          type: 'grabber',
-          level: 'error',
-          source: indexer.name,
-          message: `Search error for "${query}"`,
-          error: errorMessage,
-        });
-        db.logPipelineEvent({
-          showId, seasonNumber: season, episodeNumber: episode ?? null,
-          stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
-          message: `${indexer.name} search failed: ${errorMessage}`,
-          indexerName: indexer.name,
-        });
+      for (const query of queries) {
+        try {
+          const results = await indexer.search(query, { type: 'tvsearch', categories: [category] });
+          logDebug({
+            type: 'grabber',
+            level: results.length > 0 ? 'info' : 'debug',
+            source: indexer.name,
+            message: `Found ${results.length} releases for "${query}"`,
+          });
+          allReleases.push(...results.map(r => ({ ...r, indexer })));
+        } catch (e) {
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          logDebug({
+            type: 'grabber',
+            level: 'error',
+            source: indexer.name,
+            message: `Search error for "${query}"`,
+            error: errorMessage,
+          });
+          db.logPipelineEvent({
+            showId, seasonNumber: season, episodeNumber: episode ?? null,
+            stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
+            message: `${indexer.name} search failed: ${errorMessage}`,
+            indexerName: indexer.name,
+          });
+        }
       }
+    }
+
+    // Multi-query searches (scene + provider) can return the same release
+    // twice — dedupe by indexer + guid so counts/scores stay honest.
+    if (queries.length > 1 && allReleases.length > 1) {
+      const seen = new Set<string>();
+      const deduped = allReleases.filter(r => {
+        const key = `${r.indexer.name}::${r.guid}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      allReleases.length = 0;
+      allReleases.push(...deduped);
     }
 
     const beforeFilter = allReleases.length;
     const matchOpts = { absolute: seriesType !== 'standard' };
-    const filtered = allReleases.filter(r => isRelevantMatch(r.title, show.title, season, episode, matchOpts));
+    // When mapped, accept either the scene numbering (what releases use)
+    // or the provider numbering (some indexers mirror TVDB). Season packs
+    // accept any scene season mapping to the provider season.
+    const matches = (title: string): boolean => {
+      if (episode != null) {
+        if (isRelevantMatch(title, show.title, searchSeason, searchEpisode, matchOpts)) return true;
+        if (mappedLabel && (searchSeason !== season || searchEpisode !== episode)) {
+          return isRelevantMatch(title, show.title, season, episode, matchOpts);
+        }
+        return false;
+      }
+      if (isRelevantMatch(title, show.title, season, undefined, matchOpts)) return true;
+      for (const ss of packSceneSeasons) {
+        if (isRelevantMatch(title, show.title, ss, undefined, matchOpts)) return true;
+      }
+      return false;
+    };
+    const filtered = allReleases.filter(r => matches(r.title));
     const removed = beforeFilter - filtered.length;
     if (removed > 0) {
       logDebug({
         type: 'grabber',
         level: 'info',
         source: 'GrabberService',
-        message: `Filtered ${removed}/${beforeFilter} results that don't match "${show.title} ${label}"`,
+        message: mappedLabel
+          ? `Filtered ${removed}/${beforeFilter} results that don't match "${show.title} ${label}" (scene: "${mappedLabel}")`
+          : `Filtered ${removed}/${beforeFilter} results that don't match "${show.title} ${label}"`,
       });
       const filteredOutTitles = allReleases
-        .filter(r => !isRelevantMatch(r.title, show.title, season, episode, matchOpts))
+        .filter(r => !matches(r.title))
         .map(r => r.title);
       db.logPipelineEvent({
         showId, seasonNumber: season, episodeNumber: episode ?? null,

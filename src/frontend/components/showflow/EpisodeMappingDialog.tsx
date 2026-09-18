@@ -239,7 +239,8 @@ export function EpisodeMappingDialog({
 
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Scene/anime release tags (e.g. <code className="text-foreground/70">S04E17</code>) are translated to the
-                provider-native numbering (e.g. <code className="text-foreground/70">S01E53</code>) during import.
+                provider-native numbering (e.g. <code className="text-foreground/70">S01E53</code>) during import, and
+                searches run in reverse (provider → scene) so grabs query the scene name.
                 {summary.config.enabled
                   ? " Standard shows auto-resolve without it."
                   : " Enabled automatically for anime shows."}
