@@ -1,8 +1,10 @@
 import * as React from "react";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, Trash2Icon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
 import { formatBytes } from "./SettingsShared";
+
+const DEFAULT_KEEP_COUNT = 10;
 
 export function BackupPanel() {
   const [backups, setBackups] = React.useState<any[]>([]);
@@ -11,11 +13,24 @@ export function BackupPanel() {
   const [confirmRestore, setConfirmRestore] = React.useState<string | null>(null);
   const [restoring, setRestoring] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const [keepCount, setKeepCount] = React.useState<number>(DEFAULT_KEEP_COUNT);
+  const [keepDraft, setKeepDraft] = React.useState<string>(String(DEFAULT_KEEP_COUNT));
+  const [savingKeep, setSavingKeep] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   function load() {
     setLoading(true);
     fetch('/api/backup').then(r => r.json()).then(setBackups).finally(() => setLoading(false));
+    fetch('/api/settings').then(r => r.json()).then((settings: any[]) => {
+      const row = Array.isArray(settings) ? settings.find(s => s.key === 'backup.keepCount') : null;
+      const raw = row?.value;
+      const n = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw);
+      const sane = Number.isFinite(n) ? Math.min(100, Math.max(1, Math.floor(n))) : DEFAULT_KEEP_COUNT;
+      setKeepCount(sane);
+      setKeepDraft(String(sane));
+    }).catch(() => {});
   }
 
   React.useEffect(() => { load(); }, []);
@@ -39,7 +54,7 @@ export function BackupPanel() {
   function handleRestore() {
     if (!confirmRestore) return;
     setRestoring(true);
-    fetch(`/api/backups/${confirmRestore}/restore`, { method: 'POST' })
+    fetch(`/api/backups/${encodeURIComponent(confirmRestore)}/restore`, { method: 'POST' })
       .then(r => r.json()).then(data => {
         if (data.ok) {
           window.location.reload();
@@ -48,6 +63,42 @@ export function BackupPanel() {
         setRestoring(false);
         setConfirmRestore(null);
       });
+  }
+
+  function handleDelete() {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    fetch(`/api/backups/${encodeURIComponent(confirmDelete)}`, { method: 'DELETE' })
+      .then(r => r.json()).then(data => {
+        if (data.entries) setBackups(data.entries);
+        else load();
+      }).finally(() => {
+        setDeleting(false);
+        setConfirmDelete(null);
+      });
+  }
+
+  function saveKeepCount() {
+    const n = parseInt(keepDraft, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 100) return;
+    setSavingKeep(true);
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'backup.keepCount', value: n }),
+    })
+      .then(r => r.json())
+      .then(() => fetch('/api/backup/prune', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keepCount: n }),
+      }).then(r => r.json()))
+      .then(data => {
+        setKeepCount(n);
+        if (data?.entries) setBackups(data.entries);
+        else load();
+      })
+      .finally(() => setSavingKeep(false));
   }
 
   return (
@@ -75,6 +126,27 @@ export function BackupPanel() {
               Create Backup
             </Button>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-white/80">Retention</div>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              Automatic pruning keeps the newest {keepCount} backup{keepCount === 1 ? '' : 's'} (.db + seed SQL count as one). Lower it and the excess is deleted immediately.
+            </p>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={keepDraft}
+            onChange={e => setKeepDraft(e.target.value)}
+            className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-sm text-white/90 outline-none focus:border-white/25"
+          />
+          <Button size="sm" variant="outline" onClick={saveKeepCount} disabled={savingKeep || keepDraft === String(keepCount)}>
+            {savingKeep ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+            Apply
+          </Button>
         </div>
 
         {loading ? (
@@ -125,6 +197,15 @@ export function BackupPanel() {
                       <span className="text-[10px] font-mono font-bold px-1">SQL</span>
                     </a>
                   )}
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => setConfirmDelete(b.name)}
+                    title="Delete this backup"
+                    className="text-red-500/60 hover:text-red-400"
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
@@ -147,6 +228,27 @@ export function BackupPanel() {
               <Button size="sm" variant="destructive" onClick={handleRestore} disabled={restoring}>
                 {restoring ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
                 Restore
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#0a0a0f] p-6 shadow-2xl space-y-4">
+            <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Delete Backup</h3>
+            <p className="text-muted-foreground text-sm">
+              Permanently delete <span className="font-mono text-white/70">{confirmDelete}</span>
+              <span className="text-white/50"> + its seed SQL companion, if present</span>? This can't be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                {deleting ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+                Delete
               </Button>
             </div>
           </div>

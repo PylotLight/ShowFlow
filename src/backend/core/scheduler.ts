@@ -3,7 +3,7 @@ import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
 import { maybeForcedGc } from './memory_guard';
-import { runBackup } from "./backup";
+import { runBackup, normalizeKeepCount, BACKUP_KEEP_COUNT_SETTING, DEFAULT_BACKUP_KEEP_COUNT } from "./backup";
 import { runAutoGrabCycle } from './auto_grabber';
 import { JellyfinSync } from '../providers/jellyfin/sync';
 import { pollSystemHealth } from './pipeline/health_poller';
@@ -75,7 +75,11 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     intervalMinutes: 1440, // Daily
     defaultEnabled: true,
     action: async () => {
-      const result = await runBackup();
+      let keep = DEFAULT_BACKUP_KEEP_COUNT;
+      try {
+        keep = normalizeKeepCount(db.getSetting(BACKUP_KEEP_COUNT_SETTING) ?? DEFAULT_BACKUP_KEEP_COUNT);
+      } catch {}
+      const result = await runBackup('backups', keep);
       debugLog(`Task backup complete: ${(result.dbSize / 1024 / 1024).toFixed(1)} MB DB, ${(result.sqlSize / 1024).toFixed(1)} KB seed`);
     },
   },

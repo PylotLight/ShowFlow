@@ -31,6 +31,17 @@ export interface BackupEntry {
   hasSql: boolean;
 }
 
+export const BACKUP_KEEP_COUNT_SETTING = 'backup.keepCount';
+export const DEFAULT_BACKUP_KEEP_COUNT = 10;
+export const MAX_BACKUP_KEEP_COUNT = 100;
+
+/** Coerce a stored retention value into a sane keep-count (1..MAX). */
+export function normalizeKeepCount(raw: unknown): number {
+  const n = typeof raw === 'string' ? parseInt(raw, 10) : Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_BACKUP_KEEP_COUNT;
+  return Math.min(MAX_BACKUP_KEEP_COUNT, Math.max(1, Math.floor(n)));
+}
+
 export async function listBackups(backupDir = 'backups'): Promise<BackupEntry[]> {
   try {
     const files = await readdir(backupDir);
@@ -127,16 +138,7 @@ export async function runBackup(backupDir = 'backups', keepCount = 10): Promise<
   const sqlContent = lines.join('\n');
   await Bun.write(sqlFile, sqlContent);
 
-  // Prune old backups
-  const files = await readdir(backupDir);
-  for (const ext of ['.db', '.sql']) {
-    const byExt = files.filter(f => f.endsWith(ext)).sort().reverse();
-    if (byExt.length > keepCount) {
-      for (const old of byExt.slice(keepCount)) {
-        await unlink(join(backupDir, old));
-      }
-    }
-  }
+  await pruneBackups(backupDir, keepCount);
 
   dump.close();
 
@@ -171,6 +173,82 @@ export async function uploadBackup(buffer: Uint8Array, fileName: string, backupD
 export async function restoreBackup(name: string, dbPath: string, backupDir = 'backups'): Promise<void> {
   const src = join(backupDir, basename(name));
   await copyFile(src, dbPath);
+}
+
+/**
+ * Delete one backup and its companion file (.db deletes its .sql and
+ * vice versa), so a manual delete never leaves an orphan behind.
+ * Returns the list of file names actually removed.
+ */
+export async function deleteBackup(name: string, backupDir = 'backups'): Promise<string[]> {
+  const safe = basename(name);
+  if (!safe.endsWith('.db') && !safe.endsWith('.sql')) {
+    throw new Error('Only .db and .sql backups can be deleted');
+  }
+  const base = safe.replace(/\.(db|sql)$/, '');
+  const deleted: string[] = [];
+  for (const candidate of [`${base}.db`, `${base}.sql`]) {
+    try {
+      await unlink(join(backupDir, candidate));
+      deleted.push(candidate);
+    } catch {
+      // already gone — not an error
+    }
+  }
+  if (deleted.length === 0) throw new Error(`Backup not found: ${safe}`);
+  return deleted;
+}
+
+/**
+ * Enforce the "keep newest N" retention policy. Backup units are grouped by
+ * base name (each .db + its companion .sql counts as one) and ordered by
+ * newest file mtime, so uploaded files with arbitrary names and .sql-only
+ * orphans are pruned fairly instead of lingering forever. Returns the
+ * deleted file names.
+ */
+export async function pruneBackups(backupDir = 'backups', keepCount = DEFAULT_BACKUP_KEEP_COUNT): Promise<string[]> {
+  const keep = normalizeKeepCount(keepCount);
+  let files: string[];
+  try {
+    files = await readdir(backupDir);
+  } catch {
+    return [];
+  }
+  const relevant = files.filter(f => f.endsWith('.db') || f.endsWith('.sql'));
+  if (relevant.length === 0) return [];
+
+  const mtimes = new Map<string, number>();
+  for (const f of relevant) {
+    try {
+      const st = await stat(join(backupDir, f));
+      mtimes.set(f, st.mtimeMs);
+    } catch {
+      mtimes.set(f, 0);
+    }
+  }
+
+  const bases = new Map<string, { files: string[]; mtime: number }>();
+  for (const f of relevant) {
+    const base = f.replace(/\.(db|sql)$/, '');
+    const entry = bases.get(base) ?? { files: [], mtime: 0 };
+    entry.files.push(f);
+    entry.mtime = Math.max(entry.mtime, mtimes.get(f) ?? 0);
+    bases.set(base, entry);
+  }
+
+  const ordered = [...bases.entries()].sort((a, b) => b[1].mtime - a[1].mtime);
+  const deleted: string[] = [];
+  for (const [, entry] of ordered.slice(keep)) {
+    for (const f of entry.files) {
+      try {
+        await unlink(join(backupDir, f));
+        deleted.push(f);
+      } catch {
+        // raced with a manual delete — ignore
+      }
+    }
+  }
+  return deleted;
 }
 
 async function main() {
