@@ -73,6 +73,21 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
               }}
             />
           </FieldRow>
+          <FieldRow label="Concurrent Downloads" description="Max grabs downloading at once. Extra downloads queue until a slot frees up. Applies after the watcher restarts.">
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              className="w-24"
+              value={config.downloadClient?.torbox?.concurrency ?? 3}
+              onChange={e => {
+                const n = Math.min(20, Math.max(1, Math.floor(Number(e.target.value) || 1)));
+                const dc = { ...(config.downloadClient || {}), torbox: { ...(config.downloadClient?.torbox || {}), concurrency: n } };
+                saveConfig({ downloadClient: dc });
+              }}
+            />
+          </FieldRow>
         </>
       )}
 

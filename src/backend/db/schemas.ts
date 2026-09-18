@@ -52,7 +52,8 @@ export const ConfigSchema = z.object({
       baseUrl: z.string().optional(),
       inputFolder: z.string().optional(),
       outputFolder: z.string().optional(),
-      concurrency: z.number().optional(),
+      /** Max concurrent grab downloads; extra grabs queue until a slot frees. */
+      concurrency: z.number().int().min(1).max(20).optional().catch(undefined),
     }).optional(),
     sabnzbd: z.object({
       url: z.string().optional(),

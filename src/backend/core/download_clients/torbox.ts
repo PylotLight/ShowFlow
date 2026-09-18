@@ -7,6 +7,7 @@ import { db } from '../../db';
 import type { Config } from '../../db';
 import { TorboxService } from '../../providers/torbox/services';
 import { backgroundJobs } from '../background_jobs';
+import { Semaphore } from '../limiter';
 import type { DownloadClient } from './types';
 
 export interface TorboxClientConfig {
@@ -129,6 +130,8 @@ export class TorboxDownloadClient implements DownloadClient {
   /** Per-download abort controllers so a cancel interrupts an in-flight fetch/sleep. */
   private controllers = new Map<string, AbortController>();
   private watchHandle: ReturnType<typeof watch> | null = null;
+  /** Caps how many grabs download concurrently; further downloads queue. */
+  private slotLimiter: Semaphore;
 
   constructor(config: Config) {
     const raw = config.downloadClient?.torbox;
@@ -139,6 +142,7 @@ export class TorboxDownloadClient implements DownloadClient {
       outputFolder: raw?.outputFolder || './downloads',
       concurrency: raw?.concurrency || 3,
     };
+    this.slotLimiter = new Semaphore(this.config.concurrency!);
     this.service = new TorboxService({
       apiKey: this.config.apiKey!,
       baseUrl: this.config.baseUrl!,
@@ -411,9 +415,34 @@ export class TorboxDownloadClient implements DownloadClient {
   private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
     this.markInflight({ torrentId, title: label });
     this.activeTorrents.set(torrentId, label);
-    this.controllers.set(torrentId, new AbortController());
+    const controller = new AbortController();
+    this.controllers.set(torrentId, controller);
     try {
-      return await this.waitForDownloadInner(torrentId, label);
+      if (this.slotLimiter.inUse >= this.slotLimiter.capacity) {
+        this.activeDetails.set(label, {
+          state: `queued (${this.slotLimiter.inUse}/${this.slotLimiter.capacity} downloads active)`,
+          progress: 0,
+        });
+      }
+      let releaseSlot: () => void;
+      try {
+        releaseSlot = await this.slotLimiter.acquire(controller.signal);
+      } catch {
+        // Cancelled while waiting for a free slot — never started a download.
+        this.activeDetails.delete(label);
+        db.logEvent({
+          type: 'skip',
+          entityType: 'release',
+          message: `Cancelled download "${label}" (torrent ${torrentId}) while waiting for a free slot.`,
+        });
+        console.log(`[${this.name}] Cancelled queued download "${label}" (torrent ${torrentId})`);
+        return false;
+      }
+      try {
+        return await this.waitForDownloadInner(torrentId, label);
+      } finally {
+        releaseSlot();
+      }
     } finally {
       this.activeTorrents.delete(torrentId);
       this.controllers.delete(torrentId);

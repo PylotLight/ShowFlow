@@ -61,3 +61,74 @@ export class RateLimiter {
 }
 
 export const limiter = new RateLimiter(10, 2); // Example: 10 burst, 2 requests/sec
+
+/**
+ * Counting semaphore that caps how many operations run at once; excess
+ * callers wait in FIFO order. Unlike RateLimiter (which throttles by tokens
+ * over time), this bounds *in-flight* work — e.g. concurrent grab downloads —
+ * and hands the freed slot straight to the next waiter.
+ */
+export class Semaphore {
+  readonly capacity: number;
+  private available: number;
+  private waiters: ((release: () => void) => void)[] = [];
+
+  constructor(max: number) {
+    this.capacity = Math.max(1, Math.floor(max));
+    this.available = this.capacity;
+  }
+
+  get inUse(): number {
+    return this.capacity - this.available;
+  }
+
+  get queued(): number {
+    return this.waiters.length;
+  }
+
+  /**
+   * Resolves with a release function once a slot is free. If `signal`
+   * aborts while waiting, the promise rejects and the caller never
+   * consumes a slot.
+   */
+  acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('Aborted'));
+    if (this.available > 0) {
+      this.available--;
+      return Promise.resolve(this.createRelease());
+    }
+    return new Promise<() => void>((resolve, reject) => {
+      const waiter = (release: () => void) => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve(release);
+      };
+      const onAbort = () => {
+        const idx = this.waiters.indexOf(waiter);
+        if (idx >= 0) this.waiters.splice(idx, 1);
+        reject(signal?.reason ?? new Error('Aborted'));
+      };
+      this.waiters.push(waiter);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  async runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const release = await this.acquire(signal);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  private createRelease(): () => void {
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const next = this.waiters.shift();
+      if (next) next(this.createRelease()); // hand the slot straight over
+      else this.available++;
+    };
+  }
+}
