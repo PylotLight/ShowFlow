@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.70] - 2026-09-18
 - **Fix**: wrongly-locked episode mappings can now be reverted. A bulk Fix All with offset 0 on a season-split show stamps scene==provider identities (e.g. `S04E18 → S04E18`) that destroy the real TheXem rows — and locked rows survived every future sync with no way back. Per-row **Revert** buttons plus a bulk "revert all fixes" hand rows back to the sync job so the next refresh replaces them. The grabber also logs the fallback reason now (`No scene mapping for "Show S01E49" (N rows) — searching provider numbering`) instead of silently searching provider numbering.
 
 ## [v0.1.69] - 2026-09-18
