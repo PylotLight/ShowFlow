@@ -136,6 +136,11 @@ function ReleaseSearchDialog({
   const [releases, setReleases] = React.useState<Release[] | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Scene numbering the backend actually searched (anime season-split shows:
+  // provider S01E49 is searched as scene S04E13). Null when unmapped.
+  const [sceneSeason, setSceneSeason] = React.useState<number | null>(null);
+  const [sceneEpisode, setSceneEpisode] = React.useState<number | null>(null);
+  const [sceneSeasons, setSceneSeasons] = React.useState<number[]>([]);
 
   const [protocol, setProtocol] = React.useState<ProtocolFilter>("all");
   const [sortBy, setSortBy] = React.useState<SortKey>("score");
@@ -152,6 +157,9 @@ function ReleaseSearchDialog({
     setLoading(true);
     setError(null);
     setReleases(null);
+    setSceneSeason(null);
+    setSceneEpisode(null);
+    setSceneSeasons([]);
     const path = isMovie
       ? `/api/shows/${showId}/movie/search`
       : isSeasonScope
@@ -162,6 +170,13 @@ function ReleaseSearchDialog({
         const data = await r.json();
         if (!r.ok) throw new Error(data.error ?? "Search failed");
         setReleases(data.releases);
+        if (typeof data.sceneSeason === "number" && typeof data.sceneEpisode === "number") {
+          setSceneSeason(data.sceneSeason);
+          setSceneEpisode(data.sceneEpisode);
+        }
+        if (Array.isArray(data.sceneSeasons)) {
+          setSceneSeasons(data.sceneSeasons.filter((n: unknown) => typeof n === "number"));
+        }
       })
       .catch((err: any) => setError(err.message ?? "Search failed"))
       .finally(() => setLoading(false));
@@ -241,18 +256,39 @@ function ReleaseSearchDialog({
     }
   }
 
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const providerLabel = isMovie || isSeasonScope ? null : `S${pad2(season)}E${pad2(episode ?? 0)}`;
+  const altLabel =
+    sceneSeason != null && sceneEpisode != null
+      ? `S${pad2(sceneSeason)}E${pad2(sceneEpisode)}`
+      : null;
+  const packAltLabel =
+    isSeasonScope && sceneSeasons.length > 0
+      ? sceneSeasons.map((s) => `S${pad2(s)}`).join(", ")
+      : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="truncate" title={showTitle}>Search Releases</DialogTitle>
-          <DialogDescription className="truncate" title={isMovie ? `${showTitle}${year ? ` (${year})` : ""}` : `${showTitle} · ${isSeasonScope ? `Season ${season}` : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}`}>
+          <DialogDescription className="truncate" title={isMovie ? `${showTitle}${year ? ` (${year})` : ""}` : `${showTitle} · ${isSeasonScope ? `Season ${season}` : providerLabel}${altLabel ? ` | ${altLabel}` : ""}`}>
             {showTitle} ·{" "}
             {isMovie
               ? `${year ?? ""} (movie)`.trim()
               : isSeasonScope
                 ? `Season ${season} (packs & episodes)`
-                : `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`}
+                : providerLabel}
+            {altLabel && (
+              <span className="text-signal" title="Alternate release numbering this search also queried">
+                {" "}| {altLabel}
+              </span>
+            )}
+            {packAltLabel && (
+              <span className="text-signal" title="Alternate release numbering this pack search also queried">
+                {" "}| {packAltLabel}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 

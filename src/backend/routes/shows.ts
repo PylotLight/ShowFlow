@@ -1363,7 +1363,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const season = parseInt(req.params.season!, 10);
           const result = await grabber.searchReleases(req.params.id!, season);
           if ("error" in result) return errorResponse(result.error, 400);
-          return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease) });
+          return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease), sceneSeason: result.sceneSeason, sceneEpisode: result.sceneEpisode, sceneSeasons: result.sceneSeasons });
         } catch (err) {
           return errorResponse(err, 502);
         }
@@ -1451,7 +1451,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const episode = parseInt(req.params.episode!, 10);
           const result = await grabber.searchReleases(req.params.id!, season, episode);
           if ("error" in result) return errorResponse(result.error, 400);
-          return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease) });
+          return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease), sceneSeason: result.sceneSeason, sceneEpisode: result.sceneEpisode, sceneSeasons: result.sceneSeasons });
         } catch (err) {
           return errorResponse(err, 502);
         }

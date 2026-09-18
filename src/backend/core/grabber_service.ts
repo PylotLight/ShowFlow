@@ -132,7 +132,7 @@ export class GrabberService {
     showId: string,
     season: number,
     episode?: number
-  ): Promise<{ releases: ScoredRelease[]; profileId: string } | { error: string }> {
+  ): Promise<{ releases: ScoredRelease[]; profileId: string; sceneSeason: number | null; sceneEpisode: number | null; sceneSeasons: number[] } | { error: string }> {
     const show = db.getShow(showId);
     if (!show) return { error: `Show ${showId} not found` };
 
@@ -413,7 +413,19 @@ export class GrabberService {
       });
     }
 
-    return { releases, profileId };
+    // Scene numbering used for this search (nulls when the mapping didn't
+    // apply) so API consumers can show it, e.g. "S01E49 (scene S04E13)".
+    // Absolute-numbered series report the scene absolute number instead.
+    const sceneMapped = mappedLabel != null && searchEpisode != null;
+    return {
+      releases,
+      profileId,
+      sceneSeason: sceneMapped && seriesType !== 'absolute' ? searchSeason : null,
+      sceneEpisode: sceneMapped
+        ? (seriesType === 'absolute' ? (searchAbsolute ?? searchEpisode!) : searchEpisode!)
+        : null,
+      sceneSeasons: packSceneSeasons,
+    };
   }
 
   /**
