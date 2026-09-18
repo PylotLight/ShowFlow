@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.69] - 2026-09-18
 - **Fix**: anime season-split shows (e.g. Ascendance of a Bookworm) searched the wrong numbering and found nothing. The grabber built queries from provider-native numbering (`S01E58`) but releases/indexers use scene numbering (`S04E22`); the episode mapping was only applied on import, never on search. Searches now translate provider → scene via the mapping table (querying both namings, accepting either, deduped), and season-pack searches fan out to every scene season mapped to the provider season. Note: rows bulk-locked with offset 0 on a split show (`S04E18 → S04E18`) are identity mappings that destroy the real TheXem rows — those need a re-sync or manual correction before the new search path can resolve.
 
 ## [v0.1.68] - 2026-09-18
