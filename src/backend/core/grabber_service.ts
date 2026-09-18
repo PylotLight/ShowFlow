@@ -174,6 +174,19 @@ export class GrabberService {
             searchSeason = row.scene_season;
             searchEpisode = row.scene_episode;
             mappedLabel = `S${pad(row.scene_season)}E${pad(row.scene_episode)}`;
+          } else {
+            // Visible fallback reason: without a row whose *target* is this
+            // provider episode (e.g. no target S01E49 — typical when rows
+            // were bulk-locked as scene==provider identities), the search
+            // can only use provider numbering.
+            let rowCount = -1;
+            try { rowCount = db.listEpisodeMappings(showId).length; } catch { /* ignore */ }
+            logDebug({
+              type: 'grabber',
+              level: 'info',
+              source: 'GrabberService',
+              message: `No scene mapping for "${show.title} S${pad(season)}E${pad(episode)}" (${rowCount} mapping rows) — searching provider numbering`,
+            });
           }
         }
       } catch {

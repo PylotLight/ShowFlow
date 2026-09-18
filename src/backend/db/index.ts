@@ -290,6 +290,7 @@ export class DatabaseManager {
   listSceneSeasonsForTarget(showId: string, targetSeason: number) { return mappings.listSceneSeasonsForTarget(this, showId, targetSeason); }
   replaceThexemMappings(showId: string, tvdbId: string, rows: Parameters<typeof mappings.replaceThexemMappings>[3]) { return mappings.replaceThexemMappings(this, showId, tvdbId, rows); }
   lockMappingRow(showId: string, rowId: number, target: Parameters<typeof mappings.lockMappingRow>[3]) { return mappings.lockMappingRow(this, showId, rowId, target); }
+  setMappingRowLock(showId: string, rowId: number, locked: boolean) { return mappings.setMappingRowLock(this, showId, rowId, locked); }
   deleteEpisodeMappingsForShow(showId: string) { return mappings.deleteMappingsForShow(this, showId); }
   deleteEpisodeMappingConfigForShow(showId: string) { return mappings.deleteMappingConfigForShow(this, showId); }
 

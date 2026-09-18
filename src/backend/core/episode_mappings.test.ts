@@ -3,6 +3,7 @@ import { DatabaseManager } from '../db/index';
 import {
   replaceThexemMappings,
   findSceneMapping,
+  findTargetMapping,
   lockMappingRow,
   getMappingConfig,
 } from '../db/mappings';
@@ -148,4 +149,36 @@ test('computeMappingHealth flags the Honzuki season-split as a conflict', () => 
   expect(computeMappingHealth([flat]).health).toBe('ok');
 
   expect(computeMappingHealth([]).health).toBe('missing');
+});
+
+test('wrongly-locked identity rows explain the S01-fallback: no target row, no scene search', () => {
+  const mgr = new DatabaseManager(':memory:');
+  const showId = seedShow(mgr, { providerId: '366263' });
+
+  // What a Fix All with offset 0 stamps onto a split show: identities.
+  replaceThexemMappings(mgr, showId, '366263', [
+    { scene_season: 4, scene_episode: 18, scene_absolute: 54, target_season: 4, target_episode: 18, target_absolute: 54 },
+  ]);
+  const rows = mgr.listEpisodeMappings(showId);
+  mgr.lockMappingRow(showId, rows[0]!.id, { target_season: 4, target_episode: 18 });
+
+  const svc = new EpisodeMappingService(mgr, { getMappingAll: async () => [] } as never);
+  // Provider episode S01E54 has no row with target S01E54 -> reverse lookup
+  // misses, so the grabber can only search provider numbering.
+  expect(svc.resolveTarget(showId, 1, 54)).toBeNull();
+  expect(findTargetMapping(mgr, showId, 1, 54)).toBeNull();
+
+  // Unlocking hands the row back to the sync job...
+  expect(mgr.setMappingRowLock(showId, rows[0]!.id, false)).toBe(true);
+  const unlocked = mgr.listEpisodeMappings(showId).find(r => r.id === rows[0]!.id)!;
+  expect(unlocked.locked).toBe(0);
+  expect(unlocked.source).toBe('thexem');
+
+  // ...and the next refresh replaces the stale identity with the real row.
+  replaceThexemMappings(mgr, showId, '366263', [
+    { scene_season: 4, scene_episode: 18, scene_absolute: 54, target_season: 1, target_episode: 54, target_absolute: 54 },
+  ]);
+  expect(svc.resolveTarget(showId, 1, 54)).toEqual({ season: 4, episode: 18, absolute: 54, source: 'thexem' });
+
+  mgr.close();
 });

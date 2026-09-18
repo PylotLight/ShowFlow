@@ -1007,6 +1007,23 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           if (!Number.isFinite(rowId)) return errorResponse("Invalid row id.", 400);
           const row = db.listEpisodeMappings(req.params.id!).find(r => r.id === rowId);
           if (!row) return errorResponse("Mapping row not found.", 404);
+          // Unlock path: hand the row back to the sync job (it reverts to
+          // `thexem` source so the next refresh replaces it). This is the
+          // escape hatch for wrongly-locked rows, e.g. a bulk Fix All with
+          // offset 0 that stamped scene==provider identities onto a split
+          // show — those would otherwise survive every future sync.
+          if (body.locked === false) {
+            const ok = db.setMappingRowLock(req.params.id!, rowId, false);
+            if (!ok) return errorResponse("Mapping row update failed.", 500);
+            db.logEvent({
+              type: 'mapping',
+              entityType: 'episode',
+              entityId: String(rowId),
+              message: `Mapping fix reverted: scene S${row.scene_season}E${row.scene_episode} unlocked (sync owns it again)`,
+            });
+            const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+            return json({ ok: true, ...summarizeSyncDynamic(db, req.params.id!) });
+          }
           const targetSeason = body.targetSeason ?? row.target_season ?? null;
           const targetEpisode = body.targetEpisode ?? row.target_episode ?? null;
           if (targetSeason === null || targetEpisode === null) {
@@ -1049,10 +1066,35 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             episodeOffset?: number;
             // Per-row explicit targets override the offset for that row.
             targets?: { rowId: number; targetSeason: number; targetEpisode: number }[];
+            // Unlock mode: hand rows back to the sync job instead of locking.
+            unlock?: boolean;
           } | null;
 
           const rows = db.listEpisodeMappings(req.params.id!);
           if (rows.length === 0) return errorResponse("No mapping rows to fix.", 400);
+
+          // Bulk unlock: revert wrongly-locked rows (e.g. identity mappings
+          // from a Fix All with offset 0 on a season-split show) so the next
+          // TheXem refresh replaces them with real scene->provider rows.
+          if (body?.unlock === true) {
+            const wanted: Set<number> | null = Array.isArray(body?.rowIds) && body.rowIds.length > 0
+              ? new Set(body.rowIds.filter(n => Number.isFinite(n)))
+              : null;
+            let unlocked = 0;
+            for (const row of rows) {
+              if (row.locked !== 1) continue;
+              if (wanted && !wanted.has(row.id)) continue;
+              if (db.setMappingRowLock(req.params.id!, row.id, false)) unlocked++;
+            }
+            db.logEvent({
+              type: 'mapping',
+              entityType: 'show',
+              entityId: req.params.id!,
+              message: `Bulk mapping revert: unlocked ${unlocked} row${unlocked === 1 ? '' : 's'} (sync owns them again)`,
+            });
+            const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+            return json({ ok: true, updated: unlocked, ...summarizeSyncDynamic(db, req.params.id!) });
+          }
 
           const targetMap = new Map<number, { targetSeason: number; targetEpisode: number }>();
           for (const t of body?.targets ?? []) {

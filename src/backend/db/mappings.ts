@@ -359,6 +359,32 @@ export function lockMappingRow(
   return updated.changes > 0;
 }
 
+/**
+ * (Un)lock a mapping row. Unlocking clears the manual flag and hands the
+ * row back to the sync job: source reverts to `thexem` so the next refresh
+ * replaces it instead of preserving it forever. Needed because a wrongly
+ * locked row (e.g. a bulk Fix All with offset 0 stamping scene==provider
+ * identities onto a split show) otherwise survives every future sync.
+ */
+export function setMappingRowLock(
+  self: DatabaseManager,
+  showId: string,
+  rowId: number,
+  locked: boolean,
+): boolean {
+  const updated = self.drizz
+    .update(schema.episodeMappings)
+    .set(locked ? { locked: 1 } : { locked: 0, source: 'thexem' })
+    .where(
+      and(
+        eq(schema.episodeMappings.id, rowId),
+        eq(schema.episodeMappings.show_id, showId),
+      ),
+    )
+    .run() as unknown as { changes: number };
+  return updated.changes > 0;
+}
+
 export function deleteMappingsForShow(self: DatabaseManager, showId: string): void {
   self.drizz.delete(schema.episodeMappings).where(eq(schema.episodeMappings.show_id, showId)).run();
 }

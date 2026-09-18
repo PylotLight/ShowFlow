@@ -160,6 +160,48 @@ export function EpisodeMappingDialog({
     setFixEpisode(String(row.target_episode ?? ""));
   }
 
+  async function applyUnlock(row: MappingRow) {
+    setBusy(`row-${row.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/shows/${showId}/episode-mapping/rows/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locked: false }),
+      });
+      const data = (await res.json()) as MappingSummary;
+      if (!res.ok) throw new Error("Failed to revert fix");
+      setSummary(data);
+      setFixRow(null);
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyBulkUnlock() {
+    setBusy("bulk");
+    setError(null);
+    try {
+      const res = await fetch(`/api/shows/${showId}/episode-mapping/rows-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unlock: true }),
+      });
+      const data = (await res.json()) as MappingSummary & { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data?.error ?? "Bulk revert failed");
+      setSummary(data);
+      setBulkOpen(false);
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function applyBulkFix() {
     const seasonOffset = parseInt(bulkSeasonOffset, 10);
     const episodeOffset = parseInt(bulkEpisodeOffset, 10);
@@ -333,6 +375,18 @@ export function EpisodeMappingDialog({
                       Example: scene S01E01 should map to provider S01E53 → season 0, episode +52. Rows already locked
                       are left untouched.
                     </p>
+                    <button
+                      type="button"
+                      onClick={applyBulkUnlock}
+                      disabled={busy === 'bulk'}
+                      className="text-muted-foreground hover:text-red-400 transition-colors font-mono text-[11px] uppercase tracking-wider disabled:opacity-50"
+                    >
+                      {busy === 'bulk' ? <Loader2Icon className="size-3 animate-spin" /> : "Revert all fixes (unlock everything)"}
+                    </button>
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Wrongly-locked rows (e.g. scene==provider identities from a Fix All with offset 0 on a split
+                      show) block the sync forever — revert them so the next refresh can replace them.
+                    </p>
                   </div>
                 )}
 
@@ -370,6 +424,16 @@ export function EpisodeMappingDialog({
                                 <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 mr-2 uppercase tracking-wider">
                                   <LockIcon className="size-3" /> Fixed
                                 </span>
+                              )}
+                              {row.locked === 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => applyUnlock(row)}
+                                  disabled={busy === `row-${row.id}`}
+                                  className="text-muted-foreground hover:text-red-400 transition-colors font-mono text-[11px] uppercase tracking-wider disabled:opacity-50 mr-2"
+                                >
+                                  Revert
+                                </button>
                               )}
                               <button
                                 type="button"
