@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.72] - 2026-09-18
 - **Fix**: the Search Releases dialog now shows the alt release numbering next to the provider episode (e.g. `S01E49 | S04E13`; pack searches list the alt seasons the same way), so it's visible which numbering was queried instead of guessing from the result titles.
 
 ## [v0.1.71] - 2026-09-18
