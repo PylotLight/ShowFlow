@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.71] - 2026-09-18
 - **Fix**: one-click flat rebuild for episode mappings when TheXem is unreachable. If the provider lists everything as one season (e.g. TVDB `S01E01–60`) but the sync is down and rows were corrupted by an identity Fix All, "Rebuild flat targets" in the Fix All panel re-derives each row's provider target from its intact scene absolute number (scene `S04E13` abs 49 → provider `S01E49`), so scene-direction searches work again without hand-fixing 60 rows.
 
 ## [v0.1.70] - 2026-09-18
