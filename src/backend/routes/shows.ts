@@ -1068,10 +1068,61 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             targets?: { rowId: number; targetSeason: number; targetEpisode: number }[];
             // Unlock mode: hand rows back to the sync job instead of locking.
             unlock?: boolean;
+            // Rebuild mode for flat-provider shows (provider lists everything
+            // as one season, e.g. TVDB S01E01-60): set each row's target to
+            // (rebuildSeason, scene_absolute). Requires targetSeason.
+            rebuildFlat?: boolean;
+            targetSeason?: number;
           } | null;
 
           const rows = db.listEpisodeMappings(req.params.id!);
           if (rows.length === 0) return errorResponse("No mapping rows to fix.", 400);
+
+          // Rebuild flat targets from scene absolute numbering. This is the
+          // recovery path when TheXem is unreachable (403) and rows were
+          // corrupted by an identity Fix All: the scene keys + absolutes
+          // from the last good sync are still intact (bulk operations only
+          // ever touch target_*), and for a single-season provider listing
+          // target_episode == scene_absolute reconstructs the mapping
+          // exactly (e.g. scene S04E13 abs 49 -> provider S01E49).
+          if (body?.rebuildFlat === true) {
+            const targetSeason = body?.targetSeason;
+            if (!Number.isFinite(targetSeason)) {
+              return errorResponse("targetSeason is required to rebuild flat targets.", 400);
+            }
+            const wanted: Set<number> | null = Array.isArray(body?.rowIds) && body.rowIds.length > 0
+              ? new Set(body.rowIds.filter(n => Number.isFinite(n)))
+              : null;
+            const missing = rows.filter(r =>
+              r.locked !== 1 && (!wanted || wanted.has(r.id)) && r.scene_absolute == null,
+            );
+            if (missing.length > 0) {
+              return errorResponse(
+                `${missing.length} row${missing.length === 1 ? '' : 's'} have no scene absolute number — flat rebuild can't derive their targets. Fix those rows by hand instead.`,
+                400,
+              );
+            }
+            let rebuilt = 0;
+            for (const row of rows) {
+              if (row.locked === 1) continue;
+              if (wanted && !wanted.has(row.id)) continue;
+              if (row.scene_absolute == null) continue;
+              const ok = db.lockMappingRow(req.params.id!, row.id, {
+                target_season: targetSeason as number,
+                target_episode: row.scene_absolute,
+                target_absolute: row.scene_absolute,
+              });
+              if (ok) rebuilt++;
+            }
+            db.logEvent({
+              type: 'mapping',
+              entityType: 'show',
+              entityId: req.params.id!,
+              message: `Flat mapping rebuild: locked ${rebuilt} row${rebuilt === 1 ? '' : 's'} as provider S${targetSeason}E<scene-absolute>`,
+            });
+            const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
+            return json({ ok: true, updated: rebuilt, ...summarizeSyncDynamic(db, req.params.id!) });
+          }
 
           // Bulk unlock: revert wrongly-locked rows (e.g. identity mappings
           // from a Fix All with offset 0 on a season-split show) so the next

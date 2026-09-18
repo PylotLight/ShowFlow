@@ -71,6 +71,7 @@ export function EpisodeMappingDialog({
   const [bulkOpen, setBulkOpen] = React.useState(false);
   const [bulkSeasonOffset, setBulkSeasonOffset] = React.useState("0");
   const [bulkEpisodeOffset, setBulkEpisodeOffset] = React.useState("0");
+  const [rebuildSeason, setRebuildSeason] = React.useState("1");
 
   async function load() {
     setLoading(true);
@@ -173,6 +174,29 @@ export function EpisodeMappingDialog({
       if (!res.ok) throw new Error("Failed to revert fix");
       setSummary(data);
       setFixRow(null);
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyRebuildFlat() {
+    const targetSeason = parseInt(rebuildSeason, 10);
+    if (!Number.isFinite(targetSeason)) return;
+    setBusy("bulk");
+    setError(null);
+    try {
+      const res = await fetch(`/api/shows/${showId}/episode-mapping/rows-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rebuildFlat: true, targetSeason }),
+      });
+      const data = (await res.json()) as MappingSummary & { updated?: number; error?: string };
+      if (!res.ok) throw new Error(data?.error ?? "Rebuild failed");
+      setSummary(data);
+      setBulkOpen(false);
       onChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -375,6 +399,30 @@ export function EpisodeMappingDialog({
                       Example: scene S01E01 should map to provider S01E53 → season 0, episode +52. Rows already locked
                       are left untouched.
                     </p>
+                    <div className="border-t border-white/[0.06] pt-2 space-y-2">
+                      <p className="text-xs text-foreground/80 leading-relaxed">
+                        Provider lists everything as one season but the sync is down? Rebuild each row's provider
+                        target from its scene absolute number (scene S04E13 abs 49 → provider S01E49).
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap text-xs">
+                        <span className="text-muted-foreground">Provider season</span>
+                        <input
+                          type="number"
+                          value={rebuildSeason}
+                          onChange={e => setRebuildSeason(e.target.value)}
+                          className="w-16 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:border-signal/60"
+                        />
+                        <button
+                          type="button"
+                          onClick={applyRebuildFlat}
+                          disabled={busy === 'bulk'}
+                          className="flex items-center gap-1 rounded-md bg-signal/15 text-signal hover:bg-signal/25 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                        >
+                          {busy === 'bulk' ? <Loader2Icon className="size-3 animate-spin" /> : <Check className="size-3" />}
+                          Rebuild flat targets
+                        </button>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={applyBulkUnlock}
