@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.68] - 2026-09-18
 - **Concurrent download limiter**: grabs used to start downloading all at once — every queued TorBox download ran its own poll + file-fetch loop, so a burst of grabs (overnight auto-grab cycles, season packs, rapid UI clicks) fanned out unbounded against TorBox and local bandwidth. The existing `downloadClient.torbox.concurrency` setting was loaded but never enforced; it now gates a fair FIFO semaphore (default 3, adjustable 1–20 in Settings → Downloads → TorBox). Extra grabs queue with a visible `queued (N/M downloads active)` state on the Queue page and start as slots free up, and cancelling a queued grab releases its waiter without consuming a slot. Invalid legacy values fall back to the default instead of breaking config load.
 
 ## [v0.1.67] - 2026-09-17
