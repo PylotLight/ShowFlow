@@ -47,7 +47,17 @@ export function BackupPanel() {
     const form = new FormData();
     form.append('file', file);
     fetch('/api/backups/upload', { method: 'POST', body: form })
-      .then(r => r.json()).then(() => load())
+      .then(async r => {
+        if (!r.ok) {
+          const text = await r.text().catch(() => "");
+          throw new Error(text || `Upload failed (HTTP ${r.status})`);
+        }
+        return r.json();
+      })
+      .then(() => load())
+      .catch(err => {
+        window.alert(`Backup upload failed: ${err instanceof Error ? err.message : String(err)}`);
+      })
       .finally(() => setUploading(false));
   }
 

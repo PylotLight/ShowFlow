@@ -234,6 +234,7 @@ Object.assign(routeDefinitions, lazyRoutes());
 
 const server = serve({
   routes: wrapRouteHandlers(routeDefinitions),
+  maxRequestBodySize: 1024 * 1024 * 1024,
   websocket: {
     open(ws: ServerWebSocket) {
       debugWsClients.add(ws as any);
