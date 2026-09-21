@@ -3,8 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.73] - 2026-09-21
 - **Mobile settings**: the section dropdown is gone. Phone layouts now open a tappable list, then either a bottom sheet (General, Providers, Indexers, Integrations, Quality) or a full-screen drill-down (Appearance, Naming, Downloads, Tasks, Backup, Analytics, Debug). Deep-links into a tab still land on that section.
 - **Mobile chrome**: bottom nav is five items (Dashboard, Calendar, Library, Queue, More) with a slide-up More sheet for the rest; the shell uses `100dvh` + iOS safe-area padding so content clears the home indicator.
+
 
 ## [v0.1.72] - 2026-09-18
 - **Fix**: the Search Releases dialog now shows the alt release numbering next to the provider episode (e.g. `S01E49 | S04E13`; pack searches list the alt seasons the same way), so it's visible which numbering was queried instead of guessing from the result titles.
