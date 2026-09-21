@@ -549,7 +549,7 @@ function Dashboard({
                           <div
                             key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
                             onClick={() => { if (showObj) onSelectShow(showObj); }}
-                            className="group flex items-center gap-2 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                            className="group flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded px-1.5 py-0.5 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
                           >
                             {showObj ? (
                               <PosterImage
@@ -563,10 +563,10 @@ function Dashboard({
                                 <span className="font-mono text-[5px] text-white/20">N/A</span>
                               </div>
                             )}
-                            <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                            <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                               <span
                                 title={ep.showTitle}
-                                className="text-xs font-medium text-white/70 truncate transition-colors group-hover:text-white"
+                                className="text-xs font-medium text-white/70 break-words line-clamp-2 sm:line-clamp-1 transition-colors group-hover:text-white"
                               >
                                 {ep.showTitle}
                               </span>
@@ -766,7 +766,7 @@ function Dashboard({
                           onClick={() => {
                             if (showObj) onSelectShow(showObj);
                           }}
-                          className="group flex items-center gap-2.5 rounded-md px-2 py-1 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
+                          className="group flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-md px-2 py-1 cursor-pointer transition-all duration-150 hover:bg-white/[0.03]"
                           style={{ animationDelay: `${gi * 60 + i * 30}ms` }}
                         >
                           {showObj ? (
@@ -782,10 +782,10 @@ function Dashboard({
                             </div>
                           )}
                           <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
-                          <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                          <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                             <span
                               title={ep.showTitle}
-                              className="text-sm font-semibold truncate transition-colors text-white/75 group-hover:text-white"
+                              className="text-sm font-semibold break-words line-clamp-2 sm:line-clamp-1 transition-colors text-white/75 group-hover:text-white"
                             >
                               {ep.showTitle}
                             </span>
@@ -794,14 +794,14 @@ function Dashboard({
                             </span>
                             {ep.episodeTitle && (
                               <span
-                                className="text-[12px] text-white/60 truncate hidden sm:inline"
+                                className="text-[12px] text-white/60 break-words line-clamp-1 hidden sm:inline"
                                 title={ep.episodeTitle}
                               >
                                 · {ep.episodeTitle}
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex basis-full flex-wrap items-center gap-1.5 shrink-0 pl-11 sm:basis-auto sm:pl-0">
                             {ep.filePath && (
                               <MediaBadges media={ep.file?.media} max={3} className="hidden lg:inline-flex" />
                             )}

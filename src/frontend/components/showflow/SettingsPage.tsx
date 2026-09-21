@@ -1,5 +1,10 @@
 import * as React from "react";
-import { CheckIcon, XIcon, Loader2Icon } from "lucide-react";
+import {
+  CheckIcon, XIcon, Loader2Icon,
+  ChevronRight, ArrowLeft,
+  Settings2, Palette, KeyRound, Database, Plug, Gauge,
+  FileText, Download, Clock, Archive, BarChart3, Bug,
+} from "lucide-react";
 
 import { HeaderActions } from "@frontend/lib/header-actions";
 
@@ -19,23 +24,24 @@ import { AnalyticsPanel } from "./AnalyticsPanel";
 import { DebugSettings } from "./DebugSettings";
 import { cn } from "./SettingsShared";
 
-const SETTINGS_TABS = [
-  { id: "general", label: "General" },
-  { id: "appearance", label: "Appearance" },
-  { id: "providers", label: "Providers" },
-  { id: "indexers", label: "Indexers" },
-  { id: "integrations", label: "Integrations" },
-  { id: "quality", label: "Quality" },
-  { id: "naming", label: "Naming" },
-  { id: "downloads", label: "Downloads" },
-  { id: "tasks", label: "Tasks" },
-  { id: "backup", label: "Backup" },
-  { id: "analytics", label: "Analytics" },
-  { id: "debug", label: "Debug" },
+const SETTINGS_TABS: { id: string; label: string; icon: React.ComponentType<{ className?: string }>; mobileStyle: "sheet" | "drill" }[] = [
+  { id: "general", label: "General", icon: Settings2, mobileStyle: "sheet" },
+  { id: "appearance", label: "Appearance", icon: Palette, mobileStyle: "drill" },
+  { id: "providers", label: "Providers", icon: KeyRound, mobileStyle: "sheet" },
+  { id: "indexers", label: "Indexers", icon: Database, mobileStyle: "sheet" },
+  { id: "integrations", label: "Integrations", icon: Plug, mobileStyle: "sheet" },
+  { id: "quality", label: "Quality", icon: Gauge, mobileStyle: "sheet" },
+  { id: "naming", label: "Naming", icon: FileText, mobileStyle: "drill" },
+  { id: "downloads", label: "Downloads", icon: Download, mobileStyle: "drill" },
+  { id: "tasks", label: "Tasks", icon: Clock, mobileStyle: "drill" },
+  { id: "backup", label: "Backup", icon: Archive, mobileStyle: "drill" },
+  { id: "analytics", label: "Analytics", icon: BarChart3, mobileStyle: "drill" },
+  { id: "debug", label: "Debug", icon: Bug, mobileStyle: "drill" },
 ];
 
 export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onReRunWizard }: { onDone: () => void; initialTab?: string; scrollToSection?: string; onReRunWizard?: () => void }) {
   const [tab, setTab] = React.useState(initialTab || "general");
+  const [mobileSection, setMobileSection] = React.useState<string | null>(initialTab || null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
   const [saveMsg, setSaveMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -105,6 +111,15 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
   const [tasks, setTasks] = React.useState<any[]>([]);
   const [tasksLoading, setTasksLoading] = React.useState(false);
   const [taskRunning, setTaskRunning] = React.useState<Record<string, boolean>>({});
+
+  React.useEffect(() => {
+    if (!mobileSection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileSection(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileSection]);
 
   React.useEffect(() => {
     Promise.all([
@@ -382,13 +397,72 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
     );
   }
 
+  /* ----- helper: renders the tab body for a given id ----- */
+  function renderTabContent(id: string) {
+    switch (id) {
+      case "general":
+        return (
+          <>
+            <GeneralTab config={config} saveConfig={saveConfig} scrollToSection={scrollToSection} />
+            {onReRunWizard && (
+              <div className="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
+                <p className="text-sm font-medium mb-1">Setup Wizard</p>
+                <p className="text-xs text-muted-foreground mb-3">Re-run the onboarding wizard to reconfigure from scratch.</p>
+                <button onClick={onReRunWizard} className="text-sm text-signal hover:underline">Re-run setup wizard</button>
+              </div>
+            )}
+          </>
+        );
+      case "providers":
+        return (
+          <ProvidersTab config={config} updateApiKey={updateApiKey} showTmdbKey={showTmdbKey} setShowTmdbKey={setShowTmdbKey} showTvdbKey={showTvdbKey} setShowTvdbKey={setShowTvdbKey} showTvdbPin={showTvdbPin} setShowTvdbPin={setShowTvdbPin} saveImdb={saveImdb} />
+        );
+      case "indexers":
+        return (
+          <IndexersTab prowlarr={prowlarr} setProwlarr={setProwlarr} saveProwlarr={saveProwlarr} saveProwlarrWithDefaults={saveProwlarrWithDefaults} testProwlarr={testProwlarr} prowlarrTesting={prowlarrTesting} prowlarrStatus={prowlarrStatus} loadIndexers={loadIndexers} indexers={indexers} indexersLoading={indexersLoading} showProwlarrKey={showProwlarrKey} setShowProwlarrKey={setShowProwlarrKey} nativeIndexers={nativeIndexers} nativeMeta={nativeMeta} nativeSaving={nativeSaving} nativeTesting={nativeTesting} nativeStatuses={nativeStatuses} toggleNativeIndexer={toggleNativeIndexer} updateNativeBaseUrl={updateNativeBaseUrl} testNativeIndexer={testNativeIndexer} saving={saving} />
+        );
+      case "integrations":
+        return (
+          <IntegrationsTab sonarr={sonarr} setSonarr={setSonarr} showSonarrKey={showSonarrKey} setShowSonarrKey={setShowSonarrKey} sonarrTesting={sonarrTesting} sonarrStatus={sonarrStatus} sonarrTestingFn={testSonarr} sonarrSeries={sonarrSeries} sonarrSeriesLoading={sonarrSeriesLoading} sonarrFetchSeries={fetchSonarrSeries} sonarrImporting={sonarrImporting} sonarrImportJobId={sonarrImportJobId} onSonarrImportDone={() => setSonarrImportJobId(null)} selectedSonarrSeries={selectedSonarrSeries} setSelectedSonarrSeries={setSelectedSonarrSeries} showProfilesList={showProfilesList} qualityProfilesList={qualityProfilesList} libraryTypesList={libraryTypesList} sonarrTypeConfig={sonarrTypeConfig} setSonarrTypeConfig={setSonarrTypeConfig} sonarrTypesPresent={sonarrTypesPresent} visibleSonarrSeries={visibleSonarrSeries} sonarrImportFn={importSonarrSeries} jellyfin={jellyfin} setJellyfin={setJellyfin} showJellyfinKey={showJellyfinKey} setShowJellyfinKey={setShowJellyfinKey} jellyfinTesting={jellyfinTesting} jellyfinStatus={jellyfinStatus} jellyfinTestingFn={testJellyfin} jellyfinSyncing={jellyfinSyncing} jellyfinSyncResult={jellyfinSyncResult} jellyfinSyncFn={syncJellyfin} saveSonarr={saveSonarr} config={config} updateApiKey={updateApiKey} />
+        );
+      case "appearance":
+        return theme ? <AppearanceTab theme={theme} accent={accent} updateTheme={updateTheme} setAccent={handleAccentChange} /> : null;
+      case "quality":
+        return <QualityProfilesTab />;
+      case "naming":
+        return <NamingTab config={config} saveConfig={saveConfig} />;
+      case "downloads":
+        return <DownloadsTab config={config} saveConfig={saveConfig} showTorboxKey={showTorboxKey} setShowTorboxKey={setShowTorboxKey} />;
+      case "tasks":
+        return <TasksPanel tasks={tasks} loading={tasksLoading} onRunTask={runTaskNow} onUpdateTask={updateTaskConfig} taskRunning={taskRunning} saving={saving} />;
+      case "backup":
+        return <BackupPanel />;
+      case "analytics":
+        return <AnalyticsPanel />;
+      case "debug":
+        return <DebugSettings />;
+      default:
+        return null;
+    }
+  }
+
+  const activeMobileTab = SETTINGS_TABS.find(t => t.id === mobileSection);
+  const ActiveMobileIcon = activeMobileTab?.icon;
+
   return (
     <div className="space-y-6">
       {/* Tabs + save status — both live in the global header, replacing the
           old standalone tab-strip panel so everything sits in one place. */}
       <HeaderActions>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+          {/* Mobile: show the active section label if a panel is open, otherwise nothing (the list below serves as nav). */}
+          {mobileSection && (
+            <div className="flex min-w-0 flex-1 items-center gap-1 sm:hidden">
+              <span className="truncate font-mono text-xs font-semibold text-white">{activeMobileTab?.label ?? "Settings"}</span>
+            </div>
+          )}
+          {/* Desktop: pill tabs. */}
+          <div className="hidden min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex">
             {SETTINGS_TABS.map(t => (
               <button
                 key={t.id}
@@ -419,153 +493,99 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
         </div>
       </HeaderActions>
 
-      {/* Content */}
-      <div className="space-y-6">
-        {tab === "general" && (
-          <GeneralTab
-            config={config}
-            saveConfig={saveConfig}
-            scrollToSection={scrollToSection}
-          />
-        )}
+      {/* ── Mobile: tappable section list (visible when no section is open) ── */}
+      <div className={cn("sm:hidden", mobileSection && "hidden")}>
+        <div className="space-y-1">
+          {SETTINGS_TABS.map(t => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => { setTab(t.id); setMobileSection(t.id); }}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3.5 text-left transition-colors hover:bg-white/[0.05] active:bg-white/[0.08]"
+              >
+                <Icon className="size-5 shrink-0 text-muted-foreground" />
+                <span className="flex-1 font-sans text-sm font-medium text-white">{t.label}</span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-        {tab === "general" && onReRunWizard && (
-          <div className="p-5 rounded-2xl border border-white/10 bg-white/[0.02]">
-            <p className="text-sm font-medium mb-1">Setup Wizard</p>
-            <p className="text-xs text-muted-foreground mb-3">
-              Re-run the onboarding wizard to reconfigure from scratch.
-            </p>
-            <button
-              onClick={onReRunWizard}
-              className="text-sm text-signal hover:underline"
-            >
-              Re-run setup wizard
-            </button>
+      {/* ── Mobile: Sheet overlay (Approach A) ── */}
+      {mobileSection && activeMobileTab?.mobileStyle === "sheet" && (
+        <div className="fixed inset-0 z-50 sm:hidden" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/60 animate-[fadeIn_0.15s_ease-out]"
+            onClick={() => setMobileSection(null)}
+          />
+          <div
+            className="mobile-nav-safe absolute inset-x-0 bottom-0 flex flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] shadow-2xl"
+            style={{ maxHeight: "92vh", animation: "slideUp 0.25s ease-out" }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-2 pb-1">
+              <div className="h-1 w-8 rounded-full bg-white/20" />
+            </div>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 pb-3">
+              <div className="flex items-center gap-2">
+                {ActiveMobileIcon && <ActiveMobileIcon className="size-4 text-signal" />}
+                <span className="font-mono text-sm font-bold text-white">{activeMobileTab?.label}</span>
+              </div>
+              <button
+                onClick={() => setMobileSection(null)}
+                aria-label="Close"
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white"
+              >
+                <XIcon className="size-4" />
+              </button>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-4 pb-6">
+              <div className="space-y-6">
+                {renderTabContent(mobileSection)}
+              </div>
+            </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {tab === "providers" && (
-          <ProvidersTab
-            config={config}
-            updateApiKey={updateApiKey}
-            showTmdbKey={showTmdbKey}
-            setShowTmdbKey={setShowTmdbKey}
-            showTvdbKey={showTvdbKey}
-            setShowTvdbKey={setShowTvdbKey}
-            showTvdbPin={showTvdbPin}
-            setShowTvdbPin={setShowTvdbPin}
-            saveImdb={saveImdb}
-          />
-        )}
+      {/* ── Mobile: Drill-down overlay (Approach B) ── */}
+      {mobileSection && activeMobileTab?.mobileStyle === "drill" && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-[#1c2028] sm:hidden"
+          role="dialog"
+          aria-modal="true"
+          style={{ animation: "slideInRight 0.25s ease-out", paddingTop: "env(safe-area-inset-top, 0px)" }}
+        >
+          {/* Header */}
+          <div className="flex h-14 items-center gap-3 border-b border-white/10 px-4">
+            <button
+              onClick={() => setMobileSection(null)}
+              aria-label="Back"
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white"
+            >
+              <ArrowLeft className="size-5" />
+            </button>
+            {ActiveMobileIcon && <ActiveMobileIcon className="size-4 text-signal" />}
+            <span className="font-mono text-sm font-bold text-white">{activeMobileTab?.label}</span>
+          </div>
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="space-y-6">
+              {renderTabContent(mobileSection)}
+            </div>
+          </div>
+        </div>
+      )}
 
-        {tab === "indexers" && (
-          <IndexersTab
-            prowlarr={prowlarr}
-            setProwlarr={setProwlarr}
-            saveProwlarr={saveProwlarr}
-            saveProwlarrWithDefaults={saveProwlarrWithDefaults}
-            testProwlarr={testProwlarr}
-            prowlarrTesting={prowlarrTesting}
-            prowlarrStatus={prowlarrStatus}
-            loadIndexers={loadIndexers}
-            indexers={indexers}
-            indexersLoading={indexersLoading}
-            showProwlarrKey={showProwlarrKey}
-            setShowProwlarrKey={setShowProwlarrKey}
-            nativeIndexers={nativeIndexers}
-            nativeMeta={nativeMeta}
-            nativeSaving={nativeSaving}
-            nativeTesting={nativeTesting}
-            nativeStatuses={nativeStatuses}
-            toggleNativeIndexer={toggleNativeIndexer}
-            updateNativeBaseUrl={updateNativeBaseUrl}
-            testNativeIndexer={testNativeIndexer}
-            saving={saving}
-          />
-        )}
-
-        {tab === "integrations" && (
-          <IntegrationsTab
-            sonarr={sonarr}
-            setSonarr={setSonarr}
-            showSonarrKey={showSonarrKey}
-            setShowSonarrKey={setShowSonarrKey}
-            sonarrTesting={sonarrTesting}
-            sonarrStatus={sonarrStatus}
-            sonarrTestingFn={testSonarr}
-            sonarrSeries={sonarrSeries}
-            sonarrSeriesLoading={sonarrSeriesLoading}
-            sonarrFetchSeries={fetchSonarrSeries}
-            sonarrImporting={sonarrImporting}
-            sonarrImportJobId={sonarrImportJobId}
-            onSonarrImportDone={() => setSonarrImportJobId(null)}
-            selectedSonarrSeries={selectedSonarrSeries}
-            setSelectedSonarrSeries={setSelectedSonarrSeries}
-            showProfilesList={showProfilesList}
-            qualityProfilesList={qualityProfilesList}
-            libraryTypesList={libraryTypesList}
-            sonarrTypeConfig={sonarrTypeConfig}
-            setSonarrTypeConfig={setSonarrTypeConfig}
-            sonarrTypesPresent={sonarrTypesPresent}
-            visibleSonarrSeries={visibleSonarrSeries}
-            sonarrImportFn={importSonarrSeries}
-            jellyfin={jellyfin}
-            setJellyfin={setJellyfin}
-            showJellyfinKey={showJellyfinKey}
-            setShowJellyfinKey={setShowJellyfinKey}
-            jellyfinTesting={jellyfinTesting}
-            jellyfinStatus={jellyfinStatus}
-            jellyfinTestingFn={testJellyfin}
-            jellyfinSyncing={jellyfinSyncing}
-            jellyfinSyncResult={jellyfinSyncResult}
-            jellyfinSyncFn={syncJellyfin}
-            saveSonarr={saveSonarr}
-            config={config}
-            updateApiKey={updateApiKey}
-          />
-        )}
-
-        {tab === "appearance" && theme && (
-          <AppearanceTab
-            theme={theme}
-            accent={accent}
-            updateTheme={updateTheme}
-            setAccent={handleAccentChange}
-          />
-        )}
-
-        {tab === "quality" && <QualityProfilesTab />}
-
-        {tab === "naming" && (
-          <NamingTab
-            config={config}
-            saveConfig={saveConfig}
-          />
-        )}
-
-        {tab === "downloads" && (
-          <DownloadsTab
-            config={config}
-            saveConfig={saveConfig}
-            showTorboxKey={showTorboxKey}
-            setShowTorboxKey={setShowTorboxKey}
-          />
-        )}
-
-        {tab === "tasks" && (
-          <TasksPanel
-            tasks={tasks}
-            loading={tasksLoading}
-            onRunTask={runTaskNow}
-            onUpdateTask={updateTaskConfig}
-            taskRunning={taskRunning}
-            saving={saving}
-          />
-        )}
-
-        {tab === "backup" && <BackupPanel />}
-        {tab === "analytics" && <AnalyticsPanel />}
-        {tab === "debug" && <DebugSettings />}
+      {/* ── Desktop: inline content (unchanged) ── */}
+      <div className="hidden sm:block">
+        <div className="space-y-6">
+          {renderTabContent(tab)}
+        </div>
       </div>
     </div>
   );

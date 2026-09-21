@@ -14,12 +14,12 @@ export function formatBytes(bytes: number): string {
 
 export function FieldRow({ label, description, children }: { label: string; description: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-6">
-      <div className="min-w-0 shrink-0 pt-2.5" style={{ width: 170 }}>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 shrink-0 sm:w-[170px] sm:pt-2.5">
         <Label className="font-mono text-sub font-bold uppercase tracking-widest text-foreground/80">{label}</Label>
         <p className="text-muted-foreground mt-0.5 text-sub leading-tight">{description}</p>
       </div>
-      <div className="min-w-0 flex-1 max-w-lg">{children}</div>
+      <div className="min-w-0 flex-1 sm:max-w-lg">{children}</div>
     </div>
   );
 }

@@ -62,6 +62,14 @@ export function App() {
     if (wizardState !== 'checking') return;
     (async () => {
       try {
+        const statusRes = await fetch("/api/system/status");
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          if (status.testMode) {
+            setWizardState('closed');
+            return;
+          }
+        }
         const res = await fetch("/api/library-types");
         if (res.ok) {
           const types = await res.json();
@@ -118,7 +126,7 @@ export function App() {
 
   return (
     <HeaderActionsProvider container={headerActionsEl}>
-    <div className={`app-background flex h-screen text-foreground pb-14 md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
+    <div className={`app-background app-shell-height flex h-screen text-foreground pb-mobile-nav md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
@@ -145,9 +153,9 @@ export function App() {
         {/* Main Content Header — single persistent row for every page: title,
             page-specific actions (portaled in via <HeaderActions>), and the
             global notification / background-activity controls. */}
-        <header className="flex h-16 items-center gap-4 border-b border-white/5 px-6 py-4">
+        <header className="flex h-14 items-center gap-2 border-b border-white/5 px-4 py-3 sm:h-16 sm:gap-4 sm:px-6 sm:py-4">
           <div className="flex items-center gap-4 shrink-0">
-            <h1 className="font-display text-2xl font-bold tracking-tight text-white capitalize">
+            <h1 className="font-display text-lg font-bold tracking-tight text-white capitalize sm:text-2xl">
               {activeNav === "agenda" ? "Calendar" : activeNav === "search" ? "Indexer Search" : activeNav}
             </h1>
           </div>
@@ -184,7 +192,7 @@ export function App() {
         </header>
 
         {/* Dynamic Content Views */}
-        <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-6 animate-page-enter">
+        <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 animate-page-enter">
           {activeNav === "dashboard" ? (
             <div className="h-full flex flex-col overflow-hidden">
               <Dashboard

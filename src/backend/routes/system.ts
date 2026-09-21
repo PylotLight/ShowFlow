@@ -7,6 +7,7 @@ import { json, errorResponse } from "./_shared";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
+const TEST_MODE = process.env.SHOWFLOW_TEST_MODE === "1" || process.env.SHOWFLOW_TEST_MODE === "true";
 
 export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager, shuttingDownRef: () => boolean) {
   return {
@@ -78,6 +79,7 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
             watching: systemManager.isWatching(),
             releaseId: BUILD_COMMIT,
             version: BUILD_VERSION,
+            testMode: TEST_MODE,
           });
         } catch (err) {
           return errorResponse(err, 500);

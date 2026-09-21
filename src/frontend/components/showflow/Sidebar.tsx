@@ -12,6 +12,8 @@ import {
   ExternalLink,
   Heart,
   Search,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 import * as React from "react";
 
@@ -29,6 +31,7 @@ interface SidebarProps {
 
 export function Sidebar({ activeItem, onChange, onSettingsTab, className }: SidebarProps) {
   const [settingsHovered, setSettingsHovered] = React.useState(false);
+  const [moreOpen, setMoreOpen] = React.useState(false);
   const [attentionCount, setAttentionCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
   const [manualCount, setManualCount] = React.useState(0);
@@ -124,6 +127,29 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
     { id: "backup", label: "Backup" },
     { id: "debug", label: "Debug" },
   ];
+
+  const mobilePrimary = [
+    { id: "dashboard" as NavItem, label: "Dashboard", icon: LayoutDashboard },
+    { id: "agenda" as NavItem, label: "Calendar", icon: Calendar },
+    { id: "library" as NavItem, label: "Library", icon: Library },
+    { id: "queue" as NavItem, label: "Queue", icon: Download, badge: queueCount, badgeHint: "active downloads" },
+  ];
+
+  const mobileMore = [
+    { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
+    { id: "search" as NavItem, label: "Indexer Search", icon: Search },
+    { id: "health" as NavItem, label: "Health", icon: Heart },
+    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount, badgeHint: "files awaiting import" },
+    { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
+    { id: "settings" as NavItem, label: "Settings", icon: Settings },
+  ];
+
+  const moreActive = mobileMore.some((n) => n.id === activeItem);
+
+  function selectMobile(item: NavItem) {
+    setMoreOpen(false);
+    onChange(item);
+  }
 
   return (
     <>
@@ -341,30 +367,87 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         </div>
       </aside>
 
+      {/* Mobile "More" Sheet */}
+      {moreOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/50 animate-[fadeIn_0.15s_ease-out]"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div
+            className="mobile-nav-safe absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-white/10 bg-[#1c2028] p-4 pb-6 shadow-2xl"
+            style={{ animation: "slideUp 0.25s ease-out" }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                More
+              </span>
+              <button
+                onClick={() => setMoreOpen(false)}
+                aria-label="Close menu"
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {mobileMore.map((nav) => (
+                <button
+                  key={nav.id}
+                  onClick={() => selectMobile(nav.id)}
+                  className={cn(
+                    "relative flex flex-col items-center justify-center gap-1.5 rounded-xl border border-white/5 bg-white/[0.02] px-2 py-3 font-sans text-caption font-medium transition-colors",
+                    activeItem === nav.id ? "border-signal/20 bg-signal/15 text-signal" : "text-muted-foreground hover:bg-white/[0.05] hover:text-white"
+                  )}
+                >
+                  <nav.icon className="size-5" />
+                  <span className="text-center leading-tight">{nav.label}</span>
+                  {nav.badge !== undefined && nav.badge > 0 && (
+                    <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground">
+                      {nav.badge}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Bottom Navigation (visible on screens < 768px) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-14 items-center gap-1 overflow-x-auto border-t border-white/10 px-2 py-1 md:hidden"
+      <nav className="mobile-nav-safe fixed bottom-0 left-0 right-0 z-30 flex h-14 items-stretch border-t border-white/10 md:hidden"
         style={{ backdropFilter: "blur(18px) saturate(115%)", WebkitBackdropFilter: "blur(18px) saturate(115%)", background: "rgb(28 32 40 / 62%)" }}>
-        {mainNavs.concat(collectionNavs, manageNavs).map((nav) => (
+        {mobilePrimary.map((nav) => (
           <button
             key={nav.id}
-            onClick={() => onChange(nav.id)}
+            onClick={() => selectMobile(nav.id)}
             className={cn(
-              "relative flex shrink-0 flex-col items-center justify-center px-3 py-1 font-sans text-caption font-medium transition-colors",
+              "relative flex flex-1 flex-col items-center justify-center gap-0.5 font-sans text-caption font-medium transition-colors",
               activeItem === nav.id ? "text-signal" : "text-muted-foreground"
             )}
           >
-            <nav.icon className="size-4.5" />
-            <span className="mt-0.5 scale-90">{nav.label}</span>
+            <nav.icon className="size-5" />
+            <span className="text-[10px] leading-none">{nav.label}</span>
             {nav.badge !== undefined && nav.badge > 0 && (
-              <span
-                title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
-                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground"
-              >
+              <span className="absolute top-1 right-1/4 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground">
                 {nav.badge}
               </span>
             )}
           </button>
         ))}
+        <button
+          onClick={() => setMoreOpen(true)}
+          className={cn(
+            "relative flex flex-1 flex-col items-center justify-center gap-0.5 font-sans text-caption font-medium transition-colors",
+            moreActive ? "text-signal" : "text-muted-foreground"
+          )}
+        >
+          <MoreHorizontal className="size-5" />
+          <span className="text-[10px] leading-none">More</span>
+          {moreActive && (
+            <span className="absolute top-1 right-1/4 size-1.5 rounded-full bg-signal" />
+          )}
+        </button>
       </nav>
     </>
   );
