@@ -30,6 +30,16 @@ import type { DownloadClient } from './types';
 const INCOMPLETE_SUFFIXES = ['.part', '.tmp', '.partial', '.aria2', '.!qb', '.bc!', '.crdownload'];
 
 /**
+ * Torrent/magnet handoff artifacts. When no downloading client (TorBox) is
+ * running, an indexer grab "succeeds" by writing the release's magnet link
+ * into the blackhole output folder as `{infoHash}.magnet` — which defaults
+ * to the very folder this importer watches. Nothing in ShowFlow turns these
+ * into media; they exist for an external download client to consume. The
+ * importer must never hash, resolve, hold, or list them as importable.
+ */
+const TORRENT_ARTIFACT_SUFFIXES = ['.torrent', '.magnet'];
+
+/**
  * Content hash for duplicate detection.
  *
  * Full-file SHA-256 was the most expensive thing the importer did on a film
@@ -81,6 +91,11 @@ export async function hashFileForDedupe(filePath: string): Promise<string> {
 export function isIncompleteDownloadFile(filename: string): boolean {
   const base = path.basename(filename).toLowerCase();
   return INCOMPLETE_SUFFIXES.some((s) => base.endsWith(s));
+}
+
+export function isTorrentArtifact(filename: string): boolean {
+  const base = path.basename(filename).toLowerCase();
+  return TORRENT_ARTIFACT_SUFFIXES.some((s) => base.endsWith(s));
 }
 
 export class BlackholeClient implements DownloadClient {
@@ -312,6 +327,11 @@ export class BlackholeClient implements DownloadClient {
           continue;
         }
 
+        if (isTorrentArtifact(filename)) {
+          skippedCount++;
+          continue;
+        }
+
         this.enqueue(folder, filename);
         queuedCount++;
       }
@@ -337,6 +357,12 @@ export class BlackholeClient implements DownloadClient {
     // In-progress download artifact — leave it alone (see helper above).
     if (isIncompleteDownloadFile(filename)) {
       debugLog(`Skipping in-progress download artifact: ${filename}`);
+      return;
+    }
+
+    // Torrent/magnet handoff artifact — not media, nothing here downloads it.
+    if (isTorrentArtifact(filename)) {
+      debugLog(`Skipping torrent/magnet handoff artifact: ${filename}`);
       return;
     }
 
@@ -417,6 +443,7 @@ export class BlackholeClient implements DownloadClient {
       const files = await readdir(folder);
       for (const filename of files) {
         if (this.isIgnoredFile(filename)) continue;
+        if (isTorrentArtifact(filename)) continue;
         const fullPath = path.join(folder, filename);
 
         const entry: any = { filename, fullPath, resolved: false, held: this.isHeldForManual(fullPath) };
@@ -497,7 +524,7 @@ export class BlackholeClient implements DownloadClient {
     if (!folder) return 0;
     try {
       const files = await readdir(folder);
-      return files.filter(f => !this.isIgnoredFile(f) && !isIncompleteDownloadFile(f)).length;
+      return files.filter(f => !this.isIgnoredFile(f) && !isIncompleteDownloadFile(f) && !isTorrentArtifact(f)).length;
     } catch {
       return 0;
     }
@@ -536,6 +563,10 @@ export class BlackholeClient implements DownloadClient {
       await stat(fullPath);
     } catch {
       return { ok: false, message: `File "${filename}" no longer exists in the watch folder.` };
+    }
+
+    if (isTorrentArtifact(filename)) {
+      return { ok: false, message: `"${filename}" is a torrent/magnet handoff artifact, not a media file. Remove it or let your download client pick it up.` };
     }
 
     try {
@@ -745,6 +776,14 @@ export class BlackholeClient implements DownloadClient {
     // still owns it. (Placed after the junk branch, before queue tracking.)
     if (!opts?.force && isIncompleteDownloadFile(filename)) {
       debugLog(`Skipping in-progress download artifact: ${filename}`);
+      return;
+    }
+
+    // Torrent/magnet handoff artifact: never import, never delete — an
+    // external download client (or the user) owns it. Unconditional: even a
+    // force-import must not move a .magnet into the library as "media".
+    if (isTorrentArtifact(filename)) {
+      debugLog(`Skipping torrent/magnet handoff artifact: ${filename}`);
       return;
     }
 
