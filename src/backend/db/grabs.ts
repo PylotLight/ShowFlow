@@ -185,8 +185,10 @@ export interface EpisodeDueForGrab {
  *
  * The deadline check trusts `expected_release_at` when the air-window
  * forecast has run for the episode (the normal case after any sync); rows
- * without it are returned anyway and the caller applies the
- * air_date(+air_time)+delay fallback with the same math as air_window.ts.
+ * without it are returned only when their raw air_date is already past,
+ * and the caller re-applies the air_date(+air_time)+delay math with the
+ * same formula as air_window.ts before treating them as due — so a future
+ * episode with no forecast yet can never slip into a search cycle.
  *
  * `replace(grabbed_at,' ','T')` normalizes legacy `datetime('now')`-default
  * rows ("YYYY-MM-DD HH:MM:SS") so they compare correctly against the ISO
@@ -216,7 +218,7 @@ export function listEpisodesDueForGrab(
       AND COALESCE(s.series_type, 'standard') != 'movie'
       AND (
         (e.expected_release_at IS NOT NULL AND e.expected_release_at <= ?)
-        OR (e.expected_release_at IS NULL AND e.air_date IS NOT NULL AND e.air_date != '')
+        OR (e.expected_release_at IS NULL AND e.air_date IS NOT NULL AND e.air_date != '' AND e.air_date <= ?)
       )
       AND NOT EXISTS (
         SELECT 1 FROM grabbed_releases g
@@ -227,5 +229,5 @@ export function listEpisodesDueForGrab(
       )
     ORDER BY COALESCE(e.expected_release_at, e.air_date) DESC
     LIMIT ?
-  `).all(nowIso, grabCooldownIso, limit) as EpisodeDueForGrab[];
+  `).all(nowIso, nowIso, grabCooldownIso, limit) as EpisodeDueForGrab[];
 }

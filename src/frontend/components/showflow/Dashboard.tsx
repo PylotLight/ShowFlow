@@ -46,11 +46,20 @@ function clockLabel(ep: UpcomingEpisode): string | null {
   return expectedReleaseTime(ep.expectedReleaseAt, ep.airDate);
 }
 
-/** Basis timestamp for any "when" logic - the learned release forecast wins
- *  over the raw air date, so dashboards show true expected availability.
- *  Null when the episode is unscheduled (TBA). */
+/** Basis timestamp for any "when" logic — the LATER of the learned release
+ *  forecast and the raw air date, so a stale forecast left behind from an
+ *  older (earlier) air date can never mark a future episode as already
+ *  aired. An episode is only "past" once both the air time and the release
+ *  window have passed. Null when the episode is unscheduled (TBA). */
 function whenBasis(ep: UpcomingEpisode): string | null {
-  return ep.expectedReleaseAt || ep.airDate || null;
+  const a = ep.expectedReleaseAt ? new Date(ep.expectedReleaseAt).getTime() : NaN;
+  const b = ep.airDate ? new Date(ep.airDate).getTime() : NaN;
+  const aOk = !isNaN(a);
+  const bOk = !isNaN(b);
+  if (aOk && bOk) return new Date(Math.max(a, b)).toISOString();
+  if (aOk && ep.expectedReleaseAt) return ep.expectedReleaseAt;
+  if (bOk && ep.airDate) return ep.airDate;
+  return null;
 }
 
 function getLocalDateKey(airDate: string | null): string {
@@ -121,8 +130,9 @@ function getRowDot(airDate: string | null): string {
 }
 
 /** Explicit acquisition state, derived from calendar fields only:
- *  file on disk → Available; aired with no file → Awaiting release
- *  (aired but not yet grabbed); otherwise Scheduled. */
+ *  file on disk → Available; aired (air time AND release window both past)
+ *  with no file → Awaiting release (aired but not yet grabbed); otherwise
+ *  Scheduled. */
 function acquisition(ep: UpcomingEpisode): "available" | "awaiting" | "scheduled" {
   if (ep.filePath) return "available";
   if (isPast(whenBasis(ep))) return "awaiting";

@@ -355,3 +355,144 @@ export function getNoisiestShows(self: DatabaseManager, limit = 5): NoisyShow[] 
     .limit(limit)
     .all();
 }
+
+// ---- Unified history (Sonarr-style Activity/History) ----------------------
+//
+// One chronological feed across the three append-mostly sources that answer
+// "what did the app actually do": grabs sent to a download client
+// (grabbed_releases), files imported into the library (episode_files), and
+// the pipeline event trail in between (searches, rejections, failures).
+// Powers GET /api/history and the History page.
+
+export interface HistoryFilter {
+  limit?: number;
+  offset?: number;
+  showId?: string;
+  /** 'grab' = sent to download client, 'import' = landed in library, 'event' = pipeline trail. */
+  kind?: 'grab' | 'import' | 'event';
+  /** Free-text match against show title, message, and release title. */
+  query?: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  kind: 'grab' | 'import' | 'event';
+  timestamp: string;
+  showId: string | null;
+  showTitle: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  stage: string | null;
+  eventType: string | null;
+  message: string;
+  releaseTitle: string | null;
+  indexerName: string | null;
+}
+
+export function listHistory(self: DatabaseManager, filter: HistoryFilter): { items: HistoryItem[]; hasMore: boolean } {
+  const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
+  const offset = Math.max(filter.offset ?? 0, 0);
+  const kinds: ('grab' | 'import' | 'event')[] =
+    filter.kind ? [filter.kind] : ['grab', 'import', 'event'];
+
+  const selects: string[] = [];
+  const params: any[] = [];
+
+  if (kinds.includes('event')) {
+    selects.push(`
+      SELECT
+        ('event:' || pe.id) AS id,
+        'event' AS kind,
+        replace(pe.created_at, ' ', 'T') AS ts,
+        pe.show_id AS show_id,
+        s.title AS show_title,
+        pe.season_number AS season_number,
+        pe.episode_number AS episode_number,
+        pe.stage AS stage,
+        pe.event_type AS event_type,
+        pe.message AS message,
+        pe.release_title AS release_title,
+        pe.indexer_name AS indexer_name
+      FROM pipeline_events pe
+      LEFT JOIN shows s ON s.id = pe.show_id
+    `);
+  }
+  if (kinds.includes('grab')) {
+    selects.push(`
+      SELECT
+        ('grab:' || g.id) AS id,
+        'grab' AS kind,
+        replace(g.grabbed_at, ' ', 'T') AS ts,
+        g.show_id AS show_id,
+        s.title AS show_title,
+        g.season_number AS season_number,
+        g.episode_number AS episode_number,
+        'GRABBED' AS stage,
+        'grab_sent' AS event_type,
+        COALESCE('Grabbed "' || g.release_title || '"', 'Grab recorded') AS message,
+        g.release_title AS release_title,
+        g.indexer_name AS indexer_name
+      FROM grabbed_releases g
+      LEFT JOIN shows s ON s.id = g.show_id
+    `);
+  }
+  if (kinds.includes('import')) {
+    selects.push(`
+      SELECT
+        ('import:' || f.id) AS id,
+        'import' AS kind,
+        replace(f.imported_at, ' ', 'T') AS ts,
+        f.show_id AS show_id,
+        s.title AS show_title,
+        f.season_number AS season_number,
+        f.episode_number AS episode_number,
+        'AVAILABLE' AS stage,
+        'import_completed' AS event_type,
+        ('Imported ' || COALESCE(f.original_name, f.file_path)) AS message,
+        f.release_title AS release_title,
+        f.indexer_name AS indexer_name
+      FROM episode_files f
+      LEFT JOIN shows s ON s.id = f.show_id
+    `);
+  }
+
+  const conditions: string[] = [];
+  if (filter.showId) {
+    conditions.push(`show_id = ?`);
+    params.push(filter.showId);
+  }
+  if (filter.query?.trim()) {
+    conditions.push(`(show_title LIKE ? OR message LIKE ? OR release_title LIKE ?)`);
+    const like = `%${filter.query.trim()}%`;
+    params.push(like, like, like);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // Fetch one extra row to know whether another page exists.
+  const rows = self.db.query(`
+    SELECT * FROM (
+      ${selects.join('\n      UNION ALL\n')}
+    )
+    ${where}
+    ORDER BY ts DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit + 1, offset) as any[];
+
+  return {
+    items: rows.slice(0, limit).map((r) => ({
+      id: String(r.id),
+      kind: r.kind as 'grab' | 'import' | 'event',
+      timestamp: r.ts as string,
+      showId: r.show_id ?? null,
+      showTitle: r.show_title ?? null,
+      seasonNumber: r.season_number ?? null,
+      episodeNumber: r.episode_number ?? null,
+      stage: r.stage ?? null,
+      eventType: r.event_type ?? null,
+      message: r.message ?? '',
+      releaseTitle: r.release_title ?? null,
+      indexerName: r.indexer_name ?? null,
+    })),
+    hasMore: rows.length > limit,
+  };
+}

@@ -18,9 +18,10 @@ import type { DownloadManager } from './download_manager';
  *   - tracked (`is_tracked = 1`, the per-episode monitor toggle) AND
  *     `search_mode = 'auto'` (interactive-mode episodes stay manual-only),
  *   - no file on disk yet,
- *   - past `expected_release_at` (the air-window forecast from air_window.ts;
- *     falls back to air_date + learned/default delay when the forecast has
- *     never run for the row),
+ *   - the air datetime + delay has passed — recomputed live from the row's
+ *     current air_date/air_time (the air-window forecast from air_window.ts;
+ *     the stored `expected_release_at` is only trusted when no usable air
+ *     date exists, so a stale forecast can never make a future episode due),
  *   - no successful grab recorded in the last GRAB_INFLIGHT_HOURS — the
  *     re-grab guard. Without it, every cycle would re-submit the same release
  *     while the TorBox download is still in flight (file_path only lands when
@@ -67,6 +68,28 @@ function isPastFallbackWindow(
   return nowMs >= airDt.getTime() + (delayMinutes ?? DEFAULT_RELEASE_DELAY_MINUTES) * 60_000;
 }
 
+/**
+ * True when an episode is actually due for a search this cycle.
+ *
+ * The air datetime + delay is recomputed live from the row's current
+ * air_date/air_time (same math as air_window.ts) rather than trusting the
+ * stored `expected_release_at` — a stale forecast left behind from an older,
+ * earlier air date would otherwise keep a future episode "due" until the
+ * next metadata sync corrects it. The stored forecast is only trusted when
+ * there is no usable air date to compute from (TBA rows never reach here
+ * from the SQL side, but manual callers might).
+ */
+export function isDueForSearch(  ep: { air_date: string | null; air_time: string | null; expected_release_at: string | null; release_delay_minutes: number | null },
+  nowMs: number,
+): boolean {
+  if (ep.air_date && buildAirDateTime(ep.air_date, ep.air_time)) {
+    return isPastFallbackWindow(ep.air_date, ep.air_time, ep.release_delay_minutes, nowMs);
+  }
+  // No (parseable) air date: trust the stored forecast, if any.
+  if (!ep.expected_release_at) return false;
+  return new Date(ep.expected_release_at).getTime() <= nowMs;
+}
+
 export async function runAutoGrabCycle(
   config: Config,
   downloadManager?: DownloadManager | null,
@@ -76,12 +99,10 @@ export async function runAutoGrabCycle(
   const nowIso = new Date(nowMs).toISOString();
   const cooldownIso = new Date(nowMs - GRAB_INFLIGHT_HOURS * 3_600_000).toISOString();
 
-  // Oversubscribe the fetch so rows dropped by the JS fallback-window check
+  // Oversubscribe the fetch so rows dropped by the JS due check
   // still leave a full working set for this cycle.
   const candidates = db.listEpisodesDueForGrab(nowIso, cooldownIso, MAX_GRABS_PER_CYCLE * 2);
-  const due = candidates.filter((e) =>
-    e.expected_release_at ? true : isPastFallbackWindow(e.air_date, e.air_time, e.release_delay_minutes, nowMs),
-  );
+  const due = candidates.filter((e) => isDueForSearch(e, nowMs));
   const batch = due.slice(0, MAX_GRABS_PER_CYCLE);
   result.due = batch.length;
   result.deferred = due.length - batch.length;

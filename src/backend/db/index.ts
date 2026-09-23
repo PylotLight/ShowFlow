@@ -328,6 +328,7 @@ export class DatabaseManager {
   getHourlyPipelineEventCounts(hours?: number) { return pipeline.getHourlyPipelineEventCounts(this, hours); }
   getNoisiestShows(limit?: number) { return pipeline.getNoisiestShows(this, limit); }
   listKanbanEpisodes() { return pipeline.listKanbanEpisodes(this); }
+  listHistory(filter: Parameters<typeof pipeline.listHistory>[1]) { return pipeline.listHistory(this, filter); }
 
   // ---- Analytics / DB usage -----------------------------------------------
 

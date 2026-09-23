@@ -12,6 +12,7 @@ import { SettingsPage } from "@frontend/components/showflow/SettingsPage";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
 import { QueuePage } from "@frontend/components/showflow/QueuePage";
 import { PipelineKanban } from "@frontend/components/showflow/PipelineKanban";
+import { HistoryPage } from "@frontend/components/showflow/HistoryPage";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { ManualImport } from "@frontend/components/showflow/ManualImport";
 import { IndexerSearch } from "@frontend/components/showflow/IndexerSearch";
@@ -242,6 +243,8 @@ export function App() {
             <QueuePage key={refreshKey} />
           ) : activeNav === "pipeline" ? (
             <PipelineKanban key={refreshKey} onSelectShow={selectShow} />
+          ) : activeNav === "history" ? (
+            <HistoryPage key={refreshKey} />
           ) : activeNav === "health" ? (
             <HealthDashboard
               onOpenSettings={(tab) => {

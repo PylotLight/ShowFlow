@@ -24,6 +24,32 @@ const TV_CATEGORY = 5000;
 // as TV_CATEGORY above.
 const MOVIE_CATEGORY = 2000;
 
+/**
+ * Minimum gap between two `no_qualifying_releases` pipeline rows for the
+ * same item. The auto-grabber intentionally retries failed searches every
+ * cycle (a release published after the last look should be caught by the
+ * next one), but writing a new event row every 15 minutes buries the trace
+ * and — before NO_RESULTS_FOUND was excluded from alerts — spammed a fresh
+ * "Needs Attention" notification per cycle. Within the cooldown the miss is
+ * only debug-logged; the search itself still runs.
+ */
+const NO_RESULTS_LOG_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+/** True when the item already recorded a no-results miss recently. */
+function recentlyLoggedNoResults(showId: string, season?: number | null, episode?: number | null): boolean {
+  try {
+    const latest = db.getLatestPipelineEvent(
+      showId,
+      season ?? undefined,
+      episode ?? undefined,
+    ) as any;
+    if (!latest || latest.event_type !== 'no_qualifying_releases' || !latest.created_at) return false;
+    return Date.now() - new Date(latest.created_at).getTime() < NO_RESULTS_LOG_COOLDOWN_MS;
+  } catch {
+    return false;
+  }
+}
+
 export interface ScoredRelease extends IndexerResult {
   score: ReleaseScore;
   /** The indexer instance that produced this result - needed to grab it. */
@@ -406,11 +432,13 @@ export class GrabberService {
         source: 'GrabberService',
         message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
       });
-      db.logPipelineEvent({
-        showId, seasonNumber: season, episodeNumber: episode ?? null,
-        stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
-        message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
-      });
+      if (!recentlyLoggedNoResults(showId, season, episode)) {
+        db.logPipelineEvent({
+          showId, seasonNumber: season, episodeNumber: episode ?? null,
+          stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
+          message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
+        });
+      }
     }
 
     // Scene numbering used for this search (nulls when the mapping didn't
@@ -752,10 +780,12 @@ export class GrabberService {
         type: 'grabber', level: 'warn', source: 'GrabberService',
         message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
       });
-      db.logPipelineEvent({
-        showId, stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
-        message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
-      });
+      if (!recentlyLoggedNoResults(showId)) {
+        db.logPipelineEvent({
+          showId, stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
+          message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
+        });
+      }
     }
 
     return { releases, profileId };

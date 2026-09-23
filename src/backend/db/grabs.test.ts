@@ -99,6 +99,10 @@ function seedDueGrabDb() {
   // Tracked, no dates at all -> excluded (nothing to say it's due).
   db.saveEpisode({ showId: 's1', seasonNumber: 1, episodeNumber: 7, title: 'E7', airDate: '' });
   db.setTracked('s1', 1, 7, true);
+  // Tracked, future air_date, no forecast yet -> excluded (must not search
+  // for releases that cannot exist yet).
+  db.saveEpisode({ showId: 's1', seasonNumber: 1, episodeNumber: 8, title: 'E8', airDate: future });
+  db.setTracked('s1', 1, 8, true);
 
   // s1e1 is tracked/due but has a fresh grab -> cooldown-excluded below.
   return { db, now, past, future };
@@ -123,6 +127,7 @@ test('listEpisodesDueForGrab selects tracked+due+missing, excludes the rest', ()
   expect(eps).not.toContain(4); // interactive mode
   expect(eps).not.toContain(5); // file on disk
   expect(eps).not.toContain(7); // no dates
+  expect(eps).not.toContain(8); // future air date, no forecast yet
   expect(rows.find(r => r.show_id === 's2')).toBeUndefined(); // movie
   db.close();
 });

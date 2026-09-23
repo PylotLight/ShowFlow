@@ -119,25 +119,81 @@ export function learnShowReleaseDelay(showId: string): number | null {
 /**
  * Recompute + persist the air window for every episode of a show. Called
  * after a metadata sync (fresh air dates/times) and after each grab (new
- * learned delay). Episodes that already have an *observed* expected release
- * time (a file landed / a real publish date was seen) keep theirs; forecast
- * episodes get the predicted value so the UI always has a timestamp.
+ * learned delay). Episodes that already have a file on disk keep their
+ * observed expected-release time; every other episode gets the fresh
+ * forecast so a stale prediction (e.g. computed from a placeholder air
+ * date that the provider later corrected to a future date) can't linger
+ * and make the auto-grabber search — or the dashboard show "awaiting
+ * release" — days before the episode actually airs.
  */
 export function reconcileShowAirWindows(showId: string, forceForecast = true) {
   const episodes = db.listAllEpisodes(showId);
   const learned = learnShowReleaseDelay(showId) ?? DEFAULT_RELEASE_DELAY_MINUTES;
 
   for (const ep of episodes) {
-    // Existing observed values (from a real grab publish date or import) win
-    // over a fresh forecast unless explicitly forcing.
-    if (!forceForecast && ep.expected_release_at) continue;
-    persistEpisodeAirWindow(
-      showId,
-      ep.season_number,
-      ep.episode_number,
-      ep.air_date,
-      ep.air_time,
-      learned,
-    );
+    const airDt = buildAirDateTime(ep.air_date, ep.air_time);
+    const delay = learned;
+    const fresh = airDt ? new Date(airDt.getTime() + delay * 60 * 1000).toISOString() : null;
+
+    if (forceForecast) {
+      persistEpisodeAirWindow(
+        showId,
+        ep.season_number,
+        ep.episode_number,
+        ep.air_date,
+        ep.air_time,
+        learned,
+      );
+      continue;
+    }
+
+    const hasFile = ep.file_path !== null && ep.file_path !== undefined && ep.file_path !== '';
+    if (hasFile) {
+      // Observed value wins over a fresh forecast — but the air time itself
+      // may still have been corrected by the provider, so keep it current.
+      try {
+        db.updateEpisodeAirWindow(showId, ep.season_number, ep.episode_number, {
+          airTime: ep.air_time ?? null,
+        });
+      } catch { /* best-effort */ }
+      continue;
+    }
+
+    const stored: string | null = ep.expected_release_at ?? null;
+    if (!stored) {
+      persistEpisodeAirWindow(
+        showId,
+        ep.season_number,
+        ep.episode_number,
+        ep.air_date,
+        ep.air_time,
+        learned,
+      );
+      continue;
+    }
+
+    // Refresh stale forecasts: when the air date moved (or the learned
+    // delay tightened after a grab), the stored prediction no longer
+    // matches what the current inputs produce. A >60s drift means stale.
+    if (fresh !== stored) {
+      let stale = true;
+      if (fresh && stored) {
+        const a = new Date(fresh).getTime();
+        const b = new Date(stored).getTime();
+        if (!Number.isNaN(a) && !Number.isNaN(b) && Math.abs(a - b) <= 60_000) stale = false;
+      } else if (fresh === null && stored === null) {
+        stale = false;
+      }
+      if (stale) {
+        persistEpisodeAirWindow(
+          showId,
+          ep.season_number,
+          ep.episode_number,
+          ep.air_date,
+          ep.air_time,
+          learned,
+        );
+      }
+    }
   }
 }

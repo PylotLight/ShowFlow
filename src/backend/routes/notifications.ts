@@ -37,9 +37,14 @@ export function notificationRoutes() {
           // failure — GRAB_SUCCEEDED (and future success-category codes)
           // carry a reason code too. Exclude the success category so a
           // successful "Submitted to TorBox" never surfaces under
-          // "Needs Attention".
+          // "Needs Attention". Likewise, NO_RESULTS_FOUND ("no qualifying
+          // releases" — the routine outcome of an auto-search cycle before
+          // a release is published) and NOT_AN_UPGRADE (already have an
+          // equal-or-better file) are expected states, not failures: they
+          // stay visible in Recent Activity / History / the item trace, but
+          // must not raise an alert every 15-minute cycle.
           const failedEvents = db.drizz.select().from(schema.pipelineEvents)
-            .where(sql`(stage = 'FAILED' OR (reason_code IS NOT NULL AND reason_category != 'success'))`)
+            .where(sql`(stage = 'FAILED' OR (reason_code IS NOT NULL AND reason_category != 'success')) AND reason_code NOT IN ('NO_RESULTS_FOUND', 'NOT_AN_UPGRADE')`)
             .orderBy(desc(schema.pipelineEvents.created_at))
             .limit(20)
             .all() as any[];

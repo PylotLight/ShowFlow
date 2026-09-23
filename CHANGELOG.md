@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Fix**: auto-search no longer chases episodes that haven't aired yet. A stale `expected_release_at` forecast (computed from an early placeholder air date, then never refreshed when the provider corrected it to a future date) kept future episodes "due", so every 15-minute cycle searched indexers for releases that can't exist yet. Syncs now refresh drifted forecasts, and due-selection recomputes the air datetime + delay live instead of trusting the stored value — a stale forecast alone can never make a future episode due again.
+- **Fix**: the dashboard no longer shows "Awaiting release" for unaired episodes. "Past" now means the *later* of the air date and the release forecast has passed, so future episodes correctly read Scheduled.
+- **Quieter alerts**: "no qualifying releases" and "not an upgrade" are expected states, not failures — they stay in activity/history/traces but no longer raise a Needs Attention alert every cycle, and repeat no-result misses for the same episode are logged at most once per 6h.
+- **History page**: Sonarr-style Activity/History feed uniting grabs, library imports, and the pipeline event trail, filterable by kind/show/text with pagination, under Collection → History (`GET /api/history`).
+
 ## [v0.1.73] - 2026-09-21
 - **Mobile settings**: the section dropdown is gone. Phone layouts now open a tappable list, then either a bottom sheet (General, Providers, Indexers, Integrations, Quality) or a full-screen drill-down (Appearance, Naming, Downloads, Tasks, Backup, Analytics, Debug). Deep-links into a tab still land on that section.
 - **Mobile chrome**: bottom nav is five items (Dashboard, Calendar, Library, Queue, More) with a slide-up More sheet for the rest; the shell uses `100dvh` + iOS safe-area padding so content clears the home indicator.

@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Calendar,
   Download,
+  History,
   Library,
   Layers,
   HardDrive,
@@ -20,7 +21,7 @@ import * as React from "react";
 import { cn } from "@frontend/lib/utils";
 import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "search" | "sources" | "settings" | "manual-import" | "health";
+export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "history" | "search" | "sources" | "settings" | "manual-import" | "health";
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -105,6 +106,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
   const collectionNavs = [
     { id: "library" as NavItem, label: "Library", icon: Library },
     { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
+    { id: "history" as NavItem, label: "History", icon: History },
     { id: "search" as NavItem, label: "Indexer Search", icon: Search },
   ];
 
@@ -137,6 +139,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
   const mobileMore = [
     { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
+    { id: "history" as NavItem, label: "History", icon: History },
     { id: "search" as NavItem, label: "Indexer Search", icon: Search },
     { id: "health" as NavItem, label: "Health", icon: Heart },
     { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount, badgeHint: "files awaiting import" },
