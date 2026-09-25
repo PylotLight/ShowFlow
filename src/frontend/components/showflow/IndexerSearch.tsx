@@ -3,6 +3,7 @@ import {
   CheckIcon,
   DownloadIcon,
   Loader2Icon,
+  MagnetIcon,
   PackageIcon,
   SaveIcon,
   SearchIcon,
@@ -143,6 +144,10 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [grabbingGuid, setGrabbingGuid] = React.useState<string | null>(null);
   const [grabbedGuids, setGrabbedGuids] = React.useState<Set<string>>(new Set());
   const [notice, setNotice] = React.useState<{ message: string; ok: boolean } | null>(null);
+
+  const [magnetInput, setMagnetInput] = React.useState("");
+  const [magnetTitle, setMagnetTitle] = React.useState("");
+  const [magnetGrabbing, setMagnetGrabbing] = React.useState(false);
 
   const [presets, setPresets] = React.useState<SearchPreset[]>([]);
   const [activePresetId, setActivePresetId] = React.useState<string | null>(null);
@@ -351,6 +356,35 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
     }
   }
 
+  async function handleGrabMagnet() {
+    const magnet = magnetInput.trim();
+    if (!magnet || magnetGrabbing) return;
+    setMagnetGrabbing(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/search/grab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ magnet, title: magnetTitle.trim() || undefined }),
+      });
+      const data = await res.json();
+      const ok = !!data.success;
+      const message: string = data.message ?? (ok ? "Magnet grabbed" : "Grab failed");
+      if (!res.ok && data.error) throw new Error(data.error);
+      if (ok) {
+        setMagnetInput("");
+        setMagnetTitle("");
+      }
+      setNotice({ message, ok });
+    } catch (err: any) {
+      setNotice({ message: err.message ?? "Grab failed", ok: false });
+    } finally {
+      setMagnetGrabbing(false);
+    }
+  }
+
+  const magnetValid = magnetInput.trim().startsWith("magnet:");
+
   const noSources = pickersReady && (prowlarrIndexers?.length ?? 0) === 0 && nativeIndexers.length === 0;
 
   return (
@@ -517,6 +551,45 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
               )}
             </>
           )}
+        </div>
+
+        {/* Direct magnet grab — bypasses search, flows through the normal grab path */}
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <p className="font-mono text-caption uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+            <MagnetIcon className="size-3.5" /> Grab magnet directly
+          </p>
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(e) => { e.preventDefault(); handleGrabMagnet(); }}
+          >
+            <Input
+              placeholder="Paste magnet link… (magnet:?xt=urn:btih:…)"
+              value={magnetInput}
+              onChange={(e) => setMagnetInput(e.target.value)}
+              className="h-9 flex-1 font-mono text-xs"
+              spellCheck={false}
+            />
+            <Input
+              placeholder="Title override (optional)"
+              value={magnetTitle}
+              onChange={(e) => setMagnetTitle(e.target.value)}
+              className="h-9 text-sm sm:w-48"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0"
+              disabled={!magnetValid || magnetGrabbing}
+              title={magnetValid ? "Send this magnet through the normal grab flow" : "Paste a magnet link first"}
+            >
+              {magnetGrabbing ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
+              Grab
+            </Button>
+          </form>
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            Title auto-fills from the magnet&apos;s dn parameter unless overridden. Sends to TorBox when configured, otherwise to blackhole.
+          </p>
         </div>
       </GlassPanel>
 

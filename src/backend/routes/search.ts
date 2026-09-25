@@ -3,7 +3,54 @@ import { IndexerFactory } from "../providers/indexers/factory";
 import type { NativeIndexerId, NativeIndexerConfig } from "../providers/indexers/native/types";
 import { NATIVE_INDEXER_META } from "../providers/indexers/native/types";
 import type { SystemManager } from "../core/system_manager";
-import { json, errorResponse, getProwlarrIndexer, getNativeIndexers, serializeRelease } from "./_shared";
+import { json, errorResponse, getProwlarrIndexer, getNativeIndexers, serializeRelease, loadConfig } from "./_shared";
+
+/** Build a minimal release from a pasted magnet link so it can flow through the normal grab path. */
+function buildManualMagnetRelease(body: any) {
+  const rawMagnet = typeof body?.magnet === "string" ? body.magnet
+    : typeof body?.magnetUrl === "string" ? body.magnetUrl : null;
+  const magnetUrl = rawMagnet?.trim() ?? "";
+  if (!magnetUrl.startsWith("magnet:")) {
+    return { error: "A magnet link starting with \"magnet:\" is required." };
+  }
+  const hashMatch = magnetUrl.match(/xt=urn:btih:([^&]+)/i);
+  const infoHash = hashMatch?.[1]?.trim() ?? "";
+  if (!infoHash) {
+    return { error: "That magnet link has no btih info hash (xt=urn:btih:...)." };
+  }
+  let dn: string | null = null;
+  const dnMatch = magnetUrl.match(/[?&]dn=([^&]+)/);
+  if (dnMatch?.[1]) {
+    try {
+      dn = decodeURIComponent(dnMatch[1].replace(/\+/g, " "));
+    } catch {
+      dn = dnMatch[1];
+    }
+  }
+  const title = (typeof body?.title === "string" && body.title.trim()) || dn || `Magnet ${infoHash.slice(0, 8)}`;
+  return {
+    release: {
+      guid: `manual-${infoHash.toLowerCase()}`,
+      indexerId: -1,
+      indexerName: "Manual magnet",
+      title,
+      seeders: 0,
+      leechers: 0,
+      grabs: 0,
+      size: 0,
+      publishDate: new Date().toISOString(),
+      ageHours: 0,
+      infoUrl: "",
+      downloadUrl: "",
+      magnetUrl,
+      infoHash: infoHash.toLowerCase(),
+      protocol: "torrent" as const,
+      categories: [],
+      indexerFlags: [],
+      isPack: false,
+    },
+  };
+}
 
 export function searchRoutes(systemManager: SystemManager) {
   return {
@@ -182,9 +229,19 @@ export function searchRoutes(systemManager: SystemManager) {
     "/api/search/grab": {
       async POST(req: Request & { params: Record<string, string> }) {
         try {
-          const release = await req.json();
+          const body = await req.json();
+          let release = body;
+          let isManualMagnet = false;
+
           if (!release?.guid) {
-            return errorResponse("A full release object (as returned by /api/search) is required.");
+            // Direct magnet paste: synthesize a release so it flows through
+            // the normal TorBox / blackhole grab path.
+            const manual = buildManualMagnetRelease(body);
+            if (!("release" in manual) || !manual.release) {
+              return errorResponse((manual as { error: string }).error ?? "A full release object (as returned by /api/search) or a magnet link is required.");
+            }
+            release = manual.release;
+            isManualMagnet = true;
           }
 
           let ok = false;
@@ -196,15 +253,33 @@ export function searchRoutes(systemManager: SystemManager) {
             ok = result.ok;
             message = result.message;
           } else {
-            const prowlarr = getProwlarrIndexer();
-            if (prowlarr) {
-              ok = await prowlarr.grab(release);
+            if (!isManualMagnet) {
+              const prowlarr = getProwlarrIndexer();
+              if (prowlarr) {
+                ok = await prowlarr.grab(release);
+              }
+              if (!ok) {
+                const natives = getNativeIndexers();
+                const match = natives.find(n => release.indexerName === n.instance.name)?.instance;
+                if (match) {
+                  ok = await match.grab(release);
+                }
+              }
             }
-            if (!ok) {
-              const natives = getNativeIndexers();
-              const match = natives.find(n => release.indexerName === n.instance.name)?.instance;
-              if (match) {
-                ok = await match.grab(release);
+            if (!ok && release.magnetUrl?.startsWith("magnet:")) {
+              // Manual magnets (and any magnet release when no indexer grab
+              // claimed it): write the .magnet straight to the blackhole
+              // output folder — same artifact an indexer grab would produce.
+              try {
+                const outputFolder = loadConfig().downloadClient?.blackhole?.outputFolder?.trim();
+                if (outputFolder) {
+                  const hash = release.infoHash || release.magnetUrl.match(/btih:([a-fA-F0-9]+)/i)?.[1] || crypto.randomUUID();
+                  await Bun.file(`${outputFolder}/${hash}.magnet`).write(release.magnetUrl);
+                  ok = true;
+                  message = `Wrote magnet for "${release.title}" to blackhole output`;
+                }
+              } catch (e) {
+                console.error("[api] Manual magnet blackhole write failed:", e);
               }
             }
           }
