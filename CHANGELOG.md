@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.77] - 2026-09-25
 - **Indexer Search**: grab a magnet link directly — paste any `magnet:?xt=urn:btih:…` link (grabbed elsewhere) into the new "Grab magnet directly" box and it flows through the normal grab path (TorBox when configured, otherwise blackhole). Title auto-fills from the magnet's `dn` parameter with an optional override (`POST /api/search/grab` now accepts `{ magnet, title? }`).
 
 ## [v0.1.76] - 2026-09-25
