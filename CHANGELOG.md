@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.76] - 2026-09-25
 - **Fix**: browsing releases from a movie no longer surfaces Safari's opaque "The string did not match the expected pattern" error. The Search Releases dialog parsed every API response with a blind `response.json()`, so any non-JSON reply (proxy/supervisor HTML page, empty body) threw an uninterpretable client-side exception. Search and grab responses now go through a shared reader (`frontend/lib/api.ts`) that reports the HTTP status and content kind instead, validates the releases payload shape, and URL-encodes the show id.
 
 ## [v0.1.75] - 2026-09-23
