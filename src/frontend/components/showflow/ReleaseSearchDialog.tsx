@@ -25,6 +25,7 @@ import { Panel } from "@frontend/components/ui/panel";
 import { ScrollArea } from "@frontend/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { cn } from "@frontend/lib/utils";
+import { readJsonResponse } from "@frontend/lib/api";
 
 export interface ReleaseScore {
   rank: number;
@@ -160,15 +161,17 @@ function ReleaseSearchDialog({
     setSceneSeason(null);
     setSceneEpisode(null);
     setSceneSeasons([]);
+    const encodedId = encodeURIComponent(showId);
     const path = isMovie
-      ? `/api/shows/${showId}/movie/search`
+      ? `/api/shows/${encodedId}/movie/search`
       : isSeasonScope
-        ? `/api/shows/${showId}/seasons/${season}/search`
-        : `/api/shows/${showId}/seasons/${season}/episodes/${episode}/search`;
+        ? `/api/shows/${encodedId}/seasons/${season}/search`
+        : `/api/shows/${encodedId}/seasons/${season}/episodes/${episode}/search`;
     fetch(path)
       .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error ?? "Search failed");
+        const data = await readJsonResponse<any>(r, "Search failed");
+        if (!r.ok) throw new Error(data?.error ?? "Search failed");
+        if (!Array.isArray(data?.releases)) throw new Error("Search failed (unexpected server response)");
         setReleases(data.releases);
         if (typeof data.sceneSeason === "number" && typeof data.sceneEpisode === "number") {
           setSceneSeason(data.sceneSeason);
@@ -239,8 +242,8 @@ function ReleaseSearchDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      const message: string = data.message ?? (data.success ? `Grabbed ${release.title}` : "Grab failed");
+      const data = await readJsonResponse<any>(res, "Grab failed");
+      const message: string = data?.message ?? (data?.success ? `Grabbed ${release.title}` : "Grab failed");
       if (data.success) {
         setGrabbedGuids((prev) => new Set(prev).add(release.guid));
         if (autoCloseOnSuccess) {

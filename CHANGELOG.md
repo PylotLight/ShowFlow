@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix**: browsing releases from a movie no longer surfaces Safari's opaque "The string did not match the expected pattern" error. The Search Releases dialog parsed every API response with a blind `response.json()`, so any non-JSON reply (proxy/supervisor HTML page, empty body) threw an uninterpretable client-side exception. Search and grab responses now go through a shared reader (`frontend/lib/api.ts`) that reports the HTTP status and content kind instead, validates the releases payload shape, and URL-encodes the show id.
 
 ## [v0.1.75] - 2026-09-23
 - **Fix**: auto-search no longer chases episodes that haven't aired yet. A stale `expected_release_at` forecast (computed from an early placeholder air date, then never refreshed when the provider corrected it to a future date) kept future episodes "due", so every 15-minute cycle searched indexers for releases that can't exist yet. Syncs now refresh drifted forecasts, and due-selection recomputes the air datetime + delay live instead of trusting the stored value — a stale forecast alone can never make a future episode due again.
