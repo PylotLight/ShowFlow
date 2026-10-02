@@ -356,7 +356,7 @@ function Dashboard({
   const storyGroups = React.useMemo(() => ({
     history: groupedEpisodes
       .filter((g) => g.dateKey < todayKey)
-      .sort((a, b) => (a.dateKey > b.dateKey ? -1 : 1)), // newest first
+      .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // oldest first, latest at bottom
     upcoming: groupedEpisodes
       .filter((g) => g.dateKey >= todayKey)
       .sort((a, b) => (a.dateKey < b.dateKey ? -1 : 1)), // chronologically
@@ -519,7 +519,7 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Recently Released — newest first, above the agenda;
+          {/* Recently Released — oldest first, latest at the bottom;
               collapsed by default */}
           {storyGroups.history.length > 0 && (
             <div className="border-b border-white/5 px-5 py-1">
@@ -535,7 +535,7 @@ function Dashboard({
                   ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
                 </span>
                 <span className="flex-1" />
-                {storyGroups.history.slice(0, expandHistory ? 0 : 2).map((g) =>
+                {(expandHistory ? [] : storyGroups.history.slice(-2)).map((g) =>
                   g.items.slice(0, 2).map((ep) => (
                     <span
                       key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
