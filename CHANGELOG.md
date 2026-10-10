@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.79] - 2026-10-10
+- **Fix**: release samples no longer replace the real episode. TorBox used to download every video in a torrent, and the sample (same episode, same release tags) then out-scored the probed library copy on import and "upgraded" over it. Samples (`sample`/`samples` in the name or a `Sample/` folder, plus tiny clips under 10% of the largest video in a multi-file torrent) are now skipped at download, ignored by the watch-folder importer, never treated as an upgrade, and skipped by library scans.
+
 ## [v0.1.77] - 2026-09-25
 - **Indexer Search**: grab a magnet link directly — paste any `magnet:?xt=urn:btih:…` link (grabbed elsewhere) into the new "Grab magnet directly" box and it flows through the normal grab path (TorBox when configured, otherwise blackhole). Title auto-fills from the magnet's `dn` parameter with an optional override (`POST /api/search/grab` now accepts `{ magnet, title? }`).
 
