@@ -17,6 +17,7 @@ import type { FileMediaColumns, EpisodeFileRow } from '../db/episode_files';
 import fs from 'node:fs';
 import path from 'node:path';
 import { unlink } from 'node:fs/promises';
+import { isSampleFile } from './sample_filter';
 
 // Map a scanned/parsed episode assignment to both episodes.file_path and the
 // episode_files provenance table. Scanned files have no release provenance
@@ -150,6 +151,7 @@ export class LibraryScanner {
   private shouldScanFile(file: string): boolean {
     const base = path.basename(file);
     if (base.startsWith('.')) return false;
+    if (isSampleFile(file)) return false;
     return LibraryScanner.VIDEO_EXTENSIONS.has(path.extname(base).toLowerCase());
   }
 
