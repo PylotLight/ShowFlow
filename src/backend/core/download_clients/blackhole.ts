@@ -18,6 +18,7 @@ import { releaseTitlesMatch } from '../release_meta';
 import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
+import { isSampleFile } from '../sample_filter';
 
 /**
  * Suffixes that mark a file as an in-progress download artifact — ours
@@ -176,6 +177,9 @@ export class BlackholeClient implements DownloadClient {
     const base = path.basename(filename);
     if (BlackholeClient.IGNORED_FILENAMES.has(base)) return true;
     if (base.startsWith('.')) return true;
+    // Release samples share the main file's tags and episode number, so
+    // letting one through means it "upgrades" over the real episode.
+    if (isSampleFile(base)) return true;
     return false;
   }
 

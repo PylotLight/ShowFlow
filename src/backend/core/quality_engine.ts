@@ -1,6 +1,7 @@
 import { db } from '../db';
 import type { ReasonCode } from './pipeline/reason_codes';
 import type { MediaProbeInfo } from './media_probe';
+import { isSampleFile } from './sample_filter';
 
 /**
  * Known technical "format families" - a single canonical concept that a
@@ -260,6 +261,7 @@ export class QualityEngine {
     const newcomer = this.getReleaseScore(newFilename, profileId);
 
     if (newcomer.rejected) return false;
+    if (isSampleFile(newFilename)) return false;
 
     return newcomer.totalScore > existing.totalScore;
   }
@@ -287,6 +289,9 @@ export class QualityEngine {
     const newcomer = this.getReleaseScore(newFilename, profileId);
 
     if (newcomer.rejected) return false;
+    // A sample carries the real release's tags, so against a probed library
+    // file it can out-score it on name alone. Never upgrade to one.
+    if (isSampleFile(newFilename)) return false;
 
     // Media probing is lossy (no source-type knowledge like WEB vs Remux in
     // the file's own streams) but resolution + bitrate are the dominant
