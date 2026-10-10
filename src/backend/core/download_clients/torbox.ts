@@ -9,6 +9,7 @@ import { TorboxService } from '../../providers/torbox/services';
 import { backgroundJobs } from '../background_jobs';
 import { Semaphore } from '../limiter';
 import type { DownloadClient } from './types';
+import { filterOutSamples } from '../sample_filter';
 
 export interface TorboxClientConfig {
   apiKey?: string;
@@ -814,10 +815,17 @@ export class TorboxDownloadClient implements DownloadClient {
 
         const isComplete = torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true;
         if (isComplete) {
-          const files = (torrent.files || []).filter((f: any) => {
+          const videoFiles = (torrent.files || []).filter((f: any) => {
             const name = (f.name || '').toLowerCase();
             return ['.mkv', '.mp4', '.avi', '.mov'].some(ext => name.endsWith(ext));
           });
+          // Never pull release samples: they parse to the same episode as the
+          // real file and then "upgrade" over it on import.
+          const files = filterOutSamples(videoFiles);
+          const skippedSamples = videoFiles.filter((f: any) => !files.includes(f));
+          if (skippedSamples.length > 0) {
+            console.log(`[${this.name}] Skipping ${skippedSamples.length} sample file(s) in torrent ${torrentId}: ${skippedSamples.map((f: any) => f.name).join(', ')}`);
+          }
 
           if (files.length === 0) {
             const allNames = (torrent.files || []).map((f: any) => f.name).join(', ');
