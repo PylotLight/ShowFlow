@@ -19,20 +19,33 @@ import {
 import * as React from "react";
 
 import { cn } from "@frontend/lib/utils";
-import { NotificationsPopover } from "@frontend/components/showflow/NotificationsPopover";
+import { DebugBadge } from "@frontend/components/showflow/DebugBadge";
+import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
+import type { PageId } from "@frontend/lib/router";
 
-export type NavItem = "dashboard" | "agenda" | "queue" | "library" | "pipeline" | "history" | "search" | "sources" | "settings" | "manual-import" | "health";
+export type NavItem = PageId;
 
 interface SidebarProps {
   activeItem: NavItem;
   onChange: (item: NavItem) => void;
   onSettingsTab?: (tab: string, scrollTo?: string) => void;
+  /** Mobile menu sheet, opened from the bottom bar's "More" or the top bar's menu button. */
+  mobileMenuOpen?: boolean;
+  onMobileMenuOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
-export function Sidebar({ activeItem, onChange, onSettingsTab, className }: SidebarProps) {
+// Shared keyboard focus style for every nav button.
+const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70";
+
+export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, onMobileMenuOpenChange, className }: SidebarProps) {
   const [settingsHovered, setSettingsHovered] = React.useState(false);
-  const [moreOpen, setMoreOpen] = React.useState(false);
+  const [localMoreOpen, setLocalMoreOpen] = React.useState(false);
+  const moreOpen = mobileMenuOpen ?? localMoreOpen;
+  const setMoreOpen = (open: boolean) => {
+    setLocalMoreOpen(open);
+    onMobileMenuOpenChange?.(open);
+  };
   const [attentionCount, setAttentionCount] = React.useState(0);
   const [queueCount, setQueueCount] = React.useState(0);
   const [manualCount, setManualCount] = React.useState(0);
@@ -152,11 +165,6 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
   return (
     <>
-      {/* Mobile notification bar */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 md:hidden">
-        <NotificationsPopover />
-      </div>
-
       {/* Desktop Sidebar (visible on md screens and up) */}
       <aside
         className={cn(
@@ -181,8 +189,12 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
               <button
                 key={nav.id}
                 onClick={() => onChange(nav.id)}
+                aria-label={nav.label}
+                aria-current={activeItem === nav.id ? "page" : undefined}
+                title={nav.label}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                  focusRing,
                   activeItem === nav.id
                     ? "bg-signal/15 text-signal font-semibold border border-signal/10"
                     : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
@@ -195,7 +207,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                     title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
                     className={cn(
                       "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none",
-                      activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/60"
+                      activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/80"
                     )}
                   >
                     {nav.badge}
@@ -207,15 +219,19 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
           {/* Collection Group */}
           <div className="space-y-1">
-            <span className="px-3 font-mono text-[9px] font-semibold uppercase tracking-wider text-white/30 hidden lg:inline-block">
+            <span className="px-3 font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hidden lg:inline-block">
               Collection
             </span>
             {collectionNavs.map((nav) => (
               <button
                 key={nav.id}
                 onClick={() => onChange(nav.id)}
+                aria-label={nav.label}
+                aria-current={activeItem === nav.id ? "page" : undefined}
+                title={nav.label}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                  focusRing,
                   activeItem === nav.id
                     ? "bg-signal/15 text-signal font-semibold border border-signal/10"
                     : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
@@ -240,7 +256,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
           {/* Manage Group */}
           <div className="space-y-1">
-            <span className="px-3 font-mono text-[9px] font-semibold uppercase tracking-wider text-white/30 hidden lg:inline-block">
+            <span className="px-3 font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hidden lg:inline-block">
               Manage
             </span>
             {manageNavs.map((nav) => (
@@ -253,8 +269,12 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 >
                   <button
                     onClick={() => onChange(nav.id)}
+                    aria-label={nav.label}
+                    aria-current={activeItem === nav.id ? "page" : undefined}
+                    title={nav.label}
                     className={cn(
                       "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                      focusRing,
                       activeItem === nav.id
                         ? "bg-signal/15 text-signal font-semibold border border-signal/10"
                         : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
@@ -277,12 +297,14 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                         key={tab.id}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onChange("settings");
-                          onSettingsTab?.(tab.id);
+                          // One navigation (one history entry) straight to the tab.
+                          if (onSettingsTab) onSettingsTab(tab.id);
+                          else onChange("settings");
                           setSettingsHovered(false);
                         }}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-white/[0.05] hover:text-white transition-all duration-200",
+                          focusRing,
                           settingsHovered ? "translate-x-0 opacity-100 blur-0" : "-translate-x-2 opacity-0 blur-sm"
                         )}
                         style={{
@@ -298,8 +320,12 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 <button
                   key={nav.id}
                   onClick={() => onChange(nav.id)}
+                  aria-label={nav.label}
+                  aria-current={activeItem === nav.id ? "page" : undefined}
+                  title={nav.label}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-sans text-sm font-medium transition-all duration-150",
+                    focusRing,
                     activeItem === nav.id
                       ? "bg-signal/15 text-signal font-semibold border border-signal/10"
                       : "text-muted-foreground hover:bg-white/[0.03] hover:text-white"
@@ -311,7 +337,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                     <span
                       className={cn(
                         "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none shrink-0 hidden lg:inline-block",
-                        activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/60"
+                        activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/80"
                       )}
                     >
                       {(nav as any).badge}
@@ -350,12 +376,12 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                   <span className="font-sans text-xs text-white/70 hidden lg:inline">{seriesCount} series</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-white/50 hidden lg:inline">
+                  <span className="font-mono text-[11px] text-white/70 hidden lg:inline">
                     {appVersion || "—"}
                   </span>
                   <button
-                    onClick={() => { onChange("settings"); onSettingsTab?.("general", "updates"); }}
-                    className="font-mono text-[10px] text-signal hover:text-signal/80 transition-colors hidden lg:inline"
+                    onClick={() => (onSettingsTab ? onSettingsTab("general", "updates") : onChange("settings"))}
+                    className={cn("font-mono text-[11px] text-signal hover:text-signal/80 transition-colors hidden lg:inline rounded", focusRing)}
                   >
                     Updates
                   </button>
@@ -378,13 +404,13 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
             style={{ animation: "slideUp 0.25s ease-out" }}
           >
             <div className="mb-3 flex items-center justify-between">
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-white/40">
-                More
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Menu
               </span>
               <button
                 onClick={() => setMoreOpen(false)}
                 aria-label="Close menu"
-                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white"
+                className={cn("flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white", focusRing)}
               >
                 <X className="size-4" />
               </button>
@@ -394,20 +420,36 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
                 <button
                   key={nav.id}
                   onClick={() => selectMobile(nav.id)}
+                  aria-current={activeItem === nav.id ? "page" : undefined}
                   className={cn(
                     "relative flex flex-col items-center justify-center gap-1.5 rounded-xl border border-white/5 bg-white/[0.02] px-2 py-3 font-sans text-caption font-medium transition-colors",
+                    focusRing,
                     activeItem === nav.id ? "border-signal/20 bg-signal/15 text-signal" : "text-muted-foreground hover:bg-white/[0.05] hover:text-white"
                   )}
                 >
                   <nav.icon className="size-5" />
                   <span className="text-center leading-tight">{nav.label}</span>
                   {nav.badge !== undefined && nav.badge > 0 && (
-                    <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground">
+                    <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[11px] font-mono font-bold text-signal-foreground">
                       {nav.badge}
                     </span>
                   )}
                 </button>
               ))}
+            </div>
+            {/* Header extras that don't fit the mobile top bar. */}
+            <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/5 pt-3">
+              <div className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                <DebugBadge onOpenDebug={() => { setMoreOpen(false); onSettingsTab?.("debug"); }} />
+                <span className="truncate">{appVersion || "—"}</span>
+                <button
+                  onClick={() => { setMoreOpen(false); onSettingsTab ? onSettingsTab("general", "updates") : onChange("settings"); }}
+                  className={cn("rounded text-signal hover:text-signal/80", focusRing)}
+                >
+                  Updates
+                </button>
+              </div>
+              <FeedbackButton />
             </div>
           </div>
         </div>
@@ -420,15 +462,17 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
           <button
             key={nav.id}
             onClick={() => selectMobile(nav.id)}
+            aria-current={activeItem === nav.id ? "page" : undefined}
             className={cn(
               "relative flex flex-1 flex-col items-center justify-center gap-0.5 font-sans text-caption font-medium transition-colors",
+              focusRing,
               activeItem === nav.id ? "text-signal" : "text-muted-foreground"
             )}
           >
             <nav.icon className="size-5" />
-            <span className="text-[10px] leading-none">{nav.label}</span>
+            <span className="text-[11px] leading-none">{nav.label}</span>
             {nav.badge !== undefined && nav.badge > 0 && (
-              <span className="absolute top-1 right-1/4 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[8px] font-mono font-bold text-signal-foreground">
+              <span className="absolute top-1 right-1/4 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[11px] font-mono font-bold text-signal-foreground">
                 {nav.badge}
               </span>
             )}
@@ -436,13 +480,15 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         ))}
         <button
           onClick={() => setMoreOpen(true)}
+          aria-label="More pages"
           className={cn(
             "relative flex flex-1 flex-col items-center justify-center gap-0.5 font-sans text-caption font-medium transition-colors",
+            focusRing,
             moreActive ? "text-signal" : "text-muted-foreground"
           )}
         >
           <MoreHorizontal className="size-5" />
-          <span className="text-[10px] leading-none">More</span>
+          <span className="text-[11px] leading-none">More</span>
           {moreActive && (
             <span className="absolute top-1 right-1/4 size-1.5 rounded-full bg-signal" />
           )}

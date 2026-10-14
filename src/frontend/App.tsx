@@ -19,20 +19,41 @@ import { IndexerSearch } from "@frontend/components/showflow/IndexerSearch";
 import { HealthDashboard } from "@frontend/components/showflow/HealthDashboard";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
-import { SearchIcon } from "lucide-react";
+import { MenuIcon, SearchIcon } from "lucide-react";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
 import { OnboardingWizard } from "@frontend/components/showflow/onboarding/OnboardingWizard";
+import {
+  PAGE_LABELS,
+  cameFromApp,
+  navigate,
+  pageHash,
+  routeToHash,
+  useHashRoute,
+  type Route,
+} from "@frontend/lib/router";
 import "./styles/index.css";
 
 export function App() {
-  const [activeNav, setActiveNav] = React.useState<NavItem>("dashboard");
+  // Navigation lives in the URL hash (see lib/router.ts) so refresh, back /
+  // forward and deep links all work.
+  const route = useHashRoute();
+  // The show detail renders over whichever page you opened it from; on a
+  // pasted #/show/:id link that falls back to the dashboard.
+  const lastPageRoute = React.useRef<Extract<Route, { kind: "page" }>>({ kind: "page", page: "dashboard" });
+  if (route.kind === "page") lastPageRoute.current = route;
+  const pageRoute = lastPageRoute.current;
+  const activeNav: NavItem = pageRoute.page;
+  const settingsTab = pageRoute.settingsTab;
+  const settingsScrollTo = pageRoute.section;
+
   const [query, setQuery] = React.useState("");
-  const [selected, setSelected] = React.useState<ShowSummary | null>(null);
+  const [showSummary, setShowSummary] = React.useState<ShowSummary | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const [settingsInitialTab, setSettingsInitialTab] = React.useState<string | undefined>(undefined);
-  const [settingsScrollTo, setSettingsScrollTo] = React.useState<string | undefined>(undefined);
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const selectedShowId = route.kind === "show" ? route.showId : null;
+  const selected = selectedShowId && showSummary?.id === selectedShowId ? showSummary : null;
   // Three-state gate so the wizard never flashes on reload: while "checking"
   // we render nothing, then open only if the server is genuinely unconfigured.
   const [wizardState, setWizardState] = React.useState<'checking' | 'open' | 'closed'>(() => {
@@ -98,10 +119,61 @@ export function App() {
   const [backdropUrl, setBackdropUrl] = React.useState("");
   const [headerActionsEl, setHeaderActionsEl] = React.useState<HTMLDivElement | null>(null);
 
+  // Canonicalise the hash (empty / unknown -> #/dashboard, legacy
+  // ?tab= -> /tab) without adding a history entry.
+  React.useEffect(() => {
+    const canonical = routeToHash(route);
+    if (window.location.hash !== canonical) navigate(canonical, { replace: true });
+  }, [route]);
+
+  // Deep link to a show we don't have a summary for yet: load it.
+  React.useEffect(() => {
+    if (!selectedShowId || showSummary?.id === selectedShowId) return;
+    let cancelled = false;
+    fetch(`/api/shows/${encodeURIComponent(selectedShowId)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => {
+        if (cancelled) return;
+        setShowSummary({
+          id: d.id,
+          providerType: d.providerType,
+          title: d.title,
+          profile: d.profile ?? undefined,
+          seriesType: d.seriesType ?? undefined,
+          lastUpdated: d.lastUpdated ?? undefined,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) navigate(pageHash(lastPageRoute.current.page), { replace: true });
+      });
+    return () => { cancelled = true; };
+  }, [selectedShowId, showSummary?.id]);
+
+  // Tab title per page / show.
+  React.useEffect(() => {
+    const label = route.kind === "show" ? selected?.title : PAGE_LABELS[route.page];
+    document.title = label ? `${label} · ShowFlow` : "ShowFlow";
+  }, [route, selected?.title]);
+
+  function goTo(page: NavItem) {
+    navigate(pageHash(page));
+  }
+
+  function openSettings(tab?: string, section?: string) {
+    navigate(pageHash("settings", tab, section));
+  }
+
   function selectShow(show: ShowSummary | null) {
-    if (show) {
-      setSelected(show);
-    }
+    if (!show) return;
+    setShowSummary(show);
+    navigate(`#/show/${encodeURIComponent(show.id)}`, { state: { sfFromApp: true } });
+  }
+
+  function closeShow() {
+    // Opened from inside the app: pop back to exactly where we were.
+    // Pasted link: replace with the underlying page so back doesn't reopen it.
+    if (cameFromApp()) window.history.back();
+    else navigate(pageHash(lastPageRoute.current.page), { replace: true });
   }
 
   // Refresh the library grid + show detail after data-changing actions
@@ -110,7 +182,7 @@ export function App() {
     const onRefresh = (e: Event) => {
       const detail = (e as CustomEvent).detail as { showId?: string; title?: string } | undefined;
       if (detail?.showId && detail?.title) {
-        setSelected(prev => prev && prev.id === detail.showId ? { ...prev, title: detail.title } : prev);
+        setShowSummary(prev => prev && prev.id === detail.showId ? { ...prev, title: detail.title! } : prev);
       }
       setRefreshKey(k => k + 1);
     };
@@ -143,10 +215,12 @@ export function App() {
       )}
 
       {/* Navigation Sidebar */}
-      <Sidebar 
-        activeItem={activeNav} 
-        onChange={(item) => { setActiveNav(item); setSelected(null); }}
-        onSettingsTab={(tab, scrollTo) => { setSettingsInitialTab(tab); setSettingsScrollTo(scrollTo); setActiveNav("settings"); setSelected(null); }}
+      <Sidebar
+        activeItem={activeNav}
+        onChange={goTo}
+        onSettingsTab={openSettings}
+        mobileMenuOpen={mobileMenuOpen}
+        onMobileMenuOpenChange={setMobileMenuOpen}
       />
 
       {/* Main Viewport Workspace */}
@@ -154,41 +228,33 @@ export function App() {
         {/* Main Content Header — single persistent row for every page: title,
             page-specific actions (portaled in via <HeaderActions>), and the
             global notification / background-activity controls. */}
-        <header className="flex h-14 items-center gap-2 border-b border-white/5 px-4 py-3 sm:h-16 sm:gap-4 sm:px-6 sm:py-4">
-          <div className="flex items-center gap-4 shrink-0">
-            <h1 className="font-display text-lg font-bold tracking-tight text-white capitalize sm:text-2xl">
-              {activeNav === "agenda" ? "Calendar" : activeNav === "search" ? "Indexer Search" : activeNav}
-            </h1>
-          </div>
+        <header className="flex min-h-14 flex-wrap items-center gap-x-2 gap-y-2 border-b border-white/5 px-3 py-2 sm:px-6 md:h-16 md:flex-nowrap md:gap-4 md:py-4">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open menu"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70 md:hidden"
+          >
+            <MenuIcon className="size-5" />
+          </button>
+          <h1 className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight text-white sm:text-2xl md:flex-none md:shrink-0">
+            {PAGE_LABELS[activeNav]}
+          </h1>
 
-          <div ref={setHeaderActionsEl} className="flex min-w-0 flex-1 items-center gap-4" />
+          {/* Page actions slot. On mobile it drops to its own full-width row
+              under the title bar so it never collides with the bell. */}
+          <div
+            ref={setHeaderActionsEl}
+            className="order-last flex w-full min-w-0 items-center gap-2 empty:hidden md:order-none md:w-auto md:flex-1 md:gap-4"
+          />
 
-          <div className="hidden md:flex items-center gap-1 shrink-0">
-            <DebugBadge
-              className="mr-1"
-              onOpenDebug={() => {
-                setSettingsInitialTab("debug");
-                setActiveNav("settings");
-                setSelected(null);
-              }}
-            />
-            <NotificationsPopover onOpenLink={(link) => {
-              // Route popover deep-links through client state — no reload.
-              if (link === "/queue") {
-                setActiveNav("queue");
-                setSelected(null);
-                return;
-              }
-              const settingsMatch = link.match(/^\/settings\?tab=([^&]+)/);
-              if (settingsMatch) {
-                setSettingsInitialTab(decodeURIComponent(settingsMatch[1] ?? "general"));
-                setActiveNav("settings");
-                setSelected(null);
-                return;
-              }
-              window.location.assign(link);
-            }} />
-            <FeedbackButton />
+          <div className="flex shrink-0 items-center gap-1">
+            <DebugBadge className="mr-1 hidden md:inline-flex" onOpenDebug={() => openSettings("debug")} />
+            {/* Single mount for every breakpoint — it polls, so never render two. */}
+            <NotificationsPopover />
+            <div className="hidden md:block">
+              <FeedbackButton />
+            </div>
           </div>
         </header>
 
@@ -199,7 +265,7 @@ export function App() {
               <Dashboard
                 key={refreshKey}
                 onSelectShow={selectShow}
-                onShowCalendar={() => setActiveNav("agenda")}
+                onShowCalendar={() => goTo("agenda")}
                 onAddShow={() => setRefreshKey((k) => k + 1)}
               />
             </div>
@@ -211,8 +277,8 @@ export function App() {
           ) : activeNav === "library" ? (
             <>
               <HeaderActions>
-                <div className="ml-auto flex items-center gap-4">
-                  <div className="relative w-48 sm:w-64">
+                <div className="flex w-full items-center gap-2 sm:gap-4 md:ml-auto md:w-auto">
+                  <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
                     <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2" />
                     <Input
                       placeholder="Search library..."
@@ -233,9 +299,9 @@ export function App() {
             </>
           ) : activeNav === "settings" ? (
             <SettingsPage
-              key={settingsInitialTab}
-              onDone={() => { setActiveNav("dashboard"); setSettingsScrollTo(undefined); }}
-              initialTab={settingsInitialTab}
+              key={`${settingsTab ?? "general"}:${settingsScrollTo ?? ""}`}
+              onDone={() => goTo("dashboard")}
+              initialTab={settingsTab}
               scrollToSection={settingsScrollTo}
               onReRunWizard={reRunWizard}
             />
@@ -247,35 +313,25 @@ export function App() {
             <HistoryPage key={refreshKey} />
           ) : activeNav === "health" ? (
             <HealthDashboard
-              onOpenSettings={(tab) => {
-                setSettingsInitialTab(tab);
-                setActiveNav("settings");
-              }}
+              onOpenSettings={(tab) => openSettings(tab)}
             />
           ) : activeNav === "sources" ? (
             <SourcesPage
-              onOpenSettings={() => {
-                setSettingsInitialTab("indexers");
-                setActiveNav("settings");
-              }}
+              onOpenSettings={() => openSettings("indexers")}
             />
           ) : activeNav === "manual-import" ? (
             <ManualImport />
           ) : activeNav === "search" ? (
             <IndexerSearch
-              onOpenSettings={() => {
-                setSettingsInitialTab("indexers");
-                setActiveNav("settings");
-                setSelected(null);
-              }}
+              onOpenSettings={() => openSettings("indexers")}
             />
           ) : (
             <div className="glass-plane rounded-xl p-8 text-center text-muted-foreground">
               <h3 className="font-display text-lg font-bold text-white mb-2 uppercase">
-                {activeNav} Section
+                {PAGE_LABELS[activeNav]} Section
               </h3>
               <p className="font-mono text-caption">
-                Work-in-progress operational workspace for {activeNav}.
+                Work-in-progress operational workspace for {PAGE_LABELS[activeNav]}.
               </p>
             </div>
           )}
@@ -285,8 +341,9 @@ export function App() {
       {/* Show Detail Modal — renders on top of any page */}
       {selected && (
         <ShowDetailDialog
+          key={selected.id}
           show={selected}
-          onClose={() => setSelected(null)}
+          onClose={closeShow}
         />
       )}
     </div>

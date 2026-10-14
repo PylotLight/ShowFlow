@@ -2,6 +2,7 @@ import * as React from "react";
 import { BellIcon, AlertTriangleIcon, XCircleIcon, InfoIcon, ChevronDownIcon, Loader2Icon, CheckIcon, XIcon } from "lucide-react";
 import { Button } from "@frontend/components/ui/button";
 import { cn } from "@frontend/lib/utils";
+import { openAppLink } from "@frontend/lib/router";
 
 interface Notification {
   id: string;
@@ -57,11 +58,38 @@ function groupConsecutive(items: Notification[]): RecentGroup[] {
 
 type Tab = 'all' | 'alerts' | 'jobs' | 'activity';
 
+// Runs `fn` now and every `ms`, but pauses while the tab is hidden and
+// catches up immediately when it becomes visible again.
+function useVisibleInterval(fn: () => void, ms: number) {
+  const fnRef = React.useRef(fn);
+  fnRef.current = fn;
+  React.useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (id !== null) return;
+      fnRef.current();
+      id = setInterval(() => fnRef.current(), ms);
+    };
+    const stop = () => {
+      if (id !== null) clearInterval(id);
+      id = null;
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ms]);
+}
+
 // Single combined control for everything time-based: alerts that need
 // attention, live background jobs, and the routine activity log. One icon,
 // one panel, filterable — instead of separate bell / spinner / feedback
 // buttons all competing for the same header space.
-export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: string) => void }) {
+// Mount this ONCE (App header) — it polls.
+export function NotificationsPopover() {
   const [data, setData] = React.useState<NotificationsResponse | null>(null);
   const [jobs, setJobs] = React.useState<BackgroundJob[]>([]);
   const [open, setOpen] = React.useState(false);
@@ -69,29 +97,19 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const popoverRef = React.useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
-    const fetchNotifs = async () => {
-      try {
-        const res = await fetch("/api/notifications");
-        if (res.ok) setData(await res.json());
-      } catch {}
-    };
-    fetchNotifs();
-    const interval = setInterval(fetchNotifs, 15000);
-    return () => clearInterval(interval);
-  }, []);
+  useVisibleInterval(async () => {
+    try {
+      const res = await fetch("/api/notifications");
+      if (res.ok) setData(await res.json());
+    } catch {}
+  }, 15000);
 
-  React.useEffect(() => {
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/background-jobs");
-        if (res.ok) setJobs(await res.json());
-      } catch {}
-    };
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, []);
+  useVisibleInterval(async () => {
+    try {
+      const res = await fetch("/api/background-jobs");
+      if (res.ok) setJobs(await res.json());
+    } catch {}
+  }, 3000);
 
   React.useEffect(() => {
     if (!open) return;
@@ -123,11 +141,10 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
   }
 
   function openLink(link: string) {
-    // In-app navigation when the host provides it — a plain <a> would force
-    // a full page reload and lose all client state.
+    // Server links like "/queue" or "/settings?tab=health" go through the
+    // hash router (no reload); anything else is a real navigation.
     setOpen(false);
-    if (onOpenLink) onOpenLink(link);
-    else window.location.assign(link);
+    openAppLink(link);
   }
 
   function severityIcon(sev: string) {
@@ -166,9 +183,11 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
       <Button
         size="icon-sm"
         variant="ghost"
-        className={cn("relative size-8 rounded-full", unread > 0 && "text-signal")}
+        className={cn("relative size-8 rounded-full focus-visible:ring-2 focus-visible:ring-signal/70", unread > 0 && "text-signal")}
         onClick={() => setOpen(!open)}
         title={unread > 0 ? `${unread} notification(s)` : "Notifications & activity"}
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications & activity"}
+        aria-expanded={open}
       >
         <BellIcon className="size-4" />
         {activeJobs.length > 0 && (
@@ -178,7 +197,7 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
           </span>
         )}
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-signal text-[9px] font-bold text-white">
+          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal px-0.5 text-[11px] leading-none font-bold text-white">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -186,17 +205,17 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
 
       {open && (
         <div className="absolute top-full right-0 z-50 mt-2 w-[26rem] max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-popover shadow-xl backdrop-blur-xl">
-          <div className="flex items-center justify-between gap-3 p-3 border-b border-white/5">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-3 border-b border-white/5">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
               Notifications
             </p>
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               {(['all', 'alerts', 'jobs', 'activity'] as Tab[]).map(t => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
                   className={cn(
-                    "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide transition-all",
+                    "rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70",
                     tab === t
                       ? "bg-signal/15 text-signal font-semibold"
                       : "text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06]",
@@ -218,12 +237,12 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
             {showPriority && (
               <>
                 <div className="px-3 py-1.5 flex items-center justify-between gap-2">
-                  <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-red-400/80">
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-red-400">
                     Needs Attention
                   </p>
                   <button
                     onClick={dismissAll}
-                    className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06]"
+                    className="rounded-full px-2 py-0.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
                     title="Dismiss all current alerts"
                   >
                     Clear
@@ -237,12 +256,12 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
                       {n.message && (
                         <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
                       )}
-                      <p className="text-[10px] text-muted-foreground/60 mt-1 font-mono">
+                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
                         {new Date(n.timestamp).toLocaleString()}
                       </p>
                     </div>
                     {n.link && (
-                      <button onClick={() => openLink(n.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</button>
+                      <button onClick={() => openLink(n.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">View</button>
                     )}
                   </div>
                 ))}
@@ -252,7 +271,7 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
             {showJobs && (
               <>
                 <div className="px-3 py-1.5 border-t border-white/5">
-                  <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                     Background Jobs
                   </p>
                 </div>
@@ -274,12 +293,12 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
                       )}
                     </div>
                     {job.link && (
-                      <button onClick={() => openLink(job.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5">View</button>
+                      <button onClick={() => openLink(job.link!)} className="text-xs text-signal hover:underline shrink-0 mt-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70">View</button>
                     )}
                   </div>
                 ))}
                 {finishedJobs.slice(0, 5).map(job => (
-                  <div key={job.id} className="flex items-start gap-3 p-3 border-b border-white/5 last:border-0 opacity-60">
+                  <div key={job.id} className="flex items-start gap-3 p-3 border-b border-white/5 last:border-0 opacity-80">
                     {job.status === 'done' ? (
                       <CheckIcon className="size-4 mt-0.5 shrink-0 text-emerald-500" />
                     ) : (
@@ -299,7 +318,7 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
             {showRecent && (
               <>
                 <div className="px-3 py-1.5 border-t border-white/5">
-                  <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                     Recent Activity
                   </p>
                 </div>
@@ -312,14 +331,14 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
                       <div
                         onClick={() => isGrouped && toggleExpanded(group.key)}
                         className={cn(
-                          "flex items-start gap-3 p-3 opacity-70",
+                          "flex items-start gap-3 p-3 opacity-80",
                           isGrouped && "cursor-pointer hover:opacity-100 hover:bg-white/[0.02]",
                         )}
                       >
                         <InfoIcon className="size-4 mt-0.5 shrink-0 text-muted-foreground" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm truncate">{latest.title}</p>
-                          <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
+                          <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
                             {new Date(latest.timestamp).toLocaleString()}
                             {isGrouped && ` · ${group.items.length}×`}
                           </p>
@@ -334,8 +353,8 @@ export function NotificationsPopover({ onOpenLink }: { onOpenLink?: (link: strin
                       {isGrouped && isExpanded && (
                         <div className="pb-1">
                           {group.items.slice(1).map(n => (
-                            <div key={n.id} className="flex items-start gap-3 pl-10 pr-3 py-1.5 opacity-50">
-                              <p className="text-[10px] text-muted-foreground/60 font-mono">
+                            <div key={n.id} className="flex items-start gap-3 pl-10 pr-3 py-1.5">
+                              <p className="text-[11px] text-muted-foreground font-mono">
                                 {new Date(n.timestamp).toLocaleString()}
                               </p>
                             </div>
