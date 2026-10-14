@@ -7,7 +7,7 @@
 
 ## Priority fixes (if only three ship)
 
-- [ ] Improve contrast (secondary text → 4.5:1 minimum)
+- [x] Improve contrast (secondary text → 4.5:1 minimum)
 - [ ] Add explicit per-episode acquisition statuses
 - [ ] Surface actionable failures alongside active downloads on the dashboard
 
