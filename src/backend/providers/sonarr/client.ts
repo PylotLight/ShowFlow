@@ -18,6 +18,8 @@ export interface SonarrSeries {
   qualityProfileId: number;
   seasonFolder: boolean;
   monitored: boolean;
+  /** Sonarr v4+: 'all' | 'none' - whether newly added seasons/episodes get monitored. */
+  monitorNewItems?: string;
   useSceneNumbering: boolean;
   runtime: number;
   tvdbId: number;

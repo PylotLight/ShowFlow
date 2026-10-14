@@ -315,6 +315,9 @@ export function saveShow(self: DatabaseManager, show: {
   metadata?: any;
   rootFolderPath?: string;
   seriesType?: string;
+  /** Show-level "monitor new episodes". Defaults to on for new shows; left
+   *  untouched on re-save of an existing show unless explicitly passed. */
+  monitorNewEpisodes?: boolean;
 }) {
   const resolvedLibraryTypeId = show.libraryTypeId ? self.resolveLibraryTypeId(show.libraryTypeId) : undefined;
   const profile = resolvedLibraryTypeId
@@ -332,6 +335,7 @@ export function saveShow(self: DatabaseManager, show: {
     series_type: seriesType,
     root_folder_path: rootFolderPath,
     library_type_id: resolvedLibraryTypeId ?? null,
+    monitor_new_episodes: show.monitorNewEpisodes === false ? 0 : 1,
   }).onConflictDoUpdate({
     target: schema.shows.id,
     set: {
@@ -342,6 +346,9 @@ export function saveShow(self: DatabaseManager, show: {
       series_type: seriesType,
       root_folder_path: rootFolderPath,
       library_type_id: resolvedLibraryTypeId ?? null,
+      ...(show.monitorNewEpisodes !== undefined
+        ? { monitor_new_episodes: show.monitorNewEpisodes ? 1 : 0 }
+        : {}),
       last_updated: sql`(datetime('now'))`,
     },
   }).run();
@@ -632,6 +639,7 @@ export interface ShowSummaryRow {
   provider_type: string | null;
   tracked_count: number;
   grabbed_count: number;
+  monitor_new_episodes: number;
 }
 
 /**
@@ -644,7 +652,7 @@ export function listShowSummaries(self: DatabaseManager): ShowSummaryRow[] {
   return self.db.query(`
     SELECT
       s.id, s.title, s.year, s.profile, s.series_type, s.root_folder_path,
-      s.added_at, s.last_updated,
+      s.added_at, s.last_updated, s.monitor_new_episodes,
       (SELECT sp.provider_type FROM show_providers sp
         WHERE sp.show_id = s.id AND sp.is_primary = 1 LIMIT 1) AS provider_type,
       COALESCE(st.tracked_count, 0) AS tracked_count,
@@ -827,6 +835,63 @@ export function listSeasons(self: DatabaseManager, showId: string) {
 
 // ---- Episodes ----
 
+/**
+ * How far back a *newly inserted* episode's air date may be and still get
+ * auto-tracked on a metadata refresh. Shows without known upcoming episodes
+ * only re-sync every ~30 days (sync_manager), so an episode announced and
+ * aired between two syncs can already be a few weeks old when we first see
+ * it. Older rows appearing out of nowhere are almost always back-catalog
+ * churn (provider switch / renumbering), which we don't want to grab.
+ */
+export const NEW_EPISODE_LOOKBACK_DAYS = 30;
+
+export interface AutoTrackContext {
+  /** shows.monitor_new_episodes */
+  monitor: boolean;
+  /** Show already tracks at least one season-0 episode. */
+  tracksSpecials: boolean;
+  /** Show had no episode rows before this write (first sync after add):
+   *  only upcoming/TBA episodes count as "new" then, not the whole back
+   *  catalog. */
+  initialPopulation: boolean;
+  now?: Date;
+}
+
+/**
+ * Should a brand-new episode row be inserted with is_tracked = 1?
+ *   - show must have monitor_new_episodes on
+ *   - specials (season 0) only when the show already tracks some specials
+ *   - TBA (no air date) -> yes
+ *   - first population of a show -> air date today or later
+ *   - later refreshes -> air date within NEW_EPISODE_LOOKBACK_DAYS or later
+ */
+export function shouldAutoTrackNewEpisode(
+  ep: { seasonNumber: number; airDate?: string | null },
+  ctx: AutoTrackContext,
+): boolean {
+  if (!ctx.monitor) return false;
+  if (ep.seasonNumber === 0 && !ctx.tracksSpecials) return false;
+  const air = ep.airDate?.trim();
+  if (!air) return true;
+  const now = ctx.now ?? new Date();
+  const cutoff = new Date(now.getTime() - (ctx.initialPopulation ? 0 : NEW_EPISODE_LOOKBACK_DAYS) * 86_400_000);
+  return air.slice(0, 10) >= cutoff.toISOString().slice(0, 10);
+}
+
+function loadAutoTrackContext(self: DatabaseManager, showId: string, existing?: any[]): AutoTrackContext {
+  const show = self.drizz.select({ m: schema.shows.monitor_new_episodes })
+    .from(schema.shows).where(eq(schema.shows.id, showId)).get();
+  const rows = existing ?? (self.drizz.select({
+    season_number: schema.episodes.season_number,
+    is_tracked: schema.episodes.is_tracked,
+  }).from(schema.episodes).where(eq(schema.episodes.show_id, showId)).all() as any[]);
+  return {
+    monitor: (show?.m ?? 0) === 1,
+    tracksSpecials: rows.some(r => r.season_number === 0 && r.is_tracked === 1),
+    initialPopulation: rows.length === 0,
+  };
+}
+
 export function saveEpisode(self: DatabaseManager, episode: {
   showId: string;
   seasonNumber: number;
@@ -836,6 +901,11 @@ export function saveEpisode(self: DatabaseManager, episode: {
   filePath?: string;
   airDate?: string;
   airTime?: string;
+  /** Apply the show's monitor-new-episodes rule if this call creates the
+   *  row. Opt-in: the blackhole import path sets it so an episode first seen
+   *  via an imported file is tracked like a synced one; Sonarr import and
+   *  other callers manage is_tracked themselves. */
+  autoTrackNew?: boolean;
 }) {
   // Providers use "" for "no date announced yet" — normalize to NULL so
   // date queries (IS NOT NULL / range comparisons) treat it as unscheduled
@@ -857,6 +927,13 @@ export function saveEpisode(self: DatabaseManager, episode: {
   const title = episode.title?.trim() ? episode.title : (prev?.title ?? '');
   const absoluteNumber = episode.absoluteNumber ?? prev?.absolute_number ?? 0;
   const filePath = episode.filePath?.trim() ? episode.filePath : (prev?.file_path ?? '');
+  // is_tracked only matters on a true insert - onConflictDoUpdate below never
+  // touches it, so existing rows keep whatever tracking they had.
+  const autoTrack = !prev && episode.autoTrackNew === true
+    && shouldAutoTrackNewEpisode(
+      { seasonNumber: episode.seasonNumber, airDate },
+      { ...loadAutoTrackContext(self, episode.showId), initialPopulation: false },
+    );
   self.drizz.insert(schema.episodes).values({
     show_id: episode.showId,
     season_number: episode.seasonNumber,
@@ -866,6 +943,7 @@ export function saveEpisode(self: DatabaseManager, episode: {
     file_path: filePath,
     air_date: airDate,
     air_time: airTime,
+    is_tracked: autoTrack ? 1 : 0,
   }).onConflictDoUpdate({
     target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
     set: {
@@ -895,12 +973,23 @@ export function syncEpisodes(self: DatabaseManager, showId: string, episodes: {
   const existing = self.drizz.select().from(schema.episodes)
     .where(eq(schema.episodes.show_id, showId)).all() as any[];
   const existingByKey = new Map(existing.map(e => [`${e.season_number}:${e.episode_number}`, e]));
+  // Show-level monitor-new-episodes: decided once per sync from the rows that
+  // existed *before* it, so a batch of fresh inserts can't bootstrap itself
+  // (e.g. a new tracked special enabling more specials).
+  const trackCtx = loadAutoTrackContext(self, showId, existing);
 
   const transaction = self.db.transaction((eps: typeof episodes) => {
     for (const ep of eps) {
-      const prev = existingByKey.get(`${ep.seasonNumber}:${ep.episodeNumber}`);
+      const key = `${ep.seasonNumber}:${ep.episodeNumber}`;
+      const prev = existingByKey.get(key);
       const incomingAirDate = ep.airDate?.trim() ? ep.airDate : null;
       const incomingAirTime = ep.airTime?.trim() ? ep.airTime : null;
+      // Only consulted for brand-new rows; the conflict path never writes
+      // is_tracked so existing tracking is left exactly as the user set it.
+      const autoTrack = !prev && shouldAutoTrackNewEpisode(
+        { seasonNumber: ep.seasonNumber, airDate: incomingAirDate },
+        trackCtx,
+      );
       self.drizz.insert(schema.episodes).values({
         show_id: showId,
         season_number: ep.seasonNumber,
@@ -909,6 +998,7 @@ export function syncEpisodes(self: DatabaseManager, showId: string, episodes: {
         title: ep.title?.trim() ? ep.title : (prev?.title ?? ''),
         air_date: incomingAirDate ?? prev?.air_date ?? null,
         air_time: incomingAirTime ?? prev?.air_time ?? null,
+        is_tracked: autoTrack ? 1 : 0,
       }).onConflictDoUpdate({
         target: [schema.episodes.show_id, schema.episodes.season_number, schema.episodes.episode_number],
         set: {
@@ -1106,8 +1196,15 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
   config: Record<string, any>;
   rootFolderPath: string;
   libraryTypeId: string;
+  monitorNewEpisodes: boolean;
+  /** One-shot: also track already-known episodes that haven't aired yet
+   *  (air_date today or later, or TBA). Specials follow the same rule as
+   *  auto-tracking. */
+  trackUpcoming: boolean;
 }>) {
   const setData: Record<string, any> = { last_updated: sql`(datetime('now'))` };
+  if (updates.monitorNewEpisodes !== undefined) setData.monitor_new_episodes = updates.monitorNewEpisodes ? 1 : 0;
+  if (updates.trackUpcoming) trackUpcomingEpisodes(self, showId);
   if (updates.title !== undefined) setData.title = updates.title;
   if (updates.profile !== undefined) setData.profile = updates.profile;
   if (updates.seriesType !== undefined) setData.series_type = updates.seriesType;
@@ -1158,6 +1255,22 @@ export function updateShow(self: DatabaseManager, showId: string, updates: Parti
 
   self.drizz.update(schema.shows).set(setData)
     .where(eq(schema.shows.id, showId)).run();
+}
+
+/** Track every existing, not-yet-aired (or TBA) episode of a show. Returns rows changed. */
+export function trackUpcomingEpisodes(self: DatabaseManager, showId: string, now = new Date()): number {
+  const rows = self.drizz.select().from(schema.episodes)
+    .where(eq(schema.episodes.show_id, showId)).all() as any[];
+  const tracksSpecials = rows.some(r => r.season_number === 0 && r.is_tracked === 1);
+  const ctx: AutoTrackContext = { monitor: true, tracksSpecials, initialPopulation: true, now };
+  let changed = 0;
+  for (const r of rows) {
+    if (r.is_tracked === 1) continue;
+    if (!shouldAutoTrackNewEpisode({ seasonNumber: r.season_number, airDate: r.air_date }, ctx)) continue;
+    setTracked(self, showId, r.season_number, r.episode_number, true);
+    changed++;
+  }
+  return changed;
 }
 
 export function setShowTracking(self: DatabaseManager, showId: string, tracked: boolean) {

@@ -50,6 +50,13 @@
       "when": 1791992820655,
       "tag": "0006_auto_grab_backoff_and_event_index",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792023776042,
+      "tag": "0007_monitor_new_episodes",
+      "breakpoints": true
     }
   ]
 }

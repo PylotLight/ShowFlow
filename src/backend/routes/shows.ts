@@ -147,6 +147,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               addedAt: s.added_at,
               trackedCount: s.tracked_count,
               grabbedCount: s.grabbed_count,
+              monitorNewEpisodes: s.monitor_new_episodes !== 0,
             })),
           );
         } catch (err) {
@@ -155,7 +156,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
       async POST(req: RouteReq) {
         try {
-          const body = (await req.json()) as { source: string; providerId: string; name?: string; rootFolderPath?: string; profile?: string; showProfileId?: string; seriesType?: string; libraryTypeId?: string };
+          const body = (await req.json()) as { source: string; providerId: string; name?: string; rootFolderPath?: string; profile?: string; showProfileId?: string; seriesType?: string; libraryTypeId?: string; monitorNewEpisodes?: boolean };
           if (!body?.source || !body?.providerId) {
             return errorResponse("Both `source` and `providerId` are required.");
           }
@@ -223,6 +224,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             seriesType,
             config: {},
             rootFolderPath: body.rootFolderPath,
+            // Default on; only an explicit false opts out.
+            monitorNewEpisodes: body.monitorNewEpisodes !== false,
           });
 
           new SyncManager(config).syncShow(showUuid).catch(syncErr => {
@@ -337,6 +340,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             originalTitle: show.original_title,
             rootFolderPath: show.root_folder_path,
             seriesType,
+            monitorNewEpisodes: show.monitor_new_episodes !== 0,
             lastUpdated: show.last_updated,
             // Learned release delay forecast (minutes after air). Used by the
             // UI to show the show's expected release window alongside air
@@ -361,7 +365,13 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
       async PATCH(req: RouteReq) {
         try {
-          const body = (await req.json()) as { profile?: string; title?: string; rootFolderPath?: string; seriesType?: string; config?: Record<string, any> };
+          const body = (await req.json()) as { profile?: string; title?: string; rootFolderPath?: string; seriesType?: string; config?: Record<string, any>; monitorNewEpisodes?: boolean; trackUpcoming?: boolean };
+          if (body.monitorNewEpisodes !== undefined && typeof body.monitorNewEpisodes !== 'boolean') {
+            return errorResponse("monitorNewEpisodes must be a boolean.");
+          }
+          if (body.trackUpcoming !== undefined && typeof body.trackUpcoming !== 'boolean') {
+            return errorResponse("trackUpcoming must be a boolean.");
+          }
           db.updateShow(req.params.id!, body);
           return json({ ok: true });
         } catch (err) {
@@ -937,7 +947,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
     "/api/shows/:id/episode-mapping": {
       async GET(req: RouteReq) {
         try {
-          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
           const { summarizeSync: summarizeSyncDynamic } = await import("../core/episode_mappings");
           return json(summarizeSyncDynamic(db, req.params.id!));
         } catch (err) {
@@ -946,7 +955,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
       },
       async POST(req: RouteReq) {
         try {
-          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
           const body = (await req.json()) as { enabled?: boolean | number; source?: string };
           if (body.enabled !== undefined) {
             db.setEpisodeMappingConfig(req.params.id!, { enabled: !!body.enabled });
@@ -965,7 +973,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
     "/api/shows/:id/episode-mapping/refresh": {
       async POST(req: RouteReq) {
         try {
-          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
           const { EpisodeMappingService } = await import("../core/episode_mappings");
           const summary = await new EpisodeMappingService().syncShow(req.params.id!, { refreshTTL: true });
           return json({ ok: true, ...summary });
@@ -978,7 +985,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
     "/api/shows/:id/episode-mapping/rows/:rowId": {
       async PATCH(req: RouteReq) {
         try {
-          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
           const body = (await req.json()) as { targetSeason?: number; targetEpisode?: number; targetAbsolute?: number | null; locked?: boolean };
           const rowId = parseInt(req.params.rowId!, 10);
           if (!Number.isFinite(rowId)) return errorResponse("Invalid row id.", 400);
@@ -1034,7 +1040,6 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
     "/api/shows/:id/episode-mapping/rows-bulk": {
       async POST(req: RouteReq) {
         try {
-          if (!db.getShow(req.params.id!)) return errorResponse("Show not found.", 404);
           const body = (await req.json()) as {
             // Lock these rows only. Default: every unlocked row.
             rowIds?: number[];

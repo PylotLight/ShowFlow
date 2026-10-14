@@ -25,6 +25,7 @@ import { Input } from "@frontend/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { ScrollArea } from "@frontend/components/ui/scroll-area";
 import { Separator } from "@frontend/components/ui/separator";
+import { Switch } from "@frontend/components/ui/switch";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import { cn } from "@frontend/lib/utils";
 
@@ -140,6 +141,9 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
   const [selectedQualityProfile, setSelectedQualityProfile] = React.useState("");
 
   const [seriesType, setSeriesType] = React.useState<string>("standard");
+  // Show-level "monitor new episodes": newly announced episodes get tracked
+  // (and auto-grabbed) as metadata refreshes pick them up.
+  const [monitorNewEpisodes, setMonitorNewEpisodes] = React.useState(true);
   const [showProfiles, setShowProfiles] = React.useState<{ id: string; name: string; root_folder_path: string }[]>([]);
   const [selectedShowProfileId, setSelectedShowProfileId] = React.useState<string>("");
   const [selectedItems, setSelectedItems] = React.useState<Map<string, SearchResult>>(new Map());
@@ -304,6 +308,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             seriesType: isMovieKind ? "movie" : seriesType,
             showProfileId: selectedShowProfileId || undefined,
             libraryTypeId: selectedLibraryTypeId || undefined,
+            monitorNewEpisodes: isMovieKind ? undefined : monitorNewEpisodes,
           }),
         });
         if (res.ok) {
@@ -421,6 +426,19 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
               </SelectContent>
             </Select>
           </div>
+          {!isMovieKind && (
+            <label
+              className="flex cursor-pointer items-center gap-1.5"
+              title="Track newly announced episodes so they get auto-grabbed"
+            >
+              <Switch
+                checked={monitorNewEpisodes}
+                onCheckedChange={setMonitorNewEpisodes}
+                aria-label="Monitor new episodes"
+              />
+              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Monitor new episodes</span>
+            </label>
+          )}
         </div>
 
         {error && <p className="text-destructive text-sm">{error}</p>}
