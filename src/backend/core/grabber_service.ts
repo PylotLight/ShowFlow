@@ -35,19 +35,64 @@ const MOVIE_CATEGORY = 2000;
  */
 const NO_RESULTS_LOG_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
-/** True when the item already recorded a no-results miss recently. */
+/**
+ * True when the item already recorded a no-results miss within the cooldown.
+ * Looks back over the item's recent events rather than only the latest one:
+ * every search writes search_completed (and often release_rejected /
+ * indexer_error) right before the miss, so a "latest event is the miss"
+ * check could never fire.
+ */
 function recentlyLoggedNoResults(showId: string, season?: number | null, episode?: number | null): boolean {
   try {
-    const latest = db.getLatestPipelineEvent(
-      showId,
-      season ?? undefined,
-      episode ?? undefined,
-    ) as any;
-    if (!latest || latest.event_type !== 'no_qualifying_releases' || !latest.created_at) return false;
-    return Date.now() - new Date(latest.created_at).getTime() < NO_RESULTS_LOG_COOLDOWN_MS;
+    const since = new Date(Date.now() - NO_RESULTS_LOG_COOLDOWN_MS).toISOString();
+    return db.hasRecentPipelineEvent(showId, season ?? null, episode ?? null, 'no_qualifying_releases', since);
   } catch {
     return false;
   }
+}
+
+/**
+ * Per-indexer wall-clock cap for one search call. Native indexers already
+ * time out their own fetches at 15-30s; this is the backstop for anything
+ * that hangs (Prowlarr fan-out, a stuck proxy) so one slow indexer can't
+ * hold the whole parallel search hostage.
+ */
+const INDEXER_SEARCH_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Query every indexer in parallel (queries for one indexer stay sequential
+ * so a multi-query scene search doesn't burst a single site). Per-query
+ * failures go through `onError` exactly as the old serial loop logged them;
+ * results come back concatenated in indexer order so downstream dedupe and
+ * scoring see the same ordering as before.
+ */
+async function searchIndexersParallel(
+  indexers: Indexer[],
+  queries: string[],
+  run: (indexer: Indexer, query: string) => Promise<IndexerResult[]>,
+  onError: (indexer: Indexer, query: string, err: unknown) => void,
+): Promise<(IndexerResult & { indexer: Indexer })[]> {
+  const perIndexer = await Promise.allSettled(indexers.map(async (indexer) => {
+    const out: (IndexerResult & { indexer: Indexer })[] = [];
+    for (const query of queries) {
+      try {
+        const results = await withTimeout(run(indexer, query), INDEXER_SEARCH_TIMEOUT_MS, `${indexer.name} search`);
+        out.push(...results.map(r => ({ ...r, indexer })));
+      } catch (e) {
+        onError(indexer, query, e);
+      }
+    }
+    return out;
+  }));
+  return perIndexer.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
 }
 
 export interface ScoredRelease extends IndexerResult {
@@ -289,36 +334,36 @@ export class GrabberService {
     });
 
     const category = anime ? 5070 : TV_CATEGORY;
-    const allReleases: (IndexerResult & { indexer: Indexer })[] = [];
-    for (const indexer of indexers) {
-      for (const query of queries) {
-        try {
-          const results = await indexer.search(query, { type: 'tvsearch', categories: [category] });
-          logDebug({
-            type: 'grabber',
-            level: results.length > 0 ? 'info' : 'debug',
-            source: indexer.name,
-            message: `Found ${results.length} releases for "${query}"`,
-          });
-          allReleases.push(...results.map(r => ({ ...r, indexer })));
-        } catch (e) {
-          const errorMessage = e instanceof Error ? e.message : String(e);
-          logDebug({
-            type: 'grabber',
-            level: 'error',
-            source: indexer.name,
-            message: `Search error for "${query}"`,
-            error: errorMessage,
-          });
-          db.logPipelineEvent({
-            showId, seasonNumber: season, episodeNumber: episode ?? null,
-            stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
-            message: `${indexer.name} search failed: ${errorMessage}`,
-            indexerName: indexer.name,
-          });
-        }
-      }
-    }
+    const allReleases = await searchIndexersParallel(
+      indexers,
+      queries,
+      async (indexer, query) => {
+        const results = await indexer.search(query, { type: 'tvsearch', categories: [category] });
+        logDebug({
+          type: 'grabber',
+          level: results.length > 0 ? 'info' : 'debug',
+          source: indexer.name,
+          message: `Found ${results.length} releases for "${query}"`,
+        });
+        return results;
+      },
+      (indexer, query, e) => {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        logDebug({
+          type: 'grabber',
+          level: 'error',
+          source: indexer.name,
+          message: `Search error for "${query}"`,
+          error: errorMessage,
+        });
+        db.logPipelineEvent({
+          showId, seasonNumber: season, episodeNumber: episode ?? null,
+          stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
+          message: `${indexer.name} search failed: ${errorMessage}`,
+          indexerName: indexer.name,
+        });
+      },
+    );
 
     // Multi-query searches (scene + provider) can return the same release
     // twice — dedupe by indexer + guid so counts/scores stay honest.
@@ -405,12 +450,18 @@ export class GrabberService {
       });
     }
 
-    db.logPipelineEvent({
-      showId, seasonNumber: season, episodeNumber: episode ?? null,
-      stage: 'SEARCHING', eventType: 'search_completed',
-      message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
-      metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
-    });
+    // A repeat miss inside the no-results cooldown is a non-event: skip the
+    // search_completed row too (only debug-logged below), otherwise every
+    // 15-min retry still appends a row and flips the item back to SEARCHING.
+    const quietMiss = releases.length === 0 && recentlyLoggedNoResults(showId, season, episode);
+    if (!quietMiss) {
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode ?? null,
+        stage: 'SEARCHING', eventType: 'search_completed',
+        message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
+        metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
+      });
+    }
 
     if (releases.length > 0) {
       logDebug({
@@ -432,7 +483,7 @@ export class GrabberService {
         source: 'GrabberService',
         message: `No qualifying releases found for "${show.title} ${label}" from ${indexers.length} indexer(s)`,
       });
-      if (!recentlyLoggedNoResults(showId, season, episode)) {
+      if (!quietMiss) {
         db.logPipelineEvent({
           showId, seasonNumber: season, episodeNumber: episode ?? null,
           stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
@@ -700,27 +751,29 @@ export class GrabberService {
       message: `Searching ${indexers.length} indexers for movie "${show.title}" (query: "${query}")`,
     });
 
-    const allReleases: (IndexerResult & { indexer: Indexer })[] = [];
-    for (const indexer of indexers) {
-      try {
-        const results = await indexer.search(query, { type: 'movie', categories: [MOVIE_CATEGORY] });
+    const allReleases = await searchIndexersParallel(
+      indexers,
+      [query],
+      async (indexer, q) => {
+        const results = await indexer.search(q, { type: 'movie', categories: [MOVIE_CATEGORY] });
         logDebug({
           type: 'grabber', level: results.length > 0 ? 'info' : 'debug', source: indexer.name,
-          message: `Found ${results.length} releases for "${query}"`,
+          message: `Found ${results.length} releases for "${q}"`,
         });
-        allReleases.push(...results.map(r => ({ ...r, indexer })));
-      } catch (e) {
+        return results;
+      },
+      (indexer, q, e) => {
         const errorMessage = e instanceof Error ? e.message : String(e);
         logDebug({
           type: 'grabber', level: 'error', source: indexer.name,
-          message: `Search error for "${query}"`, error: errorMessage,
+          message: `Search error for "${q}"`, error: errorMessage,
         });
         db.logPipelineEvent({
           showId, stage: 'SEARCHING', eventType: 'indexer_error', reasonCode: 'INDEXER_SEARCH_ERROR',
           message: `${indexer.name} search failed: ${errorMessage}`, indexerName: indexer.name,
         });
-      }
-    }
+      },
+    );
 
     const beforeFilter = allReleases.length;
     const filtered = allReleases.filter(r => isRelevantMovieMatch(r.title, show.title, show.year ?? null));
@@ -759,11 +812,14 @@ export class GrabberService {
       });
     }
 
-    db.logPipelineEvent({
-      showId, stage: 'SEARCHING', eventType: 'search_completed',
-      message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
-      metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
-    });
+    const quietMiss = releases.length === 0 && recentlyLoggedNoResults(showId);
+    if (!quietMiss) {
+      db.logPipelineEvent({
+        showId, stage: 'SEARCHING', eventType: 'search_completed',
+        message: `Queried ${indexers.length} indexer(s), found ${allReleases.length} release(s), ${releases.length} passed filtering`,
+        metadata: { indexersQueried: indexers.length, resultsFound: allReleases.length, passedFiltering: releases.length },
+      });
+    }
 
     if (releases.length > 0) {
       logDebug({
@@ -780,7 +836,7 @@ export class GrabberService {
         type: 'grabber', level: 'warn', source: 'GrabberService',
         message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,
       });
-      if (!recentlyLoggedNoResults(showId)) {
+      if (!quietMiss) {
         db.logPipelineEvent({
           showId, stage: 'WANTED', eventType: 'no_qualifying_releases', reasonCode: 'NO_RESULTS_FOUND',
           message: `No qualifying releases found for movie "${show.title}" from ${indexers.length} indexer(s)`,

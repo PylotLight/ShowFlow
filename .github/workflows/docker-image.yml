@@ -7,6 +7,11 @@ on:
   release:
     types: [published]
 
+# One release build at a time per tag; never cancel a release mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -67,8 +72,12 @@ jobs:
   # that extracted the tarball from the just-built image was reverted: it
   # dropped this job's checkout, which broke `gh release upload`, and coupled
   # the update artifact to the heavyweight Docker build for ~1-2min saved.)
+  #
+  # Runs in PARALLEL with build-and-push (no `needs:`): the tarball doesn't
+  # use anything from the image, and it's what in-place updates download, so
+  # it shouldn't wait on the docker push. Bun's install cache is restored so
+  # the reinstall is mostly a cache hit.
   publish-release-assets:
-    needs: build-and-push
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
@@ -79,6 +88,13 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

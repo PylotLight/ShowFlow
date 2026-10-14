@@ -11,6 +11,7 @@ import type { ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { cn } from "@frontend/lib/utils";
+import { usePolling, setIfChanged } from "@frontend/lib/usePolling";
 import { expectedReleaseTime } from "@frontend/lib/airtime";
 import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
@@ -265,38 +266,33 @@ function Dashboard({
 
   const POLL_INTERVAL = 30_000;
 
+  // Polls below skip setState when the payload is unchanged (setIfChanged)
+  // and pause while the tab is hidden (usePolling).
   const fetchShowsAndCalendar = React.useCallback(() => {
+    const updateShows = setIfChanged(setShows);
+    const updateUpcoming = setIfChanged(setUpcoming);
     fetch("/api/shows")
       .then((r) => r.json())
-      .then(setShows)
-      .catch(() => setShows([]));
+      .then(updateShows)
+      .catch(() => updateShows([]));
 
     fetch("/api/calendar?days=7&past=3")
       .then((r) => (r.ok ? r.json() : []))
-      .then(setUpcoming)
-      .catch(() => setUpcoming([]));
+      .then(updateUpcoming)
+      .catch(() => updateUpcoming([]));
   }, []);
 
-  React.useEffect(() => {
-    fetchShowsAndCalendar();
-    const id = setInterval(fetchShowsAndCalendar, POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchShowsAndCalendar]);
+  usePolling(fetchShowsAndCalendar, POLL_INTERVAL);
 
   // Poll the system event log directly (no UI here — the full log now lives
   // in the notification bell) just to know when a show finishes syncing, is
   // removed, or is scanned, so the agenda can refresh itself.
-  React.useEffect(() => {
-    const poll = () => {
-      fetch("/api/events?limit=50")
-        .then((r) => r.json())
-        .then((data: ActivityEvent[]) => setRecentEvents(data))
-        .catch(() => {});
-    };
-    poll();
-    const id = setInterval(poll, 15_000);
-    return () => clearInterval(id);
-  }, []);
+  usePolling(() => {
+    fetch("/api/events?limit=50")
+      .then((r) => r.json())
+      .then(setIfChanged(setRecentEvents))
+      .catch(() => {});
+  }, 15_000);
 
   const lastTriggerEventId = React.useRef(0);
   React.useEffect(() => {
@@ -309,17 +305,13 @@ function Dashboard({
     }
   }, [recentEvents, fetchShowsAndCalendar]);
 
-  React.useEffect(() => {
-    const poll = () => {
-      fetch("/api/system/processing")
-        .then((r) => r.json())
-        .then((files: string[]) => setProcessingFiles(files))
-        .catch(() => setProcessingFiles([]));
-    };
-    poll();
-    const id = setInterval(poll, 5_000);
-    return () => clearInterval(id);
-  }, []);
+  usePolling(() => {
+    const update = setIfChanged(setProcessingFiles);
+    fetch("/api/system/processing")
+      .then((r) => r.json())
+      .then(update)
+      .catch(() => update([]));
+  }, 5_000);
 
   // Dated episodes only — unscheduled (TBA) episodes are excluded from the
   // dashboard entirely.

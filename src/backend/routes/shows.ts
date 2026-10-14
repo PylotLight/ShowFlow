@@ -131,46 +131,23 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
     "/api/shows": {
       async GET() {
         try {
-          const shows = db.listShows();
-          const showIds = shows.map((s: any) => s.id);
-
-          const episodeStats = showIds.length > 0
-            ? db.drizz.select({
-                show_id: schema.episodes.show_id,
-                is_tracked: schema.episodes.is_tracked,
-                file_path: schema.episodes.file_path,
-              })
-              .from(schema.episodes)
-              .where(inArray(schema.episodes.show_id, showIds))
-              .all() as { show_id: string; is_tracked: number; file_path: string | null }[]
-            : [];
-
-          const statsMap = new Map<string, { tracked_count: number; grabbed_count: number }>();
-          episodeStats.forEach(ep => {
-            const existing = statsMap.get(ep.show_id) || { tracked_count: 0, grabbed_count: 0 };
-            if (ep.is_tracked === 1) existing.tracked_count++;
-            if (ep.file_path) existing.grabbed_count++;
-            statsMap.set(ep.show_id, existing);
-          });
-
+          // One aggregate query (db/shows.ts listShowSummaries) instead of
+          // every episode row for every show counted in JS on each poll.
           return json(
-            shows.map((s: any) => {
-              const stats = statsMap.get(s.id) || { tracked_count: 0, grabbed_count: 0 };
-              return {
-                id: s.id,
-                providerType: s.provider_type,
-                title: s.title,
-                year: s.year ?? null,
-                profile: s.profile,
-                seriesType: s.series_type,
-                uuid: s.id,
-                rootFolderPath: s.root_folder_path,
-                lastUpdated: s.last_updated,
-                addedAt: s.added_at,
-                trackedCount: stats.tracked_count,
-                grabbedCount: stats.grabbed_count,
-              };
-            }),
+            db.listShowSummaries().map((s) => ({
+              id: s.id,
+              providerType: s.provider_type,
+              title: s.title,
+              year: s.year ?? null,
+              profile: s.profile,
+              seriesType: s.series_type,
+              uuid: s.id,
+              rootFolderPath: s.root_folder_path,
+              lastUpdated: s.last_updated,
+              addedAt: s.added_at,
+              trackedCount: s.tracked_count,
+              grabbedCount: s.grabbed_count,
+            })),
           );
         } catch (err) {
           return errorResponse(err, 500);
@@ -1550,11 +1527,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const all = [...episodes, ...unscheduled];
           // One extra pass to attach the live file/release detail per episode
           // (used by the dashboard "available" chip + calendar).
-          const filesByShow = new Map<string, Map<string, any>>();
-          for (const ep of all) {
-            const showId = ep.show_id;
-            if (!filesByShow.has(showId)) filesByShow.set(showId, db.getCurrentEpisodeFilesByShow(showId));
-          }
+          // Single query for every show on the agenda (was one per show).
+          const filesByShow: Map<string, Map<string, any>> = db.getCurrentEpisodeFilesForShows(all.map((ep: any) => ep.show_id));
           return json(
             all.map((ep: any) => ({
               showId: ep.show_id,

@@ -43,6 +43,13 @@
       "when": 1789642605170,
       "tag": "0005_faithful_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791992820655,
+      "tag": "0006_auto_grab_backoff_and_event_index",
+      "breakpoints": true
     }
   ]
 }

@@ -50,3 +50,6 @@ bun/
 docs/archive/
 backups/
 showflow.db
+# SQLite WAL companions (db runs in WAL mode)
+*.db-wal
+*.db-shm

@@ -5,6 +5,7 @@ import { TMDBProvider } from "../providers/tmdb";
 import type { ProviderType } from "../providers/factory";
 import { json, errorResponse, loadConfig, isProviderType, extractPosterUrl, extractBackdropUrl, toCardPosterUrl, NO_SIGNAL_SVG } from "./_shared";
 import { warmPoster } from "./artwork_warmer";
+import type { ShowArtworkMeta } from "../db/shows";
 
 export interface BackdropOption {
   index: number;
@@ -32,6 +33,31 @@ export function clampBackdropIndex(options: { url: string }[], stored: number): 
   if (options.length === 0) return 0;
   if (!Number.isFinite(stored) || stored < 0) return 0;
   return Math.min(Math.floor(stored), options.length - 1);
+}
+
+/**
+ * Serve one cached show_artworks row with an ETag, answering 304 from the
+ * metadata alone when the browser already has it — the blob is only read
+ * from SQLite on a real miss. The ETag is keyed on the row's source URL +
+ * byte length, so it changes whenever the stored image is replaced.
+ * (These route URLs aren't content-addressed — ?index / re-warms can change
+ * what they return — so no `immutable`; max-age stays as before and the
+ * ETag makes revalidation after it lapses nearly free.)
+ */
+function serveArtworkRow(req: Request, row: ShowArtworkMeta, maxAge: number): Response {
+  const etag = `W/"a${row.id}-${Bun.hash(`${row.image_url}|${row.data_len}`).toString(36)}"`;
+  const headers = {
+    "Content-Type": row.content_type ?? "image/jpeg",
+    "Cache-Control": `public, max-age=${maxAge}`,
+    ETag: etag,
+  };
+  const inm = req.headers?.get("if-none-match");
+  if (inm && inm.split(",").some((t) => t.trim() === etag || t.trim() === "*")) {
+    return new Response(null, { status: 304, headers });
+  }
+  const data = db.getShowArtworkBlob(row.id);
+  if (!data) return new Response("", { status: 404 });
+  return new Response(data as unknown as BodyInit, { headers });
 }
 
 function isBackdropRow(a: any): boolean {
@@ -99,10 +125,8 @@ export function imageRoutes() {
 
           const params = new URL(req.url).searchParams;
           const wantCard = params.get("size") === "card";
-          const cached = db.getShowArtworks(show.id, 2) as any[];
+          const cached = db.getShowArtworkMeta(show.id, 2);
 
-          const serveBytes = (data: Uint8Array, contentType: string, maxAge: number) =>
-            new Response(data as unknown as BodyInit, { headers: { "Content-Type": contentType, "Cache-Control": `public, max-age=${maxAge}` } });
           const miss = () => {
             warmPoster(show.id);
             return new Response(NO_SIGNAL_SVG, { status: 404, headers: { "Content-Type": "image/svg+xml" } });
@@ -116,23 +140,23 @@ export function imageRoutes() {
           if (!fullUrl) {
             // Legacy row without a recorded URL: serve what we have and warm
             // in the background to backfill proper URL-keyed rows.
-            const legacy = cached.find(a => a.data);
+            const legacy = cached.find(a => a.data_len > 0);
             warmPoster(show.id);
-            if (legacy) return serveBytes(legacy.data, legacy.content_type ?? "image/jpeg", 3600);
+            if (legacy) return serveArtworkRow(req, legacy, 3600);
             return miss();
           }
 
           const targetUrl = wantCard ? (toCardPosterUrl(show.provider_type, fullUrl) ?? fullUrl) : fullUrl;
-          const direct = cached.find(a => a.data && a.image_url === targetUrl);
+          const direct = cached.find(a => a.data_len > 0 && a.image_url === targetUrl);
           if (direct) {
-            return serveBytes(direct.data, direct.content_type ?? "image/jpeg", 86400);
+            return serveArtworkRow(req, direct, 86400);
           }
 
           // Wrong size cached (e.g. full bytes, card requested): serve it
           // instantly anyway and warm the missing variant alongside.
-          const fallback = cached.find(a => a.data);
+          const fallback = cached.find(a => a.data_len > 0);
           warmPoster(show.id);
-          if (fallback) return serveBytes(fallback.data, fallback.content_type ?? "image/jpeg", 3600);
+          if (fallback) return serveArtworkRow(req, fallback, 3600);
           return miss();
         } catch (err) {
           console.warn(`[api] poster fetch failed for show ${req.params.id!}:`, err);
@@ -147,7 +171,7 @@ export function imageRoutes() {
           const show = db.getShow(req.params.id!);
           if (!show) return new Response('', { status: 404 });
 
-          const cached = db.getShowArtworks(show.id) as any[];
+          const cached = db.getShowArtworkMeta(show.id);
           const config = loadConfig();
           const params = new URL(req.url).searchParams;
           const requestedParam = params.get("index");
@@ -182,12 +206,8 @@ export function imageRoutes() {
             // no schema change, one row per show.
             const thumbUrl = picked.thumb || (picked.url.includes('/t/p/w1280') ? picked.url.replace('/t/p/w1280', '/t/p/w300') : undefined);
             if (wantThumb && thumbUrl) {
-              const thumbRow = cached.find(a => a.artwork_type === "115" && a.data && a.image_url === thumbUrl);
-              if (thumbRow) {
-                return new Response(thumbRow.data, {
-                  headers: { "Content-Type": thumbRow.content_type ?? "image/jpeg", "Cache-Control": "public, max-age=86400" },
-                });
-              }
+              const thumbRow = cached.find(a => a.artwork_type === "115" && a.data_len > 0 && a.image_url === thumbUrl);
+              if (thumbRow) return serveArtworkRow(req, thumbRow, 86400);
               try {
                 const thumbRes = await fetch(thumbUrl);
                 if (thumbRes.ok) {
@@ -210,12 +230,8 @@ export function imageRoutes() {
               }
             }
 
-            const direct = cached.find(a => isBackdropRow(a) && a.data && a.image_url === picked.url);
-            if (direct) {
-              return new Response(direct.data, {
-                headers: { "Content-Type": direct.content_type ?? "image/jpeg", "Cache-Control": "public, max-age=86400" },
-              });
-            }
+            const direct = cached.find(a => isBackdropRow(a) && a.data_len > 0 && a.image_url === picked.url);
+            if (direct) return serveArtworkRow(req, direct, 86400);
             const imgRes = await fetch(picked.url);
             if (!imgRes.ok) return new Response('', { status: 404 });
             const contentType = imgRes.headers.get("Content-Type") ?? "image/jpeg";
@@ -226,13 +242,8 @@ export function imageRoutes() {
             });
           }
 
-          const backdropArt = cached.find(a => isBackdropRow(a) && a.data);
-          if (backdropArt) {
-            const contentType = backdropArt.content_type ?? "image/jpeg";
-            return new Response(backdropArt.data, {
-              headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=86400" },
-            });
-          }
+          const backdropArt = cached.find(a => isBackdropRow(a) && a.data_len > 0);
+          if (backdropArt) return serveArtworkRow(req, backdropArt, 86400);
 
           const provider = ProviderFactory.getProvider(show.provider_type, config);
 
@@ -438,17 +449,10 @@ export function imageRoutes() {
           const config = loadConfig();
           const provider = ProviderFactory.getProvider(source, config);
 
-          const existing = db.getShowArtworks(showId, type);
+          const existing = db.getShowArtworkMeta(showId, type);
           const cached = existing[0];
 
-          if (cached?.data) {
-            return new Response(cached.data, {
-              headers: {
-                "Content-Type": cached.content_type ?? "image/jpeg",
-                "Cache-Control": "public, max-age=86400",
-              },
-            });
-          }
+          if (cached && cached.data_len > 0) return serveArtworkRow(req, cached, 86400);
 
           if (source === "tvdb") {
             const tvdb = provider as TVDBProvider;
@@ -462,7 +466,7 @@ export function imageRoutes() {
                     art.height ?? undefined,
                     art.thumbnail ?? undefined);
                 }
-                artworks = db.getShowArtworks(showId, type);
+                artworks = db.getShowArtworkMeta(showId, type);
               } catch (e) {
                 console.warn(`[api] tvdb getSeriesArtworks failed:`, e);
               }
@@ -473,7 +477,7 @@ export function imageRoutes() {
               if (imgRes.ok) {
                 const imgBuffer = await imgRes.arrayBuffer();
                 const contentType = imgRes.headers.get("Content-Type") ?? "image/jpeg";
-                db.saveShowArtwork(showId, type, artwork.image_url, artwork.width, artwork.height, artwork.thumbnail, new Uint8Array(imgBuffer), contentType);
+                db.saveShowArtwork(showId, type, artwork.image_url, artwork.width ?? undefined, artwork.height ?? undefined, artwork.thumbnail ?? undefined, new Uint8Array(imgBuffer), contentType);
                 return new Response(imgBuffer, {
                   headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=86400" },
                 });

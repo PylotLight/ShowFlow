@@ -39,19 +39,89 @@ export class DatabaseManager {
 
   constructor(dbPath = 'showflow.db') {
     this.dbPath = dbPath;
-    this.db = new Database(this.dbPath);
-    this.db.run('PRAGMA foreign_keys = ON');
+    this.db = DatabaseManager.open(this.dbPath);
     this.drizz = drizzle(this.db, { schema });
     this.init();
   }
 
+  /**
+   * Open a connection with the pragmas every ShowFlow connection wants.
+   * WAL lets the API keep reading while the scanner / grabber write (rollback
+   * journal blocked every reader for the duration of each write txn), and
+   * busy_timeout turns the occasional writer-vs-writer overlap (backup's
+   * second connection, cleanup jobs) into a short wait instead of an
+   * immediate SQLITE_BUSY. synchronous=NORMAL is the recommended pairing
+   * with WAL: still crash-safe, just no fsync on every commit.
+   * journal_mode is a no-op for :memory: DBs (tests), which is fine.
+   */
+  static open(dbPath: string): Database {
+    const conn = new Database(dbPath);
+    // Only takes effect on a brand-new (empty) DB file; an existing DB keeps
+    // its mode until a full VACUUM (the manual Settings > Analytics vacuum
+    // converts it — see core/db_cleanup.ts). Never VACUUM here: on a large
+    // DB that would stall boot/activation for minutes.
+    conn.run('PRAGMA auto_vacuum = INCREMENTAL');
+    conn.run('PRAGMA journal_mode = WAL');
+    conn.run('PRAGMA synchronous = NORMAL');
+    conn.run('PRAGMA busy_timeout = 5000');
+    conn.run('PRAGMA temp_store = MEMORY');
+    conn.run('PRAGMA foreign_keys = ON');
+    return conn;
+  }
+
   reload(altPath?: string) {
-    this.db.close();
+    try { this.db.close(); } catch {}
     this.dbPath = altPath ?? this.dbPath;
-    this.db = new Database(this.dbPath);
-    this.db.run('PRAGMA foreign_keys = ON');
+    this.db = DatabaseManager.open(this.dbPath);
     this.drizz = drizzle(this.db, { schema });
     this.init();
+  }
+
+  /**
+   * Swap the on-disk DB file (backup restore). Under WAL the live file has
+   * -wal/-shm companions; copying a backup over just the main file would let
+   * the stale WAL be replayed on top of it on the next open (= corruption).
+   * So: checkpoint + close, drop the companions, let the caller write the
+   * new file, then reopen.
+   */
+  async replaceFile(write: (dbPath: string) => Promise<void>) {
+    // Fold the WAL back into the main file first. If another connection is
+    // mid-read the checkpoint can't truncate — bail rather than delete a WAL
+    // that still holds committed pages.
+    const ck = this.db.query('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: number } | null;
+    if (ck && ck.busy) throw new Error('Database is busy (checkpoint blocked) — retry the restore in a moment');
+    this.db.close(true);
+    const { unlink } = await import('node:fs/promises');
+    for (const suffix of ['-wal', '-shm']) {
+      await unlink(this.dbPath + suffix).catch(() => {});
+    }
+    try {
+      await write(this.dbPath);
+    } finally {
+      this.reload();
+    }
+  }
+
+  /**
+   * Cheap periodic upkeep (daily, from the pipeline-cleanup task):
+   *  - PRAGMA optimize: refresh planner stats for tables whose shape changed
+   *    (the high-churn event tables), so the new indexes actually get used.
+   *  - incremental_vacuum: hand pages freed by retention deletes back to the
+   *    filesystem, capped per run so a huge freelist can't stall the loop.
+   *    No-op unless the DB is in auto_vacuum=INCREMENTAL mode.
+   *  - wal_checkpoint(TRUNCATE): fold the WAL in and shrink the -wal file,
+   *    which otherwise stays at its high-water size.
+   */
+  runMaintenance(maxVacuumPages = 25_600): { autoVacuum: number; freelistBefore: number; freelistAfter: number } {
+    const autoVacuum = (this.db.query('PRAGMA auto_vacuum').get() as { auto_vacuum: number } | null)?.auto_vacuum ?? 0;
+    const freelistBefore = (this.db.query('PRAGMA freelist_count').get() as { freelist_count: number } | null)?.freelist_count ?? 0;
+    this.db.run('PRAGMA optimize');
+    if (autoVacuum === 2 && freelistBefore > 0) {
+      this.db.run(`PRAGMA incremental_vacuum(${Math.max(1, Math.floor(maxVacuumPages))})`);
+    }
+    try { this.db.run('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+    const freelistAfter = (this.db.query('PRAGMA freelist_count').get() as { freelist_count: number } | null)?.freelist_count ?? 0;
+    return { autoVacuum, freelistBefore, freelistAfter };
   }
 
   close() {
@@ -200,6 +270,8 @@ export class DatabaseManager {
   listShowProvidersWithRoles(showId: string) { return shows.listShowProvidersWithRoles(this, showId); }
   getShowByName(name: string) { return shows.getShowByName(this, name); }
   listShows() { return shows.listShows(this); }
+  listShowSummaries() { return shows.listShowSummaries(this); }
+  countShows() { return shows.countShows(this); }
   hasUpcomingEpisodes(showId: string) { return shows.hasUpcomingEpisodes(this, showId); }
   getShowByProvider(providerType: string, providerId: string) { return shows.getShowByProvider(this, providerType, providerId); }
   addShowProvider(showId: string, providerType: string, providerId: string, data?: Parameters<typeof shows.addShowProvider>[4]) { return shows.addShowProvider(this, showId, providerType, providerId, data); }
@@ -245,6 +317,8 @@ export class DatabaseManager {
 
   saveShowArtwork(showId: string, type: number, imageUrl: string, width?: number, height?: number, thumbnail?: string, data?: Uint8Array, contentType?: string, providerType?: string) { return shows.saveShowArtwork(this, showId, type, imageUrl, width, height, thumbnail, data, contentType, providerType); }
   getShowArtworks(showId: string, type?: number, providerType?: string) { return shows.getShowArtworks(this, showId, type, providerType); }
+  getShowArtworkMeta(showId: string, type?: number) { return shows.getShowArtworkMeta(this, showId, type); }
+  getShowArtworkBlob(id: number) { return shows.getShowArtworkBlob(this, id); }
   updateShowArtworkData(showId: string, type: number, data: Uint8Array, providerType?: string) { return shows.updateShowArtworkData(this, showId, type, data, providerType); }
 
   // ---- Processed files ---------------------------------------------------
@@ -261,6 +335,7 @@ export class DatabaseManager {
   findGrabbedReleaseForShowEpisode(showId: string, season: number, episode: number, withinDays?: number) { return grabs.findGrabbedReleaseForShowEpisode(this, showId, season, episode, withinDays); }
   listGrabbedReleasesForShow(showId: string, limit?: number) { return grabs.listGrabbedReleasesForShow(this, showId, limit); }
   listEpisodesDueForGrab(nowIso: string, grabCooldownIso: string, limit: number) { return grabs.listEpisodesDueForGrab(this, nowIso, grabCooldownIso, limit); }
+  recordEpisodeSearchMiss(showId: string, season: number, episode: number, nowIso?: string) { return grabs.recordEpisodeSearchMiss(this, showId, season, episode, nowIso); }
 
   // ---- Episode files (provenance) ----------------------------------------
 
@@ -268,6 +343,7 @@ export class DatabaseManager {
   getCurrentEpisodeFile(showId: string, seasonNumber: number, episodeNumber: number) { return episodeFiles.getCurrentEpisodeFile(this, showId, seasonNumber, episodeNumber); }
   listEpisodeFilesByShow(showId: string) { return episodeFiles.listEpisodeFilesByShow(this, showId); }
   getCurrentEpisodeFilesByShow(showId: string) { return episodeFiles.getCurrentEpisodeFilesByShow(this, showId); }
+  getCurrentEpisodeFilesForShows(showIds: string[]) { return episodeFiles.getCurrentEpisodeFilesForShows(this, showIds); }
   listAllCurrentEpisodeFiles() { return episodeFiles.listAllCurrentEpisodeFiles(this); }
   backfillEpisodeFiles() { return episodeFiles.backfillEpisodeFiles(this); }
   updateEpisodeFileMedia(rowId: number, media: Parameters<typeof episodeFiles.updateEpisodeFileMedia>[2]) { return episodeFiles.updateEpisodeFileMedia(this, rowId, media); }
@@ -322,12 +398,14 @@ export class DatabaseManager {
   logPipelineEvent(event: Parameters<typeof pipeline.logPipelineEvent>[1]) { return pipeline.logPipelineEvent(this, event); }
   listPipelineEvents(filter: Parameters<typeof pipeline.listPipelineEvents>[1]) { return pipeline.listPipelineEvents(this, filter); }
   getLatestPipelineEvent(showId: string, seasonNumber?: number, episodeNumber?: number) { return pipeline.getLatestPipelineEvent(this, showId, seasonNumber, episodeNumber); }
+  hasRecentPipelineEvent(showId: string, seasonNumber: number | null, episodeNumber: number | null, eventType: string, sinceIso: string) { return pipeline.hasRecentPipelineEvent(this, showId, seasonNumber, episodeNumber, eventType, sinceIso); }
   listRecentPipelineEvents(limit?: number) { return pipeline.listRecentPipelineEvents(this, limit); }
   cleanupOldPipelineEvents(beforeDate: string) { return pipeline.cleanupOldPipelineEvents(this, beforeDate); }
   getPipelineEventStats() { return pipeline.getPipelineEventStats(this); }
   getHourlyPipelineEventCounts(hours?: number) { return pipeline.getHourlyPipelineEventCounts(this, hours); }
   getNoisiestShows(limit?: number) { return pipeline.getNoisiestShows(this, limit); }
   listKanbanEpisodes() { return pipeline.listKanbanEpisodes(this); }
+  getPipelineSummary() { return pipeline.getPipelineSummary(this); }
   listHistory(filter: Parameters<typeof pipeline.listHistory>[1]) { return pipeline.listHistory(this, filter); }
 
   // ---- Analytics / DB usage -----------------------------------------------

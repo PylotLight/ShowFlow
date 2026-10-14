@@ -57,6 +57,18 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
     })
     .run();
 
+  // A grab ends the search-miss streak: clear the backoff so, if the
+  // download dies and the in-flight cooldown lapses, the episode is retried
+  // promptly instead of waiting out a 24h backoff. Season packs reset the
+  // whole season.
+  if (input.season != null) {
+    self.db.query(`
+      UPDATE episodes SET last_searched_at = NULL, search_attempts = 0
+      WHERE show_id = ? AND season_number = ? AND (? IS NULL OR episode_number = ?)
+        AND (last_searched_at IS NOT NULL OR search_attempts != 0)
+    `).run(input.showId, input.season, input.episode ?? null, input.episode ?? null);
+  }
+
   // Retain only the most recent GRAB_RETENTION_LIMIT rows so the hint
   // lookup below never scans a stale, unbounded history.
   const rows = self.drizz
@@ -179,9 +191,18 @@ export interface EpisodeDueForGrab {
 }
 
 /**
+ * Backoff ladder for scheduled searches that came back without a grab,
+ * indexed by consecutive misses (1st miss -> 15m, 2nd -> 1h, 3rd -> 6h,
+ * then capped at 24h). Fresh episodes still get searched every cycle until
+ * the first miss; long-missing ones stop eating the per-cycle budget.
+ */
+export const SEARCH_BACKOFF_MINUTES = [15, 60, 360, 1440] as const;
+
+/**
  * Episodes the auto-grabber should consider this cycle: tracked, in
  * auto-search mode, missing from disk, past their expected release time,
- * and without an in-flight grab already recorded within `grabCooldownIso`.
+ * without an in-flight grab already recorded within `grabCooldownIso`, and
+ * outside their search backoff (see SEARCH_BACKOFF_MINUTES).
  *
  * The deadline check trusts `expected_release_at` when the air-window
  * forecast has run for the episode (the normal case after any sync); rows
@@ -189,6 +210,15 @@ export interface EpisodeDueForGrab {
  * and the caller re-applies the air_date(+air_time)+delay math with the
  * same formula as air_window.ts before treating them as due — so a future
  * episode with no forecast yet can never slip into a search cycle.
+ *
+ * Backoff is ignored when the episode's release window is newer than the
+ * last search (air date moved later after we searched), so a corrected
+ * date gets searched right away.
+ *
+ * Ordering: never-searched (or window-moved) episodes first, newest release
+ * first — that's a freshly aired ep; then previously-missed episodes by
+ * oldest search first, so a long tail of old missing eps rotates through
+ * the budget instead of the same 50 starving everything behind them.
  *
  * `replace(grabbed_at,' ','T')` normalizes legacy `datetime('now')`-default
  * rows ("YYYY-MM-DD HH:MM:SS") so they compare correctly against the ISO
@@ -200,6 +230,8 @@ export function listEpisodesDueForGrab(
   grabCooldownIso: string,
   limit: number,
 ): EpisodeDueForGrab[] {
+  const nowMs = new Date(nowIso).getTime();
+  const [b1, b2, b3, b4] = SEARCH_BACKOFF_MINUTES.map(m => new Date(nowMs - m * 60_000).toISOString());
   return self.db.query(`
     SELECT
       e.show_id,
@@ -227,7 +259,43 @@ export function listEpisodesDueForGrab(
           AND g.episode_number = e.episode_number
           AND replace(g.grabbed_at, ' ', 'T') >= ?
       )
-    ORDER BY COALESCE(e.expected_release_at, e.air_date) DESC
+      AND (
+        e.last_searched_at IS NULL
+        OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at
+        OR e.last_searched_at <= CASE
+          WHEN e.search_attempts <= 1 THEN ?
+          WHEN e.search_attempts = 2 THEN ?
+          WHEN e.search_attempts = 3 THEN ?
+          ELSE ?
+        END
+      )
+    ORDER BY
+      CASE WHEN e.last_searched_at IS NULL OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at THEN 0 ELSE 1 END,
+      CASE WHEN e.last_searched_at IS NULL OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at THEN COALESCE(e.expected_release_at, e.air_date) END DESC,
+      e.last_searched_at ASC
     LIMIT ?
-  `).all(nowIso, nowIso, grabCooldownIso, limit) as EpisodeDueForGrab[];
+  `).all(nowIso, nowIso, grabCooldownIso, b1!, b2!, b3!, b4!, limit) as EpisodeDueForGrab[];
+}
+
+/**
+ * Record a scheduled search that ended without a grab (no releases, not an
+ * upgrade, grab failed) so listEpisodesDueForGrab backs it off. A miss after
+ * the release window moved restarts the streak at 1.
+ */
+export function recordEpisodeSearchMiss(
+  self: DatabaseManager,
+  showId: string,
+  season: number,
+  episode: number,
+  nowIso = new Date().toISOString(),
+) {
+  self.db.query(`
+    UPDATE episodes SET
+      search_attempts = CASE
+        WHEN last_searched_at IS NULL OR COALESCE(expected_release_at, air_date, '') > last_searched_at THEN 1
+        ELSE search_attempts + 1
+      END,
+      last_searched_at = ?
+    WHERE show_id = ? AND season_number = ? AND episode_number = ?
+  `).run(nowIso, showId, season, episode);
 }

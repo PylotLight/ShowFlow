@@ -1,4 +1,4 @@
-import { and, eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql, inArray } from 'drizzle-orm';
 import * as schema from './schema';
 import type { DatabaseManager } from './index';
 import { releaseTitlesMatch } from '../core/release_meta';
@@ -360,6 +360,34 @@ export function getCurrentEpisodeFilesByShow(self: DatabaseManager, showId: stri
   const map = new Map<string, EpisodeFileRow>();
   for (const row of rows) map.set(`${row.season_number}:${row.episode_number}`, row);
   return map;
+}
+
+/**
+ * Live files for several shows in one query, keyed showId -> "S:E" -> row
+ * (same inner shape as getCurrentEpisodeFilesByShow). Used by /api/calendar
+ * instead of one query per show on the agenda.
+ */
+export function getCurrentEpisodeFilesForShows(self: DatabaseManager, showIds: string[]): Map<string, Map<string, EpisodeFileRow>> {
+  const out = new Map<string, Map<string, EpisodeFileRow>>();
+  const unique = [...new Set(showIds)];
+  // Chunk to stay well under SQLite's bound-parameter limit on huge libraries.
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const rows = self.drizz
+      .select()
+      .from(schema.episodeFiles)
+      .where(and(
+        inArray(schema.episodeFiles.show_id, chunk),
+        eq(schema.episodeFiles.is_current, 1),
+      ))
+      .all() as EpisodeFileRow[];
+    for (const row of rows) {
+      let m = out.get(row.show_id);
+      if (!m) out.set(row.show_id, m = new Map());
+      m.set(`${row.season_number}:${row.episode_number}`, row);
+    }
+  }
+  return out;
 }
 
 /** All live files across every show (used by the scanner/episode APIs). */

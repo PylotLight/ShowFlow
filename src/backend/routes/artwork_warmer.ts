@@ -63,7 +63,7 @@ async function warmOne(showId: string): Promise<boolean> {
   const show = db.getShow(showId);
   if (!show) return true;
 
-  const cached = db.getShowArtworks(showId, 2) as any[];
+  const cached = db.getShowArtworkMeta(showId, 2);
   const config = loadConfig();
 
   // Prefer the poster URL already recorded in synced metadata — a show we've
@@ -89,7 +89,7 @@ async function warmOne(showId: string): Promise<boolean> {
   // full poster. The serving route falls back to whatever's stored for the
   // other size.
   const storeUrl = toCardPosterUrl(show.provider_type, posterPath) ?? posterPath;
-  if (cached.some(a => a.image_url === storeUrl && a.data)) return true;
+  if (cached.some(a => a.image_url === storeUrl && a.data_len > 0)) return true;
   const res = await fetch(storeUrl);
   if (!res.ok) return false;
   const bytes = new Uint8Array(await res.arrayBuffer());

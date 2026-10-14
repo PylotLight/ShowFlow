@@ -7,3 +7,9 @@ dist
 backups/
 Media/
 docs/
+*.db-wal
+*.db-shm
+# local build outputs (rebuilt inside the image anyway)
+/showflow
+/manifest.json
+*.js.map

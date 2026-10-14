@@ -161,3 +161,69 @@ test('legacy space-separated grabbed_at rows still honor the cooldown', () => {
   expect(eps).not.toContain(1);
   db.close();
 });
+// ---- search backoff ----
+
+const MIN = 60_000;
+
+test('a search miss backs the episode off on a 15m/1h/6h/24h ladder', () => {
+  const { db, now } = seedDueGrabDb();
+  const due = (at: number) => dueEpisodes(db, at).filter(r => r.show_id === 's1').map(r => r.episode_number);
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  // miss #1 at `now` -> hidden for 15m
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(now));
+  expect(due(now + 14 * MIN)).not.toContain(6);
+  expect(due(now + 16 * MIN)).toContain(6);
+  expect(due(now + 1 * MIN)).toContain(1); // other eps unaffected
+
+  // miss #2 -> 1h
+  const t2 = now + 16 * MIN;
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(t2));
+  expect(due(t2 + 59 * MIN)).not.toContain(6);
+  expect(due(t2 + 61 * MIN)).toContain(6);
+
+  // miss #3 -> 6h, miss #4+ -> capped at 24h
+  const t3 = t2 + 61 * MIN;
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(t3));
+  expect(due(t3 + 5 * 60 * MIN)).not.toContain(6);
+  expect(due(t3 + 6 * 60 * MIN + MIN)).toContain(6);
+  const t4 = t3 + 6 * 60 * MIN + MIN;
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(t4));
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(t4));
+  expect(due(t4 + 23 * 60 * MIN)).not.toContain(6);
+  expect(due(t4 + 24 * 60 * MIN + MIN)).toContain(6);
+  db.close();
+});
+
+test('never-searched episodes are ordered before backed-off ones, oldest search first', () => {
+  const { db, now } = seedDueGrabDb();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  // Both 1 and 6 searched long ago (past their backoff); 6 searched earlier.
+  db.recordEpisodeSearchMiss('s1', 1, 1, iso(now - 2 * HOUR));
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(now - 3 * HOUR));
+  // A fresh never-searched episode.
+  db.saveEpisode({ showId: 's1', seasonNumber: 1, episodeNumber: 9, title: 'E9', airDate: new Date(now - 10 * 24 * HOUR).toISOString().slice(0, 10) });
+  db.setTracked('s1', 1, 9, true);
+  const order = dueEpisodes(db, now).filter(r => r.show_id === 's1').map(r => r.episode_number);
+  expect(order).toEqual([9, 6, 1]);
+  db.close();
+});
+
+test('a grab or a moved release window clears the backoff', () => {
+  const { db, now } = seedDueGrabDb();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  db.recordEpisodeSearchMiss('s1', 1, 6, iso(now));
+  expect(dueEpisodes(db, now + MIN).map(r => r.episode_number)).not.toContain(6);
+
+  // Release window moved later than the last search (air date corrected).
+  db.updateEpisodeAirWindow('s1', 1, 6, { expectedReleaseAt: iso(now + 30_000) });
+  expect(dueEpisodes(db, now + MIN).map(r => r.episode_number)).toContain(6);
+
+  // Grab resets the counters entirely.
+  db.recordEpisodeSearchMiss('s1', 1, 1, iso(now));
+  recordGrabbedRelease(db, { showId: 's1', season: 1, episode: 1, releaseTitle: 'Due Show S01E01 1080p WEB-DL' });
+  const row = db.db.query('SELECT last_searched_at, search_attempts FROM episodes WHERE show_id = ? AND season_number = 1 AND episode_number = 1').get('s1') as any;
+  expect(row.last_searched_at).toBeNull();
+  expect(row.search_attempts).toBe(0);
+  db.close();
+});
