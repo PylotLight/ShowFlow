@@ -2,16 +2,33 @@ import * as React from "react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { Switch } from "@frontend/components/ui/switch";
-import { LibraryTypeManager } from "./LibraryTypeManager";
-import { UpdatesPanel } from "./UpdatesPanel";
-import { FieldRow } from "./SettingsShared";
+import { LibraryTypeManager } from "../LibraryTypeManager";
+import { UpdatesPanel } from "../UpdatesPanel";
+import { FieldRow } from "../SettingsShared";
+import { useSettings } from "./SettingsContext";
 import { TIMEZONE_PRESETS } from "@frontend/lib/timezones";
 
-export function GeneralTab({ config, saveConfig, scrollToSection }: {
-  config: any;
-  saveConfig: (updates: Record<string, any>) => void;
+/** Group heading so General reads as distinct sections, not one long stack. */
+function SectionHeading({ id, title, description }: { id: string; title: string; description: string }) {
+  return (
+    <div id={id} className="scroll-mt-4 pt-2 first:pt-0">
+      <h2 className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-signal">{title}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+const SECTIONS = [
+  { id: "defaults", label: "Defaults" },
+  { id: "libraries", label: "Libraries" },
+  { id: "updates", label: "Updates" },
+];
+
+export function GeneralSettings({ scrollToSection, onReRunWizard }: {
   scrollToSection?: string;
+  onReRunWizard?: () => void;
 }) {
+  const { config, saveConfig } = useSettings();
   const updatesRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -21,24 +38,22 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
   }, [scrollToSection]);
 
   return (
-    <>
-      <GlassPanel className="p-6 space-y-5">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Libraries</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates.</p>
-        </div>
-        <LibraryTypeManager />
-      </GlassPanel>
+    <div className="space-y-6">
+      <nav aria-label="General sections" className="flex flex-wrap gap-1.5">
+        {SECTIONS.map(sec => (
+          <a
+            key={sec.id}
+            href={`#${sec.id}`}
+            onClick={(e) => { e.preventDefault(); document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+            className="rounded-full bg-white/[0.04] px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+          >
+            {sec.label}
+          </a>
+        ))}
+      </nav>
 
-      <div ref={updatesRef} id="updates">
-        <UpdatesPanel />
-      </div>
-
+      <SectionHeading id="defaults" title="Defaults" description="How new shows are added and how file collisions are handled." />
       <GlassPanel className="p-6 space-y-5">
-        <div>
-          <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Defaults</h3>
-          <p className="text-muted-foreground text-xs mt-0.5">Default behavior for new shows and file handling</p>
-        </div>
         <FieldRow label="Default Provider" description="Metadata provider used when adding shows">
           <Select
             value={config.defaultProvider || "tmdb"}
@@ -94,6 +109,25 @@ export function GeneralTab({ config, saveConfig, scrollToSection }: {
           </Select>
         </FieldRow>
       </GlassPanel>
-    </>
+
+      <SectionHeading id="libraries" title="Libraries" description="Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates." />
+      <GlassPanel className="p-6 space-y-5">
+        <LibraryTypeManager />
+      </GlassPanel>
+
+      <div ref={updatesRef}>
+        <SectionHeading id="updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
+      </div>
+      <UpdatesPanel />
+
+      {onReRunWizard && (
+        <>
+          <SectionHeading id="setup" title="Setup" description="Re-run the onboarding wizard to reconfigure from scratch." />
+          <GlassPanel className="p-6">
+            <button onClick={onReRunWizard} className="rounded-md text-sm text-signal hover:underline outline-none focus-visible:ring-2 focus-visible:ring-signal/70">Re-run setup wizard</button>
+          </GlassPanel>
+        </>
+      )}
+    </div>
   );
 }

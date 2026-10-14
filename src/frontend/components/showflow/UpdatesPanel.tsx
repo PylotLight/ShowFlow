@@ -1,4 +1,5 @@
 import * as React from "react";
+import { ErrorNotice } from "./settings/errors";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, AlertCircleIcon, ShieldCheckIcon, HammerIcon, ArrowRightIcon, ChevronDownIcon, RadioIcon } from "lucide-react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
@@ -678,11 +679,7 @@ export function UpdatesPanel() {
         </GlassPanel>
       )}
 
-      {err && (
-        <div className="rounded-lg bg-red-900/20 border border-red-500/30 p-3">
-          <p className="font-mono text-xs text-red-400">{err}</p>
-        </div>
-      )}
+      {err && <ErrorNotice error={err} what="update status" onRetry={() => fetchAll()} />}
 
       {/* AVAILABLE RELEASES LIST */}
       <GlassPanel className="p-6 space-y-4">
