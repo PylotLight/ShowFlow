@@ -81,7 +81,7 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
       {open && position && createPortal(
         <div ref={panelRef} className="fixed z-[9999] rounded-lg border border-white/10 bg-[#15181f] shadow-xl p-3 max-h-80 overflow-y-auto"
           style={{ top: position.top, left: position.left, width: position.width, backdropFilter: "blur(16px)" }}>
-          <div className="px-2 py-1 font-mono text-caption text-muted-foreground/60 truncate" title={currentPath}>
+          <div className="px-2 py-1 font-mono text-caption text-muted-foreground/80 truncate" title={currentPath}>
             {currentPath}
           </div>
 
@@ -113,7 +113,7 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (v:
           ) : (
             <div className="mt-1 space-y-0.5">
               {parentPath && (
-                <button
+                <button aria-label="Up one folder"
                   onClick={() => loadDir(parentPath!)}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >

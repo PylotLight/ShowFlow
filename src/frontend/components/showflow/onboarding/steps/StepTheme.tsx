@@ -121,7 +121,7 @@ export function StepTheme({ data, setData, onNext, onSkip }: StepProps) {
       </div>
 
       <div className="mt-8 flex items-center justify-between">
-        <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
+        <button onClick={onSkip} className="text-xs text-muted-foreground hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
         <Button variant="glass" onClick={onNext} className="gap-2 h-11 px-6 rounded-xl">

@@ -68,11 +68,11 @@ function SearchResultRow({ result, onAdd }: { result: SearchResult; onAdd: (r: S
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="rounded bg-white/10 px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider shrink-0">
+            <span className="rounded bg-white/10 px-1 py-px font-mono text-[11px] font-bold uppercase tracking-wide shrink-0">
               {result.providerType}
             </span>
             {result.year && (
-              <span className="font-mono text-[10px] text-muted-foreground shrink-0">({result.year})</span>
+              <span className="font-mono text-[11px] text-muted-foreground shrink-0">({result.year})</span>
             )}
           </div>
           <p className="mt-0.5 text-sm font-medium leading-tight">{result.title}</p>
@@ -81,7 +81,7 @@ function SearchResultRow({ result, onAdd }: { result: SearchResult; onAdd: (r: S
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0 pt-1">
-          <button
+          <button aria-label="Add this source"
             type="button"
             onClick={(e) => { e.stopPropagation(); onAdd(result); }}
             className="rounded-lg p-1.5 text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
@@ -89,7 +89,7 @@ function SearchResultRow({ result, onAdd }: { result: SearchResult; onAdd: (r: S
           >
             <PlusIcon className="size-3.5" />
           </button>
-          <span className="text-muted-foreground/40">
+          <span className="text-muted-foreground">
             {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           </span>
         </div>
@@ -98,25 +98,25 @@ function SearchResultRow({ result, onAdd }: { result: SearchResult; onAdd: (r: S
         <div className="border-t border-white/5 px-3 py-2.5 space-y-1.5 text-xs">
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             <div>
-              <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Provider ID</span>
+              <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Provider ID</span>
               <p className="font-mono text-xs text-white/80">#{result.id}</p>
             </div>
             {result.year && (
               <div>
-                <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Year</span>
+                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Year</span>
                 <p className="font-mono text-xs text-white/80">{result.year}</p>
               </div>
             )}
             {result.type && (
               <div>
-                <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Format</span>
+                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Format</span>
                 <p className="font-mono text-xs text-white/80">{result.type}</p>
               </div>
             )}
           </div>
           {uniqueAltTitles.length > 0 && (
             <div>
-              <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Also known as</span>
+              <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Also known as</span>
               {uniqueAltTitles.map((t, i) => (
                 <p key={i} className="text-xs text-white/70">{t}</p>
               ))}
@@ -124,7 +124,7 @@ function SearchResultRow({ result, onAdd }: { result: SearchResult; onAdd: (r: S
           )}
           {result.overview && (
             <div>
-              <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Overview</span>
+              <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Overview</span>
               <p className="text-xs text-white/60 leading-relaxed line-clamp-4">{result.overview.replace(/<[^>]*>/g, '')}</p>
             </div>
           )}
@@ -140,10 +140,10 @@ function RoleToggle({ label, active, onClick }: { label: string; active: boolean
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       className={cn(
-        "rounded px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer",
+        "rounded px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide transition-all cursor-pointer",
         active
           ? "bg-signal/15 text-signal"
-          : "bg-white/[0.04] text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.07]",
+          : "bg-white/[0.04] text-muted-foreground hover:text-muted-foreground hover:bg-white/[0.07]",
       )}
     >
       {label}
@@ -291,7 +291,7 @@ function ManageSourcesDialog({
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider">
+                    <span className="rounded bg-white/10 px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide">
                       {source.type}
                     </span>
                     <RoleToggle
@@ -306,11 +306,11 @@ function ManageSourcesDialog({
                     />
                   </div>
                   <p className="mt-1 text-sm font-medium truncate">{source.title || showTitle}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">#{source.id}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">#{source.id}</p>
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  <button
+                  <button aria-label="Set as primary (fallback for unassigned roles)"
                     type="button"
                     onClick={() => handleSetPrimary(source.type)}
                     disabled={source.isPrimary}
@@ -319,7 +319,7 @@ function ManageSourcesDialog({
                   >
                     <Star className="size-3.5" fill={source.isPrimary ? "currentColor" : "none"} />
                   </button>
-                  <button
+                  <button aria-label="Sync now"
                     type="button"
                     onClick={() => handleSync(source.type)}
                     disabled={syncing === source.type}
@@ -330,7 +330,7 @@ function ManageSourcesDialog({
                   </button>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button
+                      <button aria-label="Remove source"
                         type="button"
                         onClick={() => handleRemove(source.type)}
                         disabled={sources.length <= 1}

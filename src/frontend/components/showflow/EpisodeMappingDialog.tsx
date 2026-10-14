@@ -260,7 +260,7 @@ export function EpisodeMappingDialog({
   const showFixTable = summary && summary.config.health !== 'missing' && summary.rows.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+    <div role="dialog" aria-modal="true" aria-label="Episode mapping" className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
       <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto rounded-xl border border-white/10 bg-[#15181f] shadow-2xl p-6 space-y-4 flex flex-col"
         style={{ backdropFilter: "blur(16px)" }}>
         <div className="flex items-start justify-between gap-3">
@@ -299,7 +299,7 @@ export function EpisodeMappingDialog({
                 <span className="flex items-center gap-1.5 text-xs font-mono">
                   <span className={`size-2 rounded-full ${meta.dot}`} />
                   <span className={meta.text}>{meta.label}</span>
-                  <span className="text-muted-foreground/60">· {summary.mappedCount} episodes</span>
+                  <span className="text-muted-foreground/80">· {summary.mappedCount} episodes</span>
                 </span>
               </div>
 
@@ -395,7 +395,7 @@ export function EpisodeMappingDialog({
                         Apply to all
                       </button>
                     </div>
-                    <p className="text-[10px] text-muted-foreground/70">
+                    <p className="text-[11px] text-muted-foreground/70">
                       Example: scene S01E01 should map to provider S01E53 → season 0, episode +52. Rows already locked
                       are left untouched.
                     </p>
@@ -431,7 +431,7 @@ export function EpisodeMappingDialog({
                     >
                       {busy === 'bulk' ? <Loader2Icon className="size-3 animate-spin" /> : "Revert all fixes (unlock everything)"}
                     </button>
-                    <p className="text-[10px] text-muted-foreground/70">
+                    <p className="text-[11px] text-muted-foreground/70">
                       Wrongly-locked rows (e.g. scene==provider identities from a Fix All with offset 0 on a split
                       show) block the sync forever — revert them so the next refresh can replace them.
                     </p>
@@ -469,7 +469,7 @@ export function EpisodeMappingDialog({
                             </td>
                             <td className="px-2 py-1.5 text-right whitespace-nowrap">
                               {row.locked === 1 && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 mr-2 uppercase tracking-wider">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400 mr-2 uppercase tracking-wider">
                                   <LockIcon className="size-3" /> Fixed
                                 </span>
                               )}

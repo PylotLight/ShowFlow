@@ -65,17 +65,17 @@ function PosterCardInner({
         </span>
         <div className="flex items-center gap-2 flex-wrap">
           {showProvider && (
-            <span className="font-mono text-caption uppercase tracking-wider text-white/50">{show.providerType}</span>
+            <span className="font-mono text-caption uppercase tracking-wider text-white/60">{show.providerType}</span>
           )}
           {showStats && (show.trackedCount !== undefined || show.grabbedCount !== undefined) && (
             <div className="flex items-center gap-1.5">
               {(show.trackedCount || 0) > 0 && (
-                <span className="font-mono text-[10px] uppercase tracking-wider text-signal bg-signal/10 px-1 rounded">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-signal bg-signal/10 px-1 rounded">
                   {show.trackedCount} tracked
                 </span>
               )}
               {(show.grabbedCount || 0) > 0 && (
-                <span className="font-mono text-[10px] uppercase tracking-wider text-green-400 bg-green-400/10 px-1 rounded">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-green-400 bg-green-400/10 px-1 rounded">
                   {show.grabbedCount} grabbed
                 </span>
               )}

@@ -119,7 +119,7 @@ function Sparkline({ buckets }: { buckets: HourlyBucket[] }) {
             className="w-full rounded-sm bg-signal/50 transition-colors group-hover:bg-signal"
             style={{ height: `${Math.max((h.count / max) * 100, h.count > 0 ? 4 : 1)}%` }}
           />
-          <div className="pointer-events-none absolute -top-7 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-0.5 font-mono text-[10px] text-white group-hover:block">
+          <div className="pointer-events-none absolute -top-7 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-px font-mono text-[11px] text-white group-hover:block">
             {h.label} · {h.count}
           </div>
         </div>

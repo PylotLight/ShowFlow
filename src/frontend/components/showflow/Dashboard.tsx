@@ -166,7 +166,7 @@ function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, o
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <button aria-label="More actions"
         onClick={() => setOpen(!open)}
         className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
       >
@@ -190,7 +190,7 @@ function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, o
           <button onClick={() => { onMetadata(); setOpen(false); }} disabled={syncingAll} className="hover:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed">
             <Activity className={`size-4 text-purple-400 ${syncingAll ? 'animate-spin' : ''}`} />
             {syncingAll ? 'Syncing...' : 'Refresh Metadata'}
-            {syncProgress && <span className="ml-auto text-white/50">{syncProgress.synced}/{syncProgress.total}</span>}
+            {syncProgress && <span className="ml-auto text-white/60">{syncProgress.synced}/{syncProgress.total}</span>}
           </button>
         </div>
       )}
@@ -475,7 +475,7 @@ function Dashboard({
             </span>
           </div>
           <div className="flex-1" />
-          <span className="font-mono text-[9px] text-signal font-bold uppercase tracking-widest">// LIVE</span>
+          <span className="font-mono text-[11px] text-signal font-bold uppercase tracking-widest">// LIVE</span>
         </div>
       )}
 
@@ -517,13 +517,13 @@ function Dashboard({
             <div className="border-b border-white/5 px-5 py-1">
               <button
                 onClick={() => setExpandHistory(!expandHistory)}
-                className="w-full flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 hover:text-white/90 transition-colors py-1 text-left"
+                className="w-full flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider text-white/60 hover:text-white/90 transition-colors py-1 text-left"
               >
                 {expandHistory
                   ? <ChevronUp className="size-3 shrink-0" />
                   : <ChevronDown className="size-3 shrink-0" />}
                 Recently Released
-                <span className="text-white/50 normal-case font-normal">
+                <span className="text-white/60 normal-case font-normal">
                   ({storyGroups.history.reduce((n, g) => n + g.items.length, 0)} ep{storyGroups.history.reduce((n, g) => n + g.items.length, 0) !== 1 ? 's' : ''})
                 </span>
                 <span className="flex-1" />
@@ -531,7 +531,7 @@ function Dashboard({
                   g.items.slice(0, 2).map((ep) => (
                     <span
                       key={`${ep.showTitle}-${ep.season}-${ep.episode}-hint`}
-                      className="text-white/50 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
+                      className="text-white/60 lowercase font-normal normal-case truncate max-w-[110px] hidden sm:inline"
                     >
                       {ep.showTitle} S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                     </span>
@@ -542,7 +542,7 @@ function Dashboard({
                 <div className="pb-1 space-y-0.5">
                   {storyGroups.history.map((group) => (
                     <div key={group.dateKey} className="space-y-0.5">
-                      <h4 className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/55 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
+                      <h4 className="font-mono text-[11px] font-bold uppercase tracking-wider text-white/55 border-b border-white/5 pb-0.5 mb-0.5 mt-1.5">
                         {group.label}
                       </h4>
                       {group.items.map((ep, i) => {
@@ -562,7 +562,7 @@ function Dashboard({
                               />
                             ) : (
                               <div className="w-[16px] h-[24px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center opacity-50">
-                                <span className="font-mono text-[5px] text-white/20">N/A</span>
+                                <span className="sr-only">No poster</span>
                               </div>
                             )}
                             <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
@@ -572,19 +572,19 @@ function Dashboard({
                               >
                                 {ep.showTitle}
                               </span>
-                              <span className="text-[10px] text-white/55 font-mono shrink-0">
+                              <span className="text-[11px] text-white/55 font-mono shrink-0">
                                 S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                               </span>
                             </div>
                             {ep.filePath ? (
-                              <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal/60 border border-signal/10">
+                              <span className="flex items-center gap-1 rounded-full bg-signal/8 px-1 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-signal border border-signal/10">
                                 <CheckIcon className="size-2" strokeWidth={3} />
                                 Available
                               </span>
                             ) : (
                               <span
                                 title="Aired but not yet grabbed — check Pipeline or grab manually"
-                                className="rounded-full bg-accent-amber/10 px-1 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
+                                className="rounded-full bg-accent-amber/10 px-1 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-accent-amber border border-accent-amber/20"
                               >
                                 Awaiting release
                               </span>
@@ -605,13 +605,13 @@ function Dashboard({
                                     episode: ep.episode,
                                   });
                                 }}
-                                className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal border border-signal/20 hover:bg-signal/20 transition-colors"
+                                className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-signal border border-signal/20 hover:bg-signal/20 transition-colors"
                               >
                                 <SearchIcon className="size-2" strokeWidth={3} />
                                 Browse
                               </button>
                             )}
-                            <span className="text-[10px] font-mono text-white/60 shrink-0 leading-none">
+                            <span className="text-[11px] font-mono text-white/60 shrink-0 leading-none">
                               {getCompactDate(ep.airDate)}
                             </span>
                           </div>
@@ -632,7 +632,7 @@ function Dashboard({
                 title="Previous days"
                 aria-label="Previous days"
                 onClick={() => setStripOffset((o) => o - 7)}
-                className="flex items-center justify-center size-6 rounded-md text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+                className="flex items-center justify-center size-6 rounded-md text-white/60 hover:text-white hover:bg-white/[0.06] transition-all"
               >
                 <ChevronRight className="size-3.5 rotate-180" />
               </button>
@@ -640,7 +640,7 @@ function Dashboard({
                 type="button"
                 title="Jump to today"
                 onClick={() => { setStripOffset(0); setSelectedDay(todayKey); }}
-                className="rounded-md px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-white/60 hover:text-signal hover:bg-signal/10 transition-all"
+                className="rounded-md px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-wide text-white/60 hover:text-signal hover:bg-signal/10 transition-all"
               >
                 Today
               </button>
@@ -649,12 +649,12 @@ function Dashboard({
                 title="Next days"
                 aria-label="Next days"
                 onClick={() => setStripOffset((o) => o + 7)}
-                className="flex items-center justify-center size-6 rounded-md text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+                className="flex items-center justify-center size-6 rounded-md text-white/60 hover:text-white hover:bg-white/[0.06] transition-all"
               >
                 <ChevronRight className="size-3.5" />
               </button>
               {stripMonths && (
-                <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-white/40">
+                <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-white/60">
                   {stripMonths}
                 </span>
               )}
@@ -684,20 +684,20 @@ function Dashboard({
                       isSelected && "bg-signal/20 border-signal/50 ring-1 ring-signal/50",
                     )}
                   >
-                    <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-white/60">
+                    <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-white/60">
                       {date.toLocaleDateString(undefined, { weekday: "short" })}
                     </span>
                     <span
                       className={cn(
                         "font-display text-xs font-bold leading-tight",
-                        count > 0 ? "text-white" : "text-white/50",
+                        count > 0 ? "text-white" : "text-white/60",
                         isToday && "text-signal",
                       )}
                     >
                       {date.getDate()}
                     </span>
                     {count > 0 && (
-                      <span className="text-[8px] font-bold text-signal">{count}</span>
+                      <span className="text-[11px] font-bold text-signal">{count}</span>
                     )}
                   </button>
                 );
@@ -710,8 +710,10 @@ function Dashboard({
             {datedUpcoming === null ? (
               <DashboardSkeleton />
             ) : datedUpcoming.length === 0 ? (
-              <div className="text-center py-20 text-muted-foreground text-xs font-mono">
-                NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.
+              <div className="flex flex-col items-center gap-3 text-center py-20 text-muted-foreground">
+                <p className="text-xs font-mono">NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.</p>
+                <p className="font-sans text-sm normal-case">Track a show to see its episodes here.</p>
+                <AddShowDialog onAdded={onAddShow} />
               </div>
             ) : (
               <div className="space-y-3">
@@ -729,7 +731,7 @@ function Dashboard({
                     style={{ animationDelay: `${gi * 60}ms` }}
                   >
                     <h3 className={cn(
-                      "font-mono text-[10px] font-bold uppercase tracking-wider pb-1 mb-1 flex items-center gap-1.5",
+                      "font-mono text-[11px] font-bold uppercase tracking-wider pb-1 mb-1 flex items-center gap-1.5",
                       isToday
                         ? "text-signal border-b border-signal/15"
                         : "text-white/60 border-b border-white/5",
@@ -737,7 +739,7 @@ function Dashboard({
                       {isToday && <span className="inline-block size-1.5 rounded-full bg-signal animate-pulse" />}
                       {group.label}
                       {isToday && (
-                        <span className="ml-auto normal-case font-normal text-[10px] text-signal/70">
+                        <span className="ml-auto normal-case font-normal text-[11px] text-signal/70">
                           {group.items.length} ep{group.items.length !== 1 ? 's' : ''}
                         </span>
                       )}
@@ -758,7 +760,7 @@ function Dashboard({
                                 <div className="w-full border-t border-signal/40" />
                               </div>
                               <div className="relative flex items-center gap-2">
-                                <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/10 px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-signal border border-signal/20">
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/10 px-2.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-signal border border-signal/20">
                                   NOW — {formatNowTime()}
                                 </span>
                               </div>
@@ -780,7 +782,7 @@ function Dashboard({
                             />
                           ) : (
                             <div className="w-[18px] h-[27px] shrink-0 rounded-sm bg-white/[0.03] border border-white/5 flex items-center justify-center">
-                              <span className="font-mono text-[5px] text-white/20">N/A</span>
+                              <span className="sr-only">No poster</span>
                             </div>
                           )}
                           <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
@@ -808,7 +810,7 @@ function Dashboard({
                               <MediaBadges media={ep.file?.media} max={3} className="hidden lg:inline-flex" />
                             )}
                             {state === "available" && (
-                              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-signal border border-signal/15">
+                              <span className="flex items-center gap-1 rounded-full bg-signal/10 px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-signal border border-signal/15">
                                 <CheckIcon className="size-2.5" strokeWidth={3} />
                                 Available
                               </span>
@@ -816,13 +818,13 @@ function Dashboard({
                             {state === "awaiting" && (
                               <span
                                 title="Aired but not yet grabbed — check Pipeline or grab manually"
-                                className="rounded-full bg-accent-amber/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-accent-amber border border-accent-amber/20"
+                                className="rounded-full bg-accent-amber/10 px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-accent-amber border border-accent-amber/20"
                               >
                                 Awaiting release
                               </span>
                             )}
                             {state === "scheduled" && (
-                              <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-white/50 border border-white/10">
+                              <span className="rounded-full bg-white/[0.04] px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-white/60 border border-white/10">
                                 Scheduled
                               </span>
                             )}
@@ -840,7 +842,7 @@ function Dashboard({
                                     episode: ep.episode,
                                   });
                                 }}
-                                className="flex items-center justify-center size-5 rounded text-white/35 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-signal hover:bg-signal/10 transition-all"
+                                className="flex items-center justify-center size-5 rounded text-white/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-signal hover:bg-signal/10 transition-all"
                               >
                                 <SearchIcon className="size-3" />
                               </button>
@@ -865,7 +867,7 @@ function Dashboard({
                     <p className="text-muted-foreground text-xs font-mono">No episodes on {new Date(selectedDay + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}.</p>
                     <button
                       onClick={() => setSelectedDay(null)}
-                      className="mt-2 font-mono text-[10px] font-bold text-signal hover:text-signal/80 uppercase tracking-wider transition-colors"
+                      className="mt-2 font-mono text-[11px] font-bold text-signal hover:text-signal/80 uppercase tracking-wider transition-colors"
                     >
                       Clear filter
                     </button>
@@ -880,7 +882,7 @@ function Dashboard({
             <div className="border-t border-white/5 px-5 py-2.5">
               <button
                 onClick={onShowCalendar}
-                className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground hover:text-white uppercase tracking-wider transition-colors"
+                className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground hover:text-white uppercase tracking-wider transition-colors"
               >
                 + Calendar view
                 <ChevronRight className="size-3" />

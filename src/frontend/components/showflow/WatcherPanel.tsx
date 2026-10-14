@@ -82,7 +82,7 @@ function WatcherPanel({ onEvents, className, hideLog, bare }: { onEvents?: (even
               <span className="absolute inset-0 size-4 rounded-full bg-signal/15 animate-ping" />
             )}
           </div>
-          <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
             <span
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
@@ -170,12 +170,12 @@ function WatcherPanel({ onEvents, className, hideLog, bare }: { onEvents?: (even
                 "flex items-start gap-3 py-2.5 px-1 rounded transition-colors",
                 isRecent ? "bg-signal/[0.02]" : "hover:bg-white/[0.01]",
               )}>
-                <span className={cn("rounded px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider shrink-0 mt-0.5", badgeClass)}>
+                <span className={cn("rounded px-1.5 py-px text-[11px] font-mono uppercase tracking-wide shrink-0 mt-0.5", badgeClass)}>
                   {badgeLabel}
                 </span>
                 <div className="flex flex-1 flex-col gap-0.5 min-w-0">
                   <span className="text-xs text-white/90 break-words leading-normal font-sans">{e.message}</span>
-                  <span className="text-muted-foreground font-mono text-[9px] tracking-tight flex items-center gap-1.5">
+                  <span className="text-muted-foreground font-mono text-[11px] tracking-tight flex items-center gap-1.5">
                     {new Date(e.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     {isRecent && <span className="size-1 rounded-full bg-signal/60" />}
                   </span>

@@ -95,7 +95,7 @@ function DiagnosePanel({
       <div className="flex flex-col items-center justify-center py-12 gap-2">
         <CheckCircle2Icon className="size-6 text-emerald-400" />
         <p className="text-sm text-emerald-400 font-semibold">No issues detected</p>
-        <p className="text-xs text-muted-foreground/60">
+        <p className="text-xs text-muted-foreground/80">
           The latest pipeline event indicates no failure.
         </p>
       </div>
@@ -116,7 +116,7 @@ function DiagnosePanel({
         {result.diagnosis?.category && (
           <p className="text-xs text-muted-foreground">
             Category: {CATEGORY_LABELS[result.diagnosis.category] ?? result.diagnosis.category}
-            <span className="ml-2 opacity-60">
+            <span className="ml-2 opacity-80">
               (confidence: {result.diagnosis.confidence})
             </span>
           </p>
@@ -129,7 +129,7 @@ function DiagnosePanel({
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Latest event</span>
           <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3 space-y-1">
             <div className="flex items-center gap-2">
-              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-white/60 border border-white/5">
+              <span className="rounded bg-white/5 px-1.5 py-px text-[11px] font-mono uppercase tracking-wide text-white/60 border border-white/5">
                 {result.event.eventType}
               </span>
               <span className="text-xs text-white/80">{result.event.message}</span>

@@ -38,7 +38,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
             <p className="text-muted-foreground text-xs mt-0.5">Connect to Prowlarr to search torrent/usenet indexers</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               {prowlarr.enabled ? 'Enabled' : 'Disabled'}
             </span>
             <Switch
@@ -69,7 +69,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
               onChange={e => setProwlarr((prev: any) => ({ ...prev, apiKey: e.target.value }))}
               placeholder="Prowlarr API key"
             />
-            <button
+            <button aria-label={showProwlarrKey ? "Hide Prowlarr API key" : "Show Prowlarr API key"}
               type="button"
               onClick={() => setShowProwlarrKey(!showProwlarrKey)}
               className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -124,7 +124,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
         {prowlarr.enabled && (
         <div className="border-t border-white/5 pt-4 mt-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
               Configured Indexers
             </span>
             <Button
@@ -185,7 +185,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
                     </div>
                     <p className="text-muted-foreground text-xs mt-px">{meta.description}</p>
                   </div>
-                  <Button
+                  <Button aria-label={`Open ${meta.name}`}
                     variant="ghost"
                     size="icon-sm"
                     onClick={() => window.open(meta.defaultUrl, '_blank')}

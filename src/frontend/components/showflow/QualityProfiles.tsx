@@ -194,7 +194,7 @@ function CustomFormatsPanel({ formats, onChange }: { formats: CustomFormat[]; on
               <span className="font-mono flex-1 text-sm tracking-wide">{f.name}</span>
               <code className="text-muted-foreground font-mono text-xs bg-white/[0.04] rounded px-2 py-1 max-w-56 truncate">{f.regex}</code>
               <ScoreSelect value={f.score} onChange={(v) => updateScore(f, v)} />
-              <button
+              <button aria-label="Remove custom format"
                 type="button"
                 onClick={() => remove(f.id)}
                 disabled={removing === f.id}
@@ -209,7 +209,7 @@ function CustomFormatsPanel({ formats, onChange }: { formats: CustomFormat[]; on
 
       {catalogRemaining.length > 0 && (
         <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-widest">Add common format</span>
+          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common format</span>
           <div className="flex flex-wrap gap-1.5">
             {catalogRemaining.map(entry => (
               <button
@@ -246,7 +246,7 @@ function CustomFormatsPanel({ formats, onChange }: { formats: CustomFormat[]; on
             <Button size="sm" onClick={saveCustom} disabled={saving === "__custom__" || !name.trim() || !regex.trim()}>
               {saving === "__custom__" ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
             </Button>
-            <button type="button" onClick={reset} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
+            <button aria-label="Cancel" type="button" onClick={reset} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
               <XIcon className="size-4" />
             </button>
           </div>
@@ -328,7 +328,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
           {sorted.map((q, i) => (
             <div key={q.id} className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
               <div className="flex flex-col shrink-0">
-                <button
+                <button aria-label="Move up"
                   type="button"
                   onClick={() => move(i, -1)}
                   disabled={i === 0 || moving === q.id}
@@ -336,7 +336,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
                 >
                   <ChevronUpIcon className="size-3.5" />
                 </button>
-                <button
+                <button aria-label="Move down"
                   type="button"
                   onClick={() => move(i, 1)}
                   disabled={i === sorted.length - 1 || moving === q.id}
@@ -346,7 +346,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
                 </button>
               </div>
               <span className="font-mono flex-1 text-sm tracking-wide">{q.name}</span>
-              <button
+              <button aria-label="Remove quality"
                 type="button"
                 onClick={() => remove(q.id)}
                 className="text-muted-foreground hover:text-red-400 shrink-0 transition-colors"
@@ -360,7 +360,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
 
       {catalogRemaining.length > 0 && (
         <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-widest">Add common quality</span>
+          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common quality</span>
           <div className="flex flex-wrap gap-1.5">
             {catalogRemaining.map(qualityName => (
               <button
@@ -391,7 +391,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
           <Button size="sm" onClick={saveCustom} disabled={saving === "__custom__" || !name.trim()}>
             {saving === "__custom__" ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
           </Button>
-          <button type="button" onClick={() => { setAddingCustom(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
+          <button aria-label="Cancel" type="button" onClick={() => { setAddingCustom(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
             <XIcon className="size-4" />
           </button>
         </div>
@@ -466,7 +466,7 @@ function ProfileFormatsEditor({ profileId, allFormats }: { profileId: string; al
               {f.profile_format_type === "bonus" && (
                 <span className="text-muted-foreground font-mono text-xs">{scoreLabel(f.score)}</span>
               )}
-              <button
+              <button aria-label="Remove format from profile"
                 type="button"
                 onClick={() => removeFormat(f.id)}
                 disabled={saving}
@@ -501,7 +501,7 @@ function ProfileFormatsEditor({ profileId, allFormats }: { profileId: string; al
               <SelectItem value="forbidden">Forbidden</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={addFormat} disabled={!addingFormatId || saving}>
+          <Button aria-label="Add format" size="sm" onClick={addFormat} disabled={!addingFormatId || saving}>
             {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <PlusIcon className="size-3.5" />}
           </Button>
         </div>
@@ -566,13 +566,13 @@ function ProfileQualitiesEditor({ profileId, qualities }: { profileId: string; q
   return (
     <div className="space-y-2 pb-3 border-b border-white/5">
       <div className="flex items-center justify-between">
-        <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-widest">Allowed qualities</span>
+        <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Allowed qualities</span>
         {allowedIds.size > 0 && (
           <button
             type="button"
             onClick={allowEverything}
             disabled={busyId === "__all__"}
-            className="text-muted-foreground hover:text-foreground font-mono text-[10px] underline decoration-dotted underline-offset-2 transition-colors"
+            className="text-muted-foreground hover:text-foreground font-mono text-[11px] underline decoration-dotted underline-offset-2 transition-colors"
           >
             Allow everything
           </button>
@@ -636,7 +636,7 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
   return (
     <div className="rounded-lg bg-white/[0.03] overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3">
-        <button
+        <button aria-label={expanded ? "Collapse profile" : "Expand profile"}
           type="button"
           onClick={() => setExpanded(v => !v)}
           className="text-muted-foreground hover:text-foreground transition-colors"
@@ -657,7 +657,7 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
             </SelectContent>
           </Select>
         </div>
-        <button
+        <button aria-label="Delete profile"
           type="button"
           onClick={remove}
           disabled={removing}
@@ -716,7 +716,7 @@ function ProfilesPanel({ profiles, qualities, formats, onChange }: {
 
       {presetsRemaining.length > 0 && (
         <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-widest">Add common profile</span>
+          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common profile</span>
           <div className="flex flex-wrap gap-1.5">
             {presetsRemaining.map(preset => (
               <button
@@ -745,10 +745,10 @@ function ProfilesPanel({ profiles, qualities, formats, onChange }: {
       ) : (
         <div className="flex items-center gap-2 rounded-lg px-4 py-3 bg-white/[0.04]">
           <Input value={name} onChange={e => setName(e.target.value)} placeholder="Profile name" className="flex-1" />
-          <Button size="sm" onClick={() => create(name)} disabled={saving || !name.trim()}>
+          <Button aria-label="Create profile" size="sm" onClick={() => create(name)} disabled={saving || !name.trim()}>
             {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
           </Button>
-          <button type="button" onClick={() => { setAdding(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
+          <button aria-label="Cancel" type="button" onClick={() => { setAdding(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
             <XIcon className="size-4" />
           </button>
         </div>

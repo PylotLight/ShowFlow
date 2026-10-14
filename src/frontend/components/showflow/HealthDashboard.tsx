@@ -101,6 +101,10 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
   const totalRows = data
     ? SECTIONS.reduce((sum, t) => sum + data.byType[t].length, 0)
     : 0;
+  // no indexers + no download clients checked = nothing to grab with yet,
+  // so don't claim "all systems operational"
+  const notConfigured =
+    data !== null && data.overallStatus === "healthy" && data.byType.indexer.length === 0 && data.byType.download_client.length === 0;
 
   return (
     <div className="space-y-4">
@@ -110,17 +114,20 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
           <ActivityIcon
             className={cn(
               "size-5",
-              data?.overallStatus === "healthy" && "text-emerald-400",
+              notConfigured && "text-accent-amber",
+              !notConfigured && data?.overallStatus === "healthy" && "text-emerald-400",
               data?.overallStatus === "degraded" && "text-accent-amber",
               data?.overallStatus === "down" && "text-destructive",
             )}
           />
           <div>
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Health</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Health</span>
             <h2 className="font-display text-2xl font-bold text-white mt-0.5">
               {data === null
                 ? "Checking system health\u2026"
-                : data.overallStatus === "healthy"
+                : notConfigured
+                  ? "Not configured"
+                  : data.overallStatus === "healthy"
                   ? "All systems operational"
                   : data.overallStatus === "degraded"
                     ? "System degraded"
@@ -129,12 +136,20 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
             <p className="text-muted-foreground text-xs mt-1">
               {data === null
                 ? ""
-                : data.overallStatus === "healthy"
+                : notConfigured
+                  ? "No indexers or download clients set up yet — add them in settings"
+                  : data.overallStatus === "healthy"
                   ? `${totalRows} component${totalRows !== 1 ? "s" : ""} checked, all healthy`
                   : `${SECTIONS.reduce((s, t) => s + countBy(data.byType[t], "down"), 0)} down, ${SECTIONS.reduce((s, t) => s + countBy(data.byType[t], "degraded"), 0)} degraded — resolve issues below`}
             </p>
           </div>
         </div>
+        {notConfigured ? (
+          <Button size="sm" variant="outline" onClick={() => onOpenSettings("indexers")} className="border-accent-amber/30 text-accent-amber hover:text-accent-amber">
+            <SettingsIcon className="size-3.5" />
+            Open settings
+          </Button>
+        ) : (
         <span
           className={cn(
             "rounded-full px-3 py-1 text-xs font-semibold font-mono uppercase tracking-wider",
@@ -145,6 +160,7 @@ function HealthDashboard({ onOpenSettings }: { onOpenSettings: (tab: string) => 
         >
           {data?.overallStatus ?? "\u00a0"}
         </span>
+        )}
       </GlassPanel>
 
       {/* Per-type sections */}

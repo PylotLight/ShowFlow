@@ -50,7 +50,7 @@ export function StepDone({ data, onNext }: StepProps) {
         {summary.map((item, i) => (
           <div key={item.label} className="flex flex-col items-center gap-1.5">
             <item.icon className="size-5 text-signal" />
-            <p className="text-xs text-muted-foreground/60">{item.label}</p>
+            <p className="text-xs text-muted-foreground/80">{item.label}</p>
             <p className="text-sm font-semibold">{item.value}</p>
           </div>
         ))}
@@ -65,7 +65,7 @@ export function StepDone({ data, onNext }: StepProps) {
         Go to Dashboard
       </Button>
 
-      <p className="text-xs text-muted-foreground/50 mt-3">
+      <p className="text-xs text-muted-foreground mt-3">
         You can always re-run this wizard from Settings later
       </p>
     </div>

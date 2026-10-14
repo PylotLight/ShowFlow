@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Loader2, Settings2, XIcon } from "lucide-react";
 
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader } from "@frontend/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@frontend/components/ui/dialog";
 import { Button } from "@frontend/components/ui/button";
 import { Label } from "@frontend/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
@@ -105,11 +105,11 @@ export function BulkUpdateDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Settings2 className="size-4 text-signal" />
-            <h2 className="font-display text-xl font-bold uppercase tracking-wider">Bulk Update</h2>
+            <DialogTitle className="font-display text-xl font-bold uppercase tracking-wider">Bulk Update</DialogTitle>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <DialogDescription className="text-sm text-muted-foreground">
             {ids.length} show{ids.length !== 1 ? "s" : ""} selected — set the fields to change, leave the rest as-is.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">

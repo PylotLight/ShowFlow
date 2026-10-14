@@ -28,7 +28,7 @@ function FilterRail({
   return (
     <aside className="sticky top-8 flex h-fit w-48 shrink-0 flex-col gap-6">
       <GlassPanel className="flex flex-col gap-2 p-4">
-        <span className="font-display text-xs font-semibold tracking-wider text-white/50 uppercase">Provider</span>
+        <span className="font-display text-xs font-semibold tracking-wider text-white/60 uppercase">Provider</span>
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
@@ -62,7 +62,7 @@ function FilterRail({
 
       {profiles.length > 0 && (
         <GlassPanel className="flex flex-col gap-2 p-4">
-          <span className="font-display text-xs font-semibold tracking-wider text-white/50 uppercase">Profile</span>
+          <span className="font-display text-xs font-semibold tracking-wider text-white/60 uppercase">Profile</span>
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"

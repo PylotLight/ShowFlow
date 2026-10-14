@@ -55,7 +55,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
                 }}
                 placeholder="TorBox API key"
               />
-              <button
+              <button aria-label={showTorboxKey ? "Hide TorBox API key" : "Show TorBox API key"}
                 type="button"
                 onClick={() => setShowTorboxKey(!showTorboxKey)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"

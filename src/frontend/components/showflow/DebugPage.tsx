@@ -263,18 +263,18 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
           <BugIcon className={cn("size-4", mode !== 'none' ? "text-signal" : "text-muted-foreground")} />
           <h2 className="font-display text-xl font-bold text-white">Debug Console</h2>
           <span className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest",
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-px font-mono text-[11px] font-bold uppercase tracking-widest",
             mode === 'ws' ? "bg-emerald-500/10 text-emerald-400" : mode === 'poll' ? "bg-accent-amber/10 text-accent-amber" : "bg-red-500/10 text-red-400",
           )}>
             <span className={cn("size-1.5 rounded-full", mode === 'ws' ? "bg-emerald-400" : mode === 'poll' ? "bg-accent-amber" : "bg-red-400")} />
             {mode === 'ws' ? "Live" : mode === 'poll' ? "Live (poll)" : "Disconnected"}
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-[11px] text-muted-foreground">
             {logs.length} entries
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button
+          <Button aria-label="Toggle filters"
             variant="ghost"
             size="icon-sm"
             onClick={() => setShowFilters(!showFilters)}
@@ -282,7 +282,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
           >
             <FilterIcon className={cn("size-3.5", showFilters && "text-signal")} />
           </Button>
-          <Button
+          <Button aria-label={paused ? "Resume" : "Pause"}
             variant="ghost"
             size="icon-sm"
             onClick={() => setPaused(!paused)}
@@ -290,10 +290,10 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
           >
             {paused ? <PlayIcon className="size-3.5" /> : <PauseIcon className="size-3.5" />}
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={clearLogs} title="Clear">
+          <Button aria-label="Clear" variant="ghost" size="icon-sm" onClick={clearLogs} title="Clear">
             <Trash2Icon className="size-3.5" />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onDone} title="Close">
+          <Button aria-label="Close" variant="ghost" size="icon-sm" onClick={onDone} title="Close">
             <XIcon className="size-3.5" />
           </Button>
         </div>
@@ -389,7 +389,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
                 <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", LEVEL_DOT[entry.level] || "bg-muted-foreground/40")} />
 
                 {/* Timestamp */}
-                <span className="shrink-0 text-muted-foreground/60 w-20 tabular-nums">
+                <span className="shrink-0 text-muted-foreground/80 w-20 tabular-nums">
                   {formatTime(entry.timestamp)}
                 </span>
 
@@ -400,7 +400,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
 
                 {/* Level */}
                 <span className={cn(
-                  "shrink-0 rounded px-1 py-0.5 font-bold uppercase tracking-wider text-[9px] leading-none border",
+                  "shrink-0 rounded px-1 py-px font-bold uppercase tracking-wide text-[11px] leading-none border",
                   LEVEL_COLORS[entry.level] || "text-muted-foreground border-white/5",
                 )}>
                   {entry.level}
@@ -433,14 +433,14 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
 
                 {/* Duration */}
                 {entry.duration !== undefined && (
-                  <span className="shrink-0 text-muted-foreground/60 w-16 text-right tabular-nums">
+                  <span className="shrink-0 text-muted-foreground/80 w-16 text-right tabular-nums">
                     {entry.duration}ms
                   </span>
                 )}
 
                 {/* Expand indicator */}
                 {(entry.requestBody || entry.responseBody || entry.error) && (
-                  expanded.has(entry.id) ? <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/40" /> : <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground/40" />
+                  expanded.has(entry.id) ? <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" /> : <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
                 )}
               </button>
 
@@ -450,7 +450,7 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
                   {/* URL bar + cURL copy */}
                   {(entry.url || (entry.method && entry.path)) && (
                     <div className="flex items-start gap-2 rounded bg-white/[0.03] px-3 py-2">
-                      <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground shrink-0 mt-0.5">URL</span>
+                      <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground shrink-0 mt-0.5">URL</span>
                       <span className="font-mono text-[11px] text-foreground/60 break-all min-w-0 flex-1">
                         {entry.url || (entry.path?.startsWith('/') ? `${typeof location !== 'undefined' ? location.origin : 'http://localhost:3000'}${entry.path}` : entry.path)}
                       </span>
@@ -480,18 +480,18 @@ export function DebugPage({ onDone }: { onDone: () => void }) {
       {/* Bottom bar */}
       <div className="flex items-center gap-3 px-6 py-2 border-t border-white/5 shrink-0 bg-white/[0.02]">
         <span className={cn(
-          "font-mono text-[10px]",
+          "font-mono text-[11px]",
           paused ? "text-accent-amber" : "text-muted-foreground",
         )}>
           {paused ? "PAUSED" : mode === 'poll' ? "POLLING" : "STREAMING"}
         </span>
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-[11px] text-muted-foreground">
           {filteredLogs.length} / {logs.length} shown
         </span>
         {!autoScroll && !paused && (
           <button
             onClick={() => { containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); setAutoScroll(true); }}
-            className="font-mono text-[10px] text-signal hover:underline"
+            className="font-mono text-[11px] text-signal hover:underline"
           >
             Scroll to latest
           </button>
@@ -516,7 +516,7 @@ function CopyCurlButton({ entry }: { entry: DebugLogEntry }) {
   return (
     <button
       onClick={handleCopy}
-      className="shrink-0 rounded px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-signal hover:bg-signal/10 transition-colors flex items-center gap-1"
+      className="shrink-0 rounded px-2 py-1 font-mono text-[11px] font-bold uppercase tracking-widest text-signal hover:bg-signal/10 transition-colors flex items-center gap-1"
       title="Copy as cURL command"
     >
       {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
@@ -539,7 +539,7 @@ function renderBodyBlock(label: string, data: unknown): React.ReactElement | nul
   if (data === undefined || data === null) return null;
   return (
     <div className="space-y-1">
-      <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
+      <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
       <pre className="rounded bg-white/[0.03] px-3 py-2 text-[11px] text-foreground/60 overflow-x-auto">{formatJSON(data)}</pre>
     </div>
   );

@@ -35,7 +35,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
             onChange={e => updateApiKey("tmdb", e.target.value)}
             placeholder="TMDB_API_KEY"
           />
-          <button
+          <button aria-label={showTmdbKey ? "Hide TMDB key" : "Show TMDB key"}
             type="button"
             onClick={() => setShowTmdbKey(!showTmdbKey)}
             className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -53,7 +53,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
             onChange={e => updateApiKey("tvdb", e.target.value)}
             placeholder="TVDB_API_KEY"
           />
-          <button
+          <button aria-label={showTvdbKey ? "Hide TVDB key" : "Show TVDB key"}
             type="button"
             onClick={() => setShowTvdbKey(!showTvdbKey)}
             className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -71,7 +71,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
             onChange={e => updateApiKey("tvdb_pin", e.target.value)}
             placeholder="TVDB_PIN"
           />
-          <button
+          <button aria-label={showTvdbPin ? "Hide TVDB PIN" : "Show TVDB PIN"}
             type="button"
             onClick={() => setShowTvdbPin(!showTvdbPin)}
             className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -107,7 +107,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
             onChange={e => setDraft({ ...imdb, apiKey: e.target.value })}
             placeholder="IMDB_API_KEY"
           />
-          <button
+          <button aria-label={showImdbKey ? "Hide IMDb key" : "Show IMDb key"}
             type="button"
             onClick={() => setShowImdbKey(!showImdbKey)}
             className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -134,7 +134,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
             onChange={e => setDraft({ ...imdb, awsSecretAccessKey: e.target.value })}
             placeholder="••••••••••••••••••••••••••••••••"
           />
-          <button
+          <button aria-label={showAwsSecret ? "Hide AWS secret" : "Show AWS secret"}
             type="button"
             onClick={() => setShowAwsSecret(!showAwsSecret)}
             className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"

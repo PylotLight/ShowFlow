@@ -208,7 +208,7 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
             <FontFamilySelect value={theme.fontMono} onChange={v => updateTheme({ fontMono: v })} options={MONO_FONTS} defaultValue={THEME_DEFAULTS.fontMono} />
           </FieldRow>
           <div className="border-t border-white/5 pt-5 space-y-5">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Text Sizes</p>
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Text Sizes</p>
             <FieldRow label="Caption" description="Small labels and auxiliary text">
               <Select value={theme.fontSizeCaption || "0.75rem"} onValueChange={v => updateTheme({ fontSizeCaption: v })}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>

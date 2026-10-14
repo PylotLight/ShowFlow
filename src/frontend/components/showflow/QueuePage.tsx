@@ -152,7 +152,7 @@ function QueuePage() {
             {watching && <span className="absolute inset-0 size-5 rounded-full bg-signal/15 animate-ping" />}
           </div>
           <div>
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Queue</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Queue</span>
             <h2 className="font-display text-2xl font-bold text-white">
               {watching === null ? "Checking status…" : watching ? "Watching for drops" : "Watcher idle"}
             </h2>
@@ -234,7 +234,7 @@ function QueuePage() {
                       style={{ width: `${item.progress ?? 0}%` }}
                     />
                   </div>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">
                     {item.client === "torbox" ? formatTorBoxState(item.state) : "importing"}
                   </span>
                 </div>
@@ -262,12 +262,12 @@ function QueuePage() {
               <div key={e.id} className="flex items-start gap-3 px-5 py-3">
                 {/* Fixed-width centered badges so every message starts at the
                     same x — GRAB vs DOWNLOAD vs UPGRADE no longer stagger. */}
-                <span className={cn("inline-flex w-[76px] justify-center rounded px-1 py-0.5 text-center text-[9px] font-mono uppercase tracking-wider shrink-0 mt-0.5", EVENT_BADGES[e.type] ?? "bg-white/5 text-white/60")}>
+                <span className={cn("inline-flex w-[76px] justify-center rounded px-1 py-px text-center text-[11px] font-mono uppercase tracking-wide shrink-0 mt-0.5", EVENT_BADGES[e.type] ?? "bg-white/5 text-white/60")}>
                   {e.type}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-white/90 break-words">{e.message}</p>
-                  <p className="text-muted-foreground font-mono text-[9px] mt-0.5">
+                  <p className="text-muted-foreground font-mono text-[11px] mt-0.5">
                     {new Date(e.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>

@@ -48,7 +48,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
               onChange={e => updateApiKey("tvdb", e.target.value)}
               placeholder="TVDB_API_KEY"
             />
-            <button
+            <button aria-label={showTvdbKey ? "Hide TVDB key" : "Show TVDB key"}
               type="button"
               onClick={() => setShowTvdbKey(!showTvdbKey)}
               className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -65,7 +65,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
               onChange={e => updateApiKey("tvdb_pin", e.target.value)}
               placeholder="TVDB_PIN"
             />
-            <button
+            <button aria-label={showTvdbPin ? "Hide TVDB PIN" : "Show TVDB PIN"}
               type="button"
               onClick={() => setShowTvdbPin(!showTvdbPin)}
               className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -82,7 +82,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
               onChange={e => updateApiKey("tmdb", e.target.value)}
               placeholder="TMDB_API_KEY"
             />
-            <button
+            <button aria-label={showTmdbKey ? "Hide TMDB key" : "Show TMDB key"}
               type="button"
               onClick={() => setShowTmdbKey(!showTmdbKey)}
               className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -100,7 +100,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
             <p className="text-muted-foreground text-xs mt-0.5">Connect to Sonarr for series management and importing</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               {sonarr.enabled ? 'Enabled' : 'Disabled'}
             </span>
             <Switch
@@ -126,7 +126,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                 onChange={e => setSonarr((prev: any) => ({ ...prev, apiKey: e.target.value }))}
                 placeholder="Sonarr API key"
               />
-              <button
+              <button aria-label={showSonarrKey ? "Hide Sonarr API key" : "Show Sonarr API key"}
                 type="button"
                 onClick={() => setShowSonarrKey(!showSonarrKey)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -192,7 +192,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
 
             {sonarrTypesPresent.length > 0 && (
               <div className="space-y-3 border border-white/5 rounded-lg p-4 bg-white/[0.02]">
-                <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                   Series Type Mapping
                 </p>
                 {sonarrTypesPresent.map(([type, count]: [string, number]) => {
@@ -267,7 +267,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
             {sonarrSeries !== null && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                     {visibleSonarrSeries.length} series
                   </span>
                   <div className="flex items-center gap-2">
@@ -342,7 +342,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
             <p className="text-muted-foreground text-xs mt-0.5">Sync watched state from Jellyfin to ShowFlow</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               {jellyfin.enabled ? 'Enabled' : 'Disabled'}
             </span>
             <Switch
@@ -368,7 +368,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
                 onChange={e => setJellyfin((prev: any) => ({ ...prev, apiKey: e.target.value }))}
                 placeholder="Jellyfin API key"
               />
-              <button
+              <button aria-label={showJellyfinKey ? "Hide Jellyfin API key" : "Show Jellyfin API key"}
                 type="button"
                 onClick={() => setShowJellyfinKey(!showJellyfinKey)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"

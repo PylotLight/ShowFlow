@@ -438,7 +438,7 @@ function ReleaseSearchDialog({
                           <Badge variant="muted">{release.score.qualityName}</Badge>
                         )}
                         {release.score.matchedTags && release.score.matchedTags.length > 0 && (
-                          <span className="text-muted-foreground/50 text-[10px] font-mono truncate min-w-0 max-w-[200px]" title={release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}>
+                          <span className="text-muted-foreground text-[11px] font-mono truncate min-w-0 max-w-[200px]" title={release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}>
                             {release.score.matchedTags.filter(t => t !== release.score.qualityName).join(" · ")}
                           </span>
                         )}

@@ -174,7 +174,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           </div>
           <button
             onClick={() => setData({ sonarr: { ...sonarr, importJobId: null, importForkMode: null } })}
-            className="shrink-0 text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic whitespace-nowrap pt-1"
+            className="shrink-0 text-xs text-muted-foreground hover:text-muted-foreground/70 transition-colors italic whitespace-nowrap pt-1"
           >
             Cancel and reconfigure
           </button>
@@ -378,9 +378,9 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             )}>
               {prowlarrEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <CableIcon className={cn("size-4", prowlarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <CableIcon className={cn("size-4", prowlarrEnabled ? "text-signal" : "text-muted-foreground")} />
             <div className="flex-1">
-              <p className={cn("text-sm font-semibold", !prowlarrEnabled && "text-muted-foreground/50")}>
+              <p className={cn("text-sm font-semibold", !prowlarrEnabled && "text-muted-foreground")}>
                 Prowlarr (Indexer)
               </p>
               <p className="text-xs text-muted-foreground">
@@ -392,7 +392,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           {prowlarrEnabled && (
             <div className="mt-3 space-y-2 pl-10">
               <div>
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">URL</p>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">URL</p>
                 <Input
                   value={prowlarr.baseUrl}
                   onChange={e => setData({ prowlarr: { ...prowlarr, baseUrl: e.target.value } })}
@@ -401,7 +401,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 />
               </div>
               <div>
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">API Key</p>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">API Key</p>
                 <Input
                   value={prowlarr.apiKey}
                   onChange={e => setData({ prowlarr: { ...prowlarr, apiKey: e.target.value } })}
@@ -454,9 +454,9 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             )}>
               {sonarrEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <TvIcon className={cn("size-4", sonarrEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <TvIcon className={cn("size-4", sonarrEnabled ? "text-signal" : "text-muted-foreground")} />
             <div className="flex-1">
-              <p className={cn("text-sm font-semibold", !sonarrEnabled && "text-muted-foreground/50")}>
+              <p className={cn("text-sm font-semibold", !sonarrEnabled && "text-muted-foreground")}>
                 Sonarr
               </p>
               <p className="text-xs text-muted-foreground">
@@ -468,7 +468,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           {sonarrEnabled && (
             <div className="mt-3 space-y-2 pl-10">
               <div>
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">URL</p>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">URL</p>
                 <Input
                   value={sonarr.baseUrl}
                   onChange={e => setData({ sonarr: { ...sonarr, baseUrl: e.target.value, tested: false } })}
@@ -477,7 +477,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 />
               </div>
               <div>
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">API Key</p>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">API Key</p>
                 <Input
                   value={sonarr.apiKey}
                   onChange={e => setData({ sonarr: { ...sonarr, apiKey: e.target.value, tested: false } })}
@@ -488,7 +488,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex-1">
-                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">API Version</p>
+                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">API Version</p>
                   <Select
                     value={sonarr.apiVersion}
                     onValueChange={(v) => setData({ sonarr: { ...sonarr, apiVersion: v as any, tested: false } })}
@@ -555,9 +555,9 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             )}>
               {dcEnabled && <CheckCircleIcon className="size-3.5 text-white" />}
             </div>
-            <DownloadIcon className={cn("size-4", dcEnabled ? "text-signal" : "text-muted-foreground/40")} />
+            <DownloadIcon className={cn("size-4", dcEnabled ? "text-signal" : "text-muted-foreground")} />
             <div className="flex-1">
-              <p className={cn("text-sm font-semibold", !dcEnabled && "text-muted-foreground/50")}>
+              <p className={cn("text-sm font-semibold", !dcEnabled && "text-muted-foreground")}>
                 Download Client
               </p>
               <p className="text-xs text-muted-foreground">
@@ -569,7 +569,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           {dcEnabled && (
             <div className="mt-3 space-y-2 pl-10">
               <div>
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Type</p>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">Type</p>
                 <Select
                   value={downloadClient.type}
                   onValueChange={(v) => setData({ downloadClient: { type: v as any, config: {} } })}
@@ -587,7 +587,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
 
               {downloadClient.type === 'blackhole' && (
                 <div>
-                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Output Folder</p>
+                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">Output Folder</p>
                   <Input
                     value={downloadClient.config.outputFolder ?? ''}
                     onChange={e => setData({ downloadClient: { ...downloadClient, config: { ...downloadClient.config, outputFolder: e.target.value } } })}
@@ -598,7 +598,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               )}
               {downloadClient.type === 'torbox' && (
                 <div>
-                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">API Key</p>
+                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">API Key</p>
                   <Input
                     value={downloadClient.config.apiKey ?? ''}
                     onChange={e => setData({ downloadClient: { ...downloadClient, config: { ...downloadClient.config, apiKey: e.target.value } } })}
@@ -610,7 +610,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               {downloadClient.type === 'sabnzbd' && (
                 <div className="space-y-3">
                   <div>
-                    <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">URL</p>
+                    <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">URL</p>
                     <Input
                       value={downloadClient.config.url ?? ''}
                       onChange={e => setData({ downloadClient: { ...downloadClient, config: { ...downloadClient.config, url: e.target.value } } })}
@@ -619,7 +619,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                     />
                   </div>
                   <div>
-                    <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">API Key</p>
+                    <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">API Key</p>
                     <Input
                       value={downloadClient.config.apiKey ?? ''}
                       onChange={e => setData({ downloadClient: { ...downloadClient, config: { ...downloadClient.config, apiKey: e.target.value } } })}
@@ -652,13 +652,13 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               <p className="text-xs text-muted-foreground">TVDB or TMDB API key required</p>
             </div>
           </div>
-          <button onClick={() => setMetaPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/60 hover:text-foreground transition-colors">
+          <button aria-label="Close" onClick={() => setMetaPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/80 hover:text-foreground transition-colors">
             <XCircleIcon className="size-4" />
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
           <div>
-            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TVDB API Key</p>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">TVDB API Key</p>
             <div className="relative">
               <Input
                 type={showTvdbKey ? "text" : "password"}
@@ -667,7 +667,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 placeholder="TVDB_API_KEY"
                 className="font-mono pr-8"
               />
-              <button
+              <button aria-label={showTvdbKey ? "Hide TVDB key" : "Show TVDB key"}
                 type="button"
                 onClick={() => setShowTvdbKey(!showTvdbKey)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -677,7 +677,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             </div>
           </div>
           <div>
-            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TVDB PIN</p>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">TVDB PIN</p>
             <div className="relative">
               <Input
                 type={showTvdbPin ? "text" : "password"}
@@ -686,7 +686,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 placeholder="TVDB_PIN (optional)"
                 className="font-mono pr-8"
               />
-              <button
+              <button aria-label={showTvdbPin ? "Hide TVDB PIN" : "Show TVDB PIN"}
                 type="button"
                 onClick={() => setShowTvdbPin(!showTvdbPin)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -696,7 +696,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             </div>
           </div>
           <div>
-            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">TMDB API Key</p>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80 mb-1.5">TMDB API Key</p>
             <div className="relative">
               <Input
                 type={showTmdbKey ? "text" : "password"}
@@ -705,7 +705,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 placeholder="TMDB_API_KEY"
                 className="font-mono pr-8"
               />
-              <button
+              <button aria-label={showTmdbKey ? "Hide TMDB key" : "Show TMDB key"}
                 type="button"
                 onClick={() => setShowTmdbKey(!showTmdbKey)}
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
@@ -748,7 +748,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             <p className="text-xs text-muted-foreground">{selectedIds.size} of {sonarr.series.length} series selected</p>
           </div>
           </div>
-          <button onClick={() => setSonarrPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/60 hover:text-foreground transition-colors">
+          <button aria-label="Close" onClick={() => setSonarrPanelOpen(false)} className="size-8 flex items-center justify-center rounded-lg hover:bg-white/[0.04] text-muted-foreground/80 hover:text-foreground transition-colors">
             <XCircleIcon className="size-4" />
           </button>
         </div>
@@ -767,7 +767,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
             </Button>
           ) : (
             <div className="flex items-center justify-between">
-              <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
+              <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/80">
                 {filteredSeries.length} of {sonarr.series.length} series
               </p>
               <div className="flex gap-2">
@@ -791,7 +791,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 "text-xs px-2.5 py-1 rounded-lg font-medium transition-colors",
                 !typeFilter
                   ? "bg-white/10 text-foreground"
-                  : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.04]"
+                  : "text-muted-foreground hover:text-muted-foreground hover:bg-white/[0.04]"
               )}
             >
               All
@@ -804,7 +804,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                   "text-xs px-2.5 py-1 rounded-lg font-medium transition-colors",
                   typeFilter === st
                     ? "bg-white/10 text-foreground"
-                    : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.04]"
+                    : "text-muted-foreground hover:text-muted-foreground hover:bg-white/[0.04]"
                 )}
               >
                 {st.charAt(0).toUpperCase() + st.slice(1)}
@@ -834,7 +834,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 {selectedIds.has(s.id) && <CheckCircleIcon className="size-3 text-white" />}
               </div>
               <span className="flex-1 truncate">{s.title}</span>
-              <span className="text-xs text-muted-foreground/50 shrink-0">{s.year}</span>
+              <span className="text-xs text-muted-foreground shrink-0">{s.year}</span>
             </button>
           ))}
           {sonarr.tested && filteredSeries.length === 0 && (
@@ -847,10 +847,10 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
           {seriesTypes.length > 0 && (
             <div className="mx-6 px-5 py-4 rounded-lg bg-white/[0.02] border border-white/10">
               <div className="flex items-center gap-2 mb-3">
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground/40">
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground">
                   Type Routing
                 </p>
-                <span className="text-xs text-muted-foreground/30">— Route Sonarr series types into your libraries</span>
+                <span className="text-xs text-muted-foreground">— Route Sonarr series types into your libraries</span>
               </div>
               {libraryTypes.length > 0 ? (
               <div className="space-y-2.5 max-h-40 overflow-y-auto pr-1">
@@ -858,9 +858,9 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
                 const currentLibId = sonarrTypeMapping[st] ?? '';
                 return (
                   <div key={st} className="grid grid-cols-[auto_1fr_auto_1fr] items-center gap-2">
-                    <div className="font-mono text-[10px] text-muted-foreground/40 shrink-0">SONARR</div>
+                    <div className="font-mono text-[11px] text-muted-foreground shrink-0">SONARR</div>
                     <span className="text-sm font-mono text-muted-foreground/70 capitalize">{st}</span>
-                    <div className="text-muted-foreground/40">→</div>
+                    <div className="text-muted-foreground">→</div>
                     <Select
                       value={currentLibId}
                       onValueChange={(v) => {
@@ -883,7 +883,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
               })}
               </div>
               ) : (
-                <p className="text-sm text-muted-foreground/40 italic">
+                <p className="text-sm text-muted-foreground italic">
                   Complete the Create Libraries step first
                 </p>
               )}
@@ -928,7 +928,7 @@ export function StepIntegrations({ data, setData, onNext, onSkip, sonarrPanelOpe
         "mt-6 flex items-center justify-between transition-all duration-300",
         (sonarrPanelOpen || metaPanelOpen) && "opacity-0 pointer-events-none"
       )}>
-        <button onClick={onSkip} className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic">
+        <button onClick={onSkip} className="text-xs text-muted-foreground hover:text-muted-foreground/70 transition-colors italic">
           Skip and set up manually
         </button>
         <Button variant="glass" onClick={onNext} disabled={!hasMetadataKey} className="gap-2 h-10 px-5 rounded-xl">

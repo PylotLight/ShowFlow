@@ -170,7 +170,7 @@ export function BackupPanel() {
             {backups.map(b => (
               <div key={b.name} className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
                 <div className="size-8 rounded-lg bg-signal/10 grid place-items-center shrink-0">
-                  <span className="text-signal font-mono text-[10px] font-bold leading-none">DB</span>
+                  <span className="text-signal font-mono text-[11px] font-bold leading-none">DB</span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-mono text-sm font-medium truncate">{b.name}</div>
@@ -180,16 +180,16 @@ export function BackupPanel() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Button
+                  <Button aria-label="Restore from this backup"
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => setConfirmRestore(b.name)}
                     title="Restore from this backup"
-                    className="text-amber-500/60 hover:text-amber-400"
+                    className="text-amber-500/90 hover:text-amber-400"
                   >
                     <RefreshCwIcon className="size-3.5" />
                   </Button>
-                  <a
+                  <a aria-label="Download .db"
                     href={`/api/backups/${b.name}`}
                     download
                     className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
@@ -204,15 +204,15 @@ export function BackupPanel() {
                       className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
                       title="Download seed SQL"
                     >
-                      <span className="text-[10px] font-mono font-bold px-1">SQL</span>
+                      <span className="text-[11px] font-mono font-bold px-1">SQL</span>
                     </a>
                   )}
-                  <Button
+                  <Button aria-label="Delete this backup"
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => setConfirmDelete(b.name)}
                     title="Delete this backup"
-                    className="text-red-500/60 hover:text-red-400"
+                    className="text-red-500/90 hover:text-red-400"
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -224,7 +224,7 @@ export function BackupPanel() {
       </GlassPanel>
 
       {confirmRestore && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" aria-label="Restore backup" className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#0a0a0f] p-6 shadow-2xl space-y-4">
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Restore Backup</h3>
             <p className="text-muted-foreground text-sm">
@@ -245,12 +245,12 @@ export function BackupPanel() {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" aria-label="Delete backup" className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#0a0a0f] p-6 shadow-2xl space-y-4">
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Delete Backup</h3>
             <p className="text-muted-foreground text-sm">
               Permanently delete <span className="font-mono text-white/70">{confirmDelete}</span>
-              <span className="text-white/50"> + its seed SQL companion, if present</span>? This can't be undone.
+              <span className="text-white/60"> + its seed SQL companion, if present</span>? This can't be undone.
             </p>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>
