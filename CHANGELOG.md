@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **RSS sync**: new `rss-sync` task (every 15 min, on by default) pulls each indexer's latest-releases feed instead of searching per episode — Prowlarr via each indexer's newznab/torznab `t=tvsearch` feed, plus Nyaa, SubsPlease and Knaben natively (TPB/RARBG have no feed and are skipped). New items (per-feed cursor, each release processed once) are matched to tracked, missing, aired episodes, scored with the show's profile and the best per episode goes through the normal grab path. Auto-grab stays as the per-episode backfill and skips anything RSS already grabbed. Feed failures show up on the health dashboard as `<indexer> (RSS)`.
 
 ## [v0.1.79] - 2026-10-10
 - **Fix**: release samples no longer replace the real episode. TorBox used to download every video in a torrent, and the sample (same episode, same release tags) then out-scored the probed library copy on import and "upgraded" over it. Samples (`sample`/`samples` in the name or a `Sample/` folder, plus tiny clips under 10% of the largest video in a multi-file torrent) are now skipped at download, ignored by the watch-folder importer, never treated as an upgrade, and skipped by library scans.

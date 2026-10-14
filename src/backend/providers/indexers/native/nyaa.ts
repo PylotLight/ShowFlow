@@ -1,4 +1,4 @@
-import type { IndexerResult, SearchOptions } from '../types';
+import type { IndexerResult, RecentFeed, SearchOptions } from '../types';
 import { BaseNativeIndexer } from './base';
 
 /**
@@ -22,6 +22,12 @@ export class NyaaSiIndexer extends BaseNativeIndexer {
 
     const rss = await this.fetchRss(url);
     return this.parseRss(rss);
+  }
+
+  /** RSS sync: the same feed with no `q` is Nyaa's latest-uploads listing. */
+  async fetchRecent(): Promise<RecentFeed[]> {
+    const rss = await this.fetchRss(`${this.baseUrl}/?page=rss&c=1_2`);
+    return this.asRecentFeed(this.parseRss(rss));
   }
 
   private parseRss(xml: string): IndexerResult[] {

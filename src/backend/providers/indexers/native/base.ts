@@ -2,6 +2,7 @@ import type {
   Indexer,
   IndexerInfo,
   IndexerResult,
+  RecentFeed,
   SearchOptions,
 } from '../types';
 import type { NativeIndexerId } from './types';
@@ -117,6 +118,11 @@ export abstract class BaseNativeIndexer implements Indexer {
       throw new Error(`${this.name} API returned ${res.status} for POST ${url}`);
     }
     return res.json() as Promise<T>;
+  }
+
+  /** Wraps a native tracker's latest listing as its single RSS feed (cursor key = tracker id). */
+  protected asRecentFeed(results: IndexerResult[]): RecentFeed[] {
+    return [{ key: this.id, name: this.name, results }];
   }
 
   /**

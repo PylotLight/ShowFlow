@@ -1,4 +1,4 @@
-import type { IndexerResult, SearchOptions } from '../types';
+import type { IndexerResult, RecentFeed, SearchOptions } from '../types';
 import { BaseNativeIndexer } from './base';
 
 interface KnabenHit {
@@ -75,6 +75,20 @@ export class KnabenIndexer extends BaseNativeIndexer {
 
     const data = await this.fetchPostJson<KnabenResponse>(this.baseUrl, body);
     return this.parseResponse(data);
+  }
+
+  /** RSS sync: no query (omitted - an empty string matches nothing), ordered by date = latest TV + anime uploads. */
+  async fetchRecent(): Promise<RecentFeed[]> {
+    const data = await this.fetchPostJson<KnabenResponse>(this.baseUrl, {
+      order_by: 'date',
+      order_direction: 'desc',
+      categories: [...this.tvCategoryIds(), ...this.animeCategoryIds()],
+      from: 0,
+      size: 100,
+      hide_unsafe: true,
+      hide_xxx: true,
+    });
+    return this.asRecentFeed(this.parseResponse(data));
   }
 
   private parseResponse(data: KnabenResponse): IndexerResult[] {

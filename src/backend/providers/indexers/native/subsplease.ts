@@ -1,4 +1,4 @@
-import type { IndexerResult, SearchOptions } from '../types';
+import type { IndexerResult, RecentFeed, SearchOptions } from '../types';
 import { BaseNativeIndexer } from './base';
 
 /**
@@ -35,6 +35,12 @@ export class SubsPleaseIndexer extends BaseNativeIndexer {
       const lower = r.title.toLowerCase();
       return terms.every(t => lower.includes(t));
     });
+  }
+
+  /** RSS sync: the site feed *is* a latest-releases listing. */
+  async fetchRecent(): Promise<RecentFeed[]> {
+    const rss = await this.fetchRss(`${this.baseUrl}/rss/?r=${this.resolution}`);
+    return this.asRecentFeed(this.parseRss(rss));
   }
 
   private parseRss(xml: string): IndexerResult[] {
