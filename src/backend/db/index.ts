@@ -9,6 +9,7 @@ import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema';
 
 import { seedDefaults, migrateQualityIds } from './init';
+import { convertLegacyProfiles } from './quality_model';
 import { backfillShowTitles } from './shows';
 import { extractReleaseMeta } from '../core/release_meta';
 import * as shows from './shows';
@@ -169,6 +170,15 @@ export class DatabaseManager {
 
     seedDefaults(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
     migrateQualityIds(this.drizz as unknown as BunSQLiteDatabase<typeof schema>);
+    // One-time: legacy quality profiles (custom formats + allow-list + tier
+    // cutoff) -> streamlined model (resolution target/min, source skips,
+    // terms, upgrade-until). Idempotent; converted profiles are skipped.
+    try {
+      const converted = convertLegacyProfiles(this);
+      for (const c of converted) console.log(`[quality] Converted profile "${c.name}" to the streamlined model (${c.terms} terms)${c.notes.length ? `: ${c.notes.join('; ')}` : ''}`);
+    } catch (err) {
+      console.warn('[quality] Profile conversion failed (engine converts in memory until it succeeds):', err);
+    }
 
     const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;
     if (!titleCount || titleCount.c === 0) {

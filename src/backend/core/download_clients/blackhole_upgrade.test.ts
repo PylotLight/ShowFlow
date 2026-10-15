@@ -5,6 +5,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "../../db";
 import { BlackholeClient } from "./blackhole";
 import { isSafeReplaceArtifact } from "./safe_replace";
+import { saveProfileModel } from "../../db/quality_model";
 
 // Upgrade safety for the watch-folder importer:
 //  - the old library file is only retired after the new one is in place AND
@@ -15,6 +16,8 @@ import { isSafeReplaceArtifact } from "./safe_replace";
 // ids per run + explicit cleanup. The oracle is stubbed so no provider calls.
 const RUN_ID = `bhup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+const UP_PROFILE = `${RUN_ID}-up`;
+const OFF_PROFILE = `${RUN_ID}-off`;
 let watchRoot = "";
 let libraryRoot = "";
 let showId = "";
@@ -31,12 +34,17 @@ beforeEach(() => {
     config: {},
     rootFolderPath: libraryRoot,
   });
+  // Upgrades must be on for imports to replace anything (off really means off).
+  saveProfileModel(db, { id: UP_PROFILE, name: "Upgrades on", upgradesEnabled: true });
+  saveProfileModel(db, { id: OFF_PROFILE, name: "Upgrades off", upgradesEnabled: false });
+  db.db.run(`UPDATE shows SET profile = ?, library_type_id = NULL WHERE id = ?`, [UP_PROFILE, showId]);
 });
 
 afterEach(() => {
   try {
     db.removeShow(showId);
     db.db.run(`DELETE FROM processed_files WHERE original_path LIKE ?`, [`${watchRoot}%`]);
+    db.db.run(`DELETE FROM quality_profiles WHERE id IN (?, ?)`, [UP_PROFILE, OFF_PROFILE]);
   } catch {}
   fs.rmSync(watchRoot, { recursive: true, force: true });
   fs.rmSync(libraryRoot, { recursive: true, force: true });
@@ -111,6 +119,19 @@ test("multi-episode upgrade over every covered episode replaces both files and a
   expect(db.getCurrentEpisodeFile(showId, 1, 1)?.file_path).toBe(dest);
   expect(db.getCurrentEpisodeFile(showId, 1, 2)?.file_path).toBe(dest);
   expect(artifacts()).toHaveLength(0);
+}, 30_000);
+
+test("upgrades off in the profile: a better file is NOT imported over the existing one", async () => {
+  db.db.run(`UPDATE shows SET profile = ? WHERE id = ?`, [OFF_PROFILE, showId]);
+  const e1 = seedExisting("Upgrade.Show.S01E01.720p.HDTV.x264-A.mkv", [1]);
+  const name = drop("Upgrade.Show.S01E01.1080p.WEB-DL.x264-C.mkv");
+
+  const client = makeClient([1], "Season 01/Upgrade Show - S01E01.mkv");
+  await (client as any).handleFile(watchRoot, name);
+
+  expect(fs.existsSync(e1)).toBe(true);
+  expect(epPath(1)).toBe(e1);
+  expect(fs.existsSync(path.join(watchRoot, name))).toBe(true);
 }, 30_000);
 
 test("an old file that also holds an episode outside the new file is kept", async () => {

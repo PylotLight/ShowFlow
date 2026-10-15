@@ -1,326 +1,193 @@
 import { test, expect, describe } from "bun:test";
-import { qualityEngine } from "./quality_engine";
-import { db } from "../db";
-
-test("QualityEngine Scoring", async () => {
-  // Clear tables to ensure consistent tests (FKs off so delete order doesn't matter)
-  db.db.run('PRAGMA foreign_keys = OFF');
-  db.db.run('DELETE FROM quality_definitions');
-  db.db.run('DELETE FROM quality_profiles');
-  db.db.run('DELETE FROM custom_formats');
-  db.db.run('DELETE FROM profile_formats');
-  db.db.run('PRAGMA foreign_keys = ON');
-
-  // Setup test data
-  db.saveQuality({ id: 'q_720p', name: '720p', rank: 20 });
-  db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
-  db.saveQuality({ id: 'q_2160p', name: '2160p', rank: 40 });
-
-  db.saveProfile({ id: 'p1', name: 'High Quality' });
-  db.saveCustomFormat({ id: 'f1', name: 'HDR', regex: 'HDR', score: 50 });
-  db.saveCustomFormat({ id: 'f2', name: 'x265', regex: 'x265', score: 10 });
-  
-  db.addProfileFormat('p1', 'f1');
-  db.addProfileFormat('p1', 'f2');
-
-  const file720 = "Show.S01E01.720p.mkv";
-  const file1080 = "Show.S01E01.1080p.mkv";
-  const file1080HDR = "Show.S01E01.1080p.HDR.x265.mkv";
-  const file2160p = "Show.S01E01.2160p.mkv";
-
-  const score720 = qualityEngine.getReleaseScore(file720, 'p1');
-  const score1080 = qualityEngine.getReleaseScore(file1080, 'p1');
-  const score1080HDR = qualityEngine.getReleaseScore(file1080HDR, 'p1');
-  const score2160p = qualityEngine.getReleaseScore(file2160p, 'p1');
-
-  console.log(`Score 720: ${score720.totalScore}`);
-  console.log(`Score 1080: ${score1080.totalScore}`);
-  console.log(`Score 1080HDR: ${score1080HDR.totalScore}`);
-  console.log(`Score 2160p: ${score2160p.totalScore}`);
-
-  expect(score1080.totalScore).toBeGreaterThan(score720.totalScore);
-  expect(score1080HDR.totalScore).toBeGreaterThan(score1080.totalScore);
-  expect(score2160p.totalScore).toBeGreaterThan(score1080HDR.totalScore);
-
-  expect(qualityEngine.shouldUpgrade(file720, file1080, 'p1')).toBe(true);
-  expect(qualityEngine.shouldUpgrade(file1080HDR, file1080, 'p1')).toBe(false);
-});
-
-test("Codec families auto-match every spelling of a format", async () => {
-  db.db.run('PRAGMA foreign_keys = OFF');
-  db.db.run('DELETE FROM quality_definitions');
-  db.db.run('DELETE FROM quality_profiles');
-  db.db.run('DELETE FROM custom_formats');
-  db.db.run('DELETE FROM profile_formats');
-  db.db.run('PRAGMA foreign_keys = ON');
-
-  db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
-  db.saveProfile({ id: 'p2', name: 'Codec Profile' });
-
-  // A single "H.265" format should catch every spelling:
-  // x265, X.265, h265, h.265, h-265, HEVC, hvc1, and bare "265".
-  db.saveCustomFormat({ id: 'fh265', name: 'H.265', regex: 'H.265', score: 50 });
-  db.addProfileFormat('p2', 'fh265');
-
-  const cases = [
-    "Show.S01E01.1080p.x265.mkv",
-    "Show.S01E01.1080p.X.265.mkv",
-    "Show.S01E01.1080p.h265.mkv",
-    "Show.S01E01.1080p.H.265.mkv",
-    "Show.S01E01.1080p.h-265.mkv",
-    "Show.S01E01.1080p.HEVC.mkv",
-    "Show.S01E01.1080p.hvc1.mkv",
-    "Show.S01E01.1080p.265.mkv",
-  ];
-  for (const file of cases) {
-    const score = qualityEngine.getReleaseScore(file, 'p2');
-    expect(score.rejected).toBe(false);
-    expect(score.formatScore).toBe(50);
-    expect(score.matchedTags).toContain("H.265");
-  }
-
-  // A different codec must NOT match the H.265 format.
-  const h264 = qualityEngine.getReleaseScore("Show.S01E01.1080p.x264.mkv", 'p2');
-  expect(h264.formatScore).toBe(0);
-
-  // Tag scanning surfaces the family label regardless of spelling.
-  const tags = qualityEngine.getReleaseScore("Show.S01E01.1080p.HEVC.mkv", 'p2').matchedTags;
-  expect(tags).toContain("H.265");
-});
-
-test("Media-aware scoring: cleaned stored names don't lose to lower resolutions", async () => {
-  db.db.run('PRAGMA foreign_keys = OFF');
-  db.db.run('DELETE FROM quality_definitions');
-  db.db.run('DELETE FROM quality_profiles');
-  db.db.run('DELETE FROM custom_formats');
-  db.db.run('DELETE FROM profile_formats');
-  db.db.run('PRAGMA foreign_keys = ON');
-
-  db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
-  db.saveQuality({ id: 'q_2160p', name: '2160p', rank: 40 });
-  db.saveProfile({ id: 'p3', name: 'Media Profile' });
-
-  // The exact Reacher S04E01 scenario: a 6.5GB 2160p HEVC file stored under a
-  // clean name ("Reacher - S04E01 - City of Brotherly Love.mkv") vs an
-  // arriving WEBRip-1080p.
-  const stored2160 = {
-    video: { codec: 'hevc', width: 3840, height: 2160, fps: 23.976, codedWidth: 3840, codedHeight: 2160, bitrate: null, averageBitrate: null, hdr: false },
-    audio: [{ codec: 'eac3', channels: 6, sampleRate: 48000, bitrate: null, averageBitrate: null }],
-    overallBitrate: 18_731_592,
-    fileSize: 6_510_427_156,
-  };
-
-  // Filename-only comparison says the WEBRip IS an upgrade -> the root cause.
-  const cleanName = "Reacher - S04E01 - City of Brotherly Love.mkv";
-  const arriving1080 = "Reacher.S04E01.WEBRip.1080p.HEVC.x265.mkv";
-  expect(qualityEngine.shouldUpgrade(cleanName, arriving1080, 'p3')).toBe(true);
-
-  // Media-aware comparison sees the stored 2160p and correctly refuses.
-  expect(qualityEngine.shouldUpgradeWithMedia(stored2160, cleanName, arriving1080, 'p3')).toBe(false);
-
-  // A real 2160p arrival still upgrades a stored 1080p.
-  const stored1080 = {
-    video: { codec: 'hevc', width: 1920, height: 960, fps: 23.976, codedWidth: 1920, codedHeight: 960, bitrate: null, averageBitrate: null, hdr: false },
-    audio: [{ codec: 'eac3', channels: 6, sampleRate: 48000, bitrate: null, averageBitrate: null }],
-    overallBitrate: 1_828_638,
-    fileSize: 635_562_686,
-  };
-  const arriving2160 = "Reacher.S04E01.2160p.WEBDL.HEVC.mkv";
-  expect(qualityEngine.shouldUpgradeWithMedia(stored1080, cleanName, arriving2160, 'p3')).toBe(true);
-
-  // getReleaseScoreFromMedia matches a 2160p tag to the 2160p quality rank.
-  const s = qualityEngine.getReleaseScoreFromMedia(stored2160, 'p3');
-  expect(s.rejected).toBe(false);
-  expect(s.qualityName).toBe('2160p');
-});
-
-// ---- Real release names, seeded tiers, de-duped formats --------------------
-
-import { mergeProbeWithRelease, formatGroupKey } from "./quality_engine";
+import { db, DatabaseManager } from "../db";
+import { qualityEngine, mergeProbeWithRelease } from "./quality_engine";
+import { scoreTerms, builtinTermsIn, BUILTIN_TERMS, type ResolvedTerm } from "./quality_terms";
+import { saveProfileModel, getProfileModel, convertLegacyProfiles, saveCustomTerm, removeCustomTerm } from "../db/quality_model";
 import { testReleaseName } from "./release_test";
-import seedManifest from "../db/seed/manifest.json";
+import { getProfileCutoff, isCutoffMet } from "./cutoff";
+import { sonarrProfileToModel } from "../providers/sonarr/profile_map";
 
-function resetQualityTables() {
-  db.db.run('PRAGMA foreign_keys = OFF');
-  db.db.run('DELETE FROM quality_definitions');
-  db.db.run('DELETE FROM quality_profiles');
-  db.db.run('DELETE FROM custom_formats');
-  db.db.run('DELETE FROM profile_formats');
-  db.db.run('DELETE FROM profile_qualities');
-  db.db.run('PRAGMA foreign_keys = ON');
-  for (const q of seedManifest.qualities) db.saveQuality(q);
-}
+const RUN = `qe_${Date.now().toString(36)}`;
+const pid = (s: string) => `${RUN}_${s}`;
 
-/** The user's Anime setup: five HEVC spellings (+50 each) and VOSTFR avoid. */
-function seedAnimeProfile() {
-  resetQualityTables();
-  db.saveProfile({ id: 'anime', name: 'Anime' });
-  const formats = [
-    { id: 'f_x265', name: 'x265', regex: 'x265', score: 50 },
-    { id: 'f_hevc', name: 'HEVC', regex: 'HEVC', score: 50 },
-    { id: 'f_h265', name: 'H265', regex: 'H265', score: 50 },
-    { id: 'f_265', name: '265', regex: '265', score: 50 },
-    { id: 'f_h.265', name: 'H.265', regex: 'H\\.265', score: 50 },
-    { id: 'f_vostfr', name: 'VOSTFR', regex: 'vostfr', score: -50 },
-  ];
-  for (const f of formats) {
-    db.saveCustomFormat(f);
-    db.addProfileFormat('anime', f.id);
-  }
-}
+const term = (termId: string, mode: ResolvedTerm["mode"], weight: number | null = null): ResolvedTerm => {
+  const b = BUILTIN_TERMS.find(t => t.id === termId)!;
+  return { termId, label: b.label, group: b.group, mode, weight, regex: null };
+};
 
-describe("real-world release names", () => {
-  test("source tiers rank: Remux > BluRay > WEB-DL > WEBRip at the same resolution", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'std', name: 'Standard' });
-    const s = (n: string) => qualityEngine.getReleaseScore(n, 'std');
-    const remux = s('Show.S01E01.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-FraMeSToR');
-    const bluray = s('Show.S01E01.1080p.BluRay.x264-GRP');
-    const webdl = s('Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb');
-    const webrip = s('Show.S01E01.1080p.WEBRip.x264-GRP');
-    expect(remux.qualityName).toBe('Remux-1080p');
-    expect(webdl.qualityName).toBe('WEBDL-1080p');
-    expect(webdl.source).toBe('webdl');
-    expect(webdl.resolution).toBe(1080);
-    expect(remux.totalScore).toBeGreaterThan(bluray.totalScore);
-    expect(bluray.totalScore).toBeGreaterThan(webdl.totalScore);
-    expect(webdl.totalScore).toBeGreaterThan(webrip.totalScore);
-    expect(qualityEngine.shouldUpgrade('Show.S01E01.1080p.WEBRip.x264-GRP', 'Show.S01E01.1080p.WEB-DL.H.264-NTb', 'std')).toBe(true);
+describe("term library", () => {
+  test("every HEVC spelling is one term, counted once", () => {
+    const t = [term("hevc", "prefer")];
+    for (const name of ["S01E01.1080p.x265", "S01E01.1080p.X.265", "S01E01.h265", "S01E01.H.265", "S01E01.h-265", "S01E01.HEVC", "S01E01.hvc1", "S01E01 x265 HEVC H.265"]) {
+      expect(scoreTerms(name, t).score).toBe(100);
+    }
+    // bare absolute episode number is not a codec
+    expect(scoreTerms("[SubsPlease] One Piece - 265 (1080p)", t).score).toBe(0);
   });
 
-  test("2160p UHD HDR and bare 4K names parse as 2160p", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'std', name: 'Standard' });
-    expect(qualityEngine.getReleaseScore('Show.S01E01.2160p.WEB-DL.DV.HDR.H.265-FLUX', 'std').qualityName).toBe('WEBDL-2160p');
-    expect(qualityEngine.getReleaseScore('Show.S01E01.UHD.BluRay.REMUX.HDR.HEVC.Atmos', 'std').qualityName).toBe('Remux-2160p');
-    const fourK = qualityEngine.getReleaseScore('Show S01E01 4K HDR', 'std');
-    expect(fourK.qualityName).toBe('2160p');
-    expect(fourK.rank).toBe(40);
+  test("tricky tags", () => {
+    expect(builtinTermsIn("Show.S01E01.DVDRip.x264")).not.toContain("dv");
+    // classification picks the specific HDR term; scoring still lets "Any HDR" match DV
+    expect(builtinTermsIn("Show.S01E01.2160p.DV.HDR10.HEVC")).toEqual(expect.arrayContaining(["dv", "hevc"]));
+    expect(scoreTerms("Show.S01E01.2160p.DV.HEVC", [term("hdr", "prefer")]).score).toBe(100);
+    expect(builtinTermsIn("Show S01 MULTi 1080p")).toContain("multi");
+    expect(builtinTermsIn("Show S01 Multi-Subs 1080p")).toEqual(expect.arrayContaining(["multi_subs"]));
+    expect(builtinTermsIn("Show S01 Multi-Subs 1080p")).not.toContain("multi");
+    expect(builtinTermsIn("[SubsPlease] Frieren - 01 (1080p) [ABCD].mkv")).toContain("g_subsplease");
+    expect(builtinTermsIn("Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb")).toEqual(expect.arrayContaining(["ddp", "avc", "g_ntb"]));
+    expect(builtinTermsIn("Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb.mkv")).toContain("g_ntb");
+    expect(builtinTermsIn("[Team] Frieren - 01 VOSTFR 1080p")).toContain("vostfr");
   });
 
-  test("HEVC spellings count once: x265/HEVC/H265/265/H.265 no longer stack", () => {
-    seedAnimeProfile();
-    const erai = qualityEngine.getReleaseScore('[Erai-raws] Frieren - 01 [1080p][HEVC][Multiple Subtitle].mkv', 'anime');
-    expect(erai.formatScore).toBe(50);
-    expect(erai.totalScore).toBe(30050);
-    const res = qualityEngine.calculateFormatScore('[Erai-raws] Frieren - 01 [1080p][HEVC].mkv', 'anime');
-    expect(res.matchedFormats).toHaveLength(1);
-    const deduped = res.hits.filter(h => h.deduped);
-    expect(deduped.map(h => h.name).sort()).toEqual(['265', 'H.265', 'H265', 'HEVC', 'x265'].filter(n => n !== res.matchedFormats[0]).sort());
-    expect(deduped.every(h => h.countedAs === res.matchedFormats[0])).toBe(true);
-  });
-
-  test("VOSTFR x265 no longer outscores clean SubsPlease by +200", () => {
-    seedAnimeProfile();
-    const subsplease = qualityEngine.getReleaseScore('[SubsPlease] Frieren - 01 (1080p) [ABCD1234].mkv', 'anime');
-    const vostfr = qualityEngine.getReleaseScore('[Team] Frieren - 01 VOSTFR 1080p x265', 'anime');
-    expect(subsplease.totalScore).toBe(30000);
-    expect(subsplease.qualityName).toBe('1080p');
-    // +50 HEVC (once) -50 VOSTFR: a tie with clean, not a +200 win.
-    expect(vostfr.formatScore).toBe(0);
-    expect(vostfr.totalScore).toBeLessThanOrEqual(subsplease.totalScore);
-  });
-
-  test("de-dup keeps the highest score in a group", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    db.saveCustomFormat({ id: 'a', name: 'x265', regex: 'x265', score: 10 });
-    db.saveCustomFormat({ id: 'b', name: 'H.265 / HEVC', regex: 'x.?265|hevc', score: 40 });
-    db.saveCustomFormat({ id: 'c', name: 'HDR', regex: 'HDR', score: 20 });
-    for (const id of ['a', 'b', 'c']) db.addProfileFormat('p', id);
-    const r = qualityEngine.calculateFormatScore('Show.S01E01.2160p.WEB-DL.HDR.x265', 'p');
-    expect(r.score).toBe(60);
-    expect(r.matchedFormats.sort()).toEqual(['H.265 / HEVC', 'HDR']);
-    expect(formatGroupKey({ name: 'x265', regex: 'x265' })).toBe(formatGroupKey({ name: 'HEVC', regex: 'HEVC' }));
-    expect(formatGroupKey({ name: 'VOSTFR', regex: 'vostfr' })).not.toBe(formatGroupKey({ name: 'ITA', regex: 'ita' }));
-  });
-
-  test("required/forbidden still apply per format, unaffected by de-dup", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    db.saveCustomFormat({ id: 'hevc', name: 'HEVC', regex: 'HEVC', score: 50 });
-    db.saveCustomFormat({ id: 'x265', name: 'x265', regex: 'x265', score: 50 });
-    db.saveCustomFormat({ id: 'vostfr', name: 'VOSTFR', regex: 'vostfr', score: 0 });
-    db.addProfileFormat('p', 'hevc', 'required');
-    db.addProfileFormat('p', 'x265', 'bonus');
-    db.addProfileFormat('p', 'vostfr', 'forbidden');
-    const ok = qualityEngine.getReleaseScore('Show.S01E01.1080p.WEB-DL.x265', 'p');
-    expect(ok.rejected).toBe(false);
-    expect(ok.formatScore).toBe(50);
-    const missing = qualityEngine.getReleaseScore('Show.S01E01.1080p.WEB-DL.x264', 'p');
-    expect(missing.rejectCode).toBe('MISSING_REQUIRED_FORMAT');
-    const forbidden = qualityEngine.getReleaseScore('[Team] Show - 01 VOSTFR 1080p x265', 'p');
-    expect(forbidden.rejectCode).toBe('FORBIDDEN_FORMAT_MATCHED');
-  });
-
-  test("allow-list uses the real tier now", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    db.addProfileQuality('p', 'q_webdl_1080p');
-    expect(qualityEngine.getReleaseScore('Show.S01E01.1080p.WEB-DL.H.264', 'p').rejected).toBe(false);
-    const rip = qualityEngine.getReleaseScore('Show.S01E01.1080p.WEBRip.x264', 'p');
-    expect(rip.rejected).toBe(true);
-    expect(rip.rejectCode).toBe('QUALITY_NOT_ALLOWED');
-  });
-
-  test("a bare resolution in the allow-list still accepts every source at that resolution", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    db.addProfileQuality('p', 'q_1080p');
-    expect(qualityEngine.getReleaseScore('Show.S01E01.1080p.WEB-DL.H.264', 'p').rejected).toBe(false);
-    expect(qualityEngine.getReleaseScore('Show.S01E01.1080p.BluRay.REMUX', 'p').rejected).toBe(false);
-    expect(qualityEngine.getReleaseScore('Show.S01E01.720p.WEB-DL', 'p').rejected).toBe(true);
+  test("must / never / custom weights", () => {
+    const custom: ResolvedTerm = { termId: "custom:x", label: "Team", group: "custom", mode: "prefer", weight: 42, regex: "\\[Team\\]" };
+    const r = scoreTerms("[Team] Show - 01 1080p x265", [term("hevc", "strong_prefer"), custom, term("vostfr", "never"), term("dual_audio", "must")]);
+    expect(r.score).toBe(342);
+    expect(r.neverMatched).toBeNull();
+    expect(r.missingMust).toEqual(["Dual audio"]);
+    const bad: ResolvedTerm = { ...custom, regex: "([" };
+    expect(scoreTerms("x", [bad]).hits[0]!.invalid).toBe(true);
   });
 });
 
-describe("probed files vs source tiers", () => {
-  const probed1080 = {
-    video: { codec: 'h264', width: 1920, height: 1080, fps: 23.976, codedWidth: 1920, codedHeight: 1080, bitrate: null, averageBitrate: null, hdr: false },
-    audio: [{ codec: 'eac3', channels: 6, sampleRate: 48000, bitrate: null, averageBitrate: null }],
-    overallBitrate: 6_000_000,
-    fileSize: 2_000_000_000,
-  };
-
-  test("a same-resolution release can't upgrade a probed file on source alone", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    const s = qualityEngine.getReleaseScoreFromMedia(probed1080, 'p');
-    expect(s.qualityName).toBe('1080p');
-    expect(s.totalScore).toBe(35000); // assumes Remux-1080p for comparison
-    expect(qualityEngine.shouldUpgradeWithMedia(probed1080, 'Show - S01E01.mkv', 'Show.S01E01.1080p.WEB-DL.H.264', 'p')).toBe(false);
-    expect(qualityEngine.shouldUpgradeWithMedia(probed1080, 'Show - S01E01.mkv', 'Show.S01E01.2160p.WEB-DL.H.265', 'p')).toBe(true);
+describe("streamlined scoring", () => {
+  test("strong avoid: VOSTFR x265 loses to clean SubsPlease", () => {
+    saveProfileModel(db, { id: pid("anime"), name: "Anime", terms: [{ termId: "hevc", mode: "prefer" }, { termId: "vostfr", mode: "strong_avoid" }] });
+    const clean = qualityEngine.getReleaseScore("[SubsPlease] Frieren - 01 (1080p) [ABCD1234].mkv", pid("anime"));
+    const vostfr = qualityEngine.getReleaseScore("[Team] Frieren - 01 VOSTFR 1080p x265", pid("anime"));
+    const hevc = qualityEngine.getReleaseScore("[Erai-raws] Frieren - 01 [1080p][HEVC]", pid("anime"));
+    expect(vostfr.totalScore).toBeLessThan(clean.totalScore);
+    expect(hevc.totalScore).toBeGreaterThan(clean.totalScore);
+    expect(hevc.formatScore).toBe(100);
   });
 
-  test("a known stored source lets a real source upgrade through", () => {
-    resetQualityTables();
-    db.saveProfile({ id: 'p', name: 'P' });
-    const stored = 'Show.S01E01.1080p.WEBRip.x264-GRP';
-    expect(qualityEngine.shouldUpgradeWithMedia(probed1080, 'Show - S01E01.mkv', 'Show.S01E01.1080p.WEB-DL.H.264', 'p', stored)).toBe(true);
-    expect(qualityEngine.shouldUpgradeWithMedia(probed1080, 'Show - S01E01.mkv', 'Show.S01E01.1080p.HDTV.x264', 'p', stored)).toBe(false);
-    // A stored title with no source (anime) keeps the assume-best rule.
-    const anime = '[SubsPlease] Show - 01 (1080p) [ABCD1234].mkv';
-    expect(qualityEngine.shouldUpgradeWithMedia(probed1080, 'Show - S01E01.mkv', 'Show.S01E01.1080p.WEB-DL.H.264', 'p', anime)).toBe(false);
-    const merged = mergeProbeWithRelease(qualityEngine.getReleaseScoreFromMedia(probed1080, 'p'), qualityEngine.getReleaseScore(stored, 'p'));
-    expect(merged.qualityName).toBe('WEBRip-1080p');
-    expect(merged.totalScore).toBe(32000);
+  test("fixed source order: Remux > BluRay > WEB-DL > unknown > WEBRip > HDTV", () => {
+    saveProfileModel(db, { id: pid("std"), name: "Std" });
+    const t = (n: string) => qualityEngine.getReleaseScore(n, pid("std")).totalScore;
+    const remux = t("Show.S01E01.1080p.BluRay.REMUX.AVC");
+    const bluray = t("Show.S01E01.1080p.BluRay.x264");
+    const webdl = t("Show.S01E01.1080p.WEB-DL.H.264");
+    const unknown = t("[Group] Show - 01 (1080p)");
+    const webrip = t("Show.S01E01.1080p.WEBRip.x264");
+    const hdtv = t("Show.S01E01.1080p.HDTV.x264");
+    expect([remux, bluray, webdl, unknown, webrip, hdtv]).toEqual([...[remux, bluray, webdl, unknown, webrip, hdtv]].sort((a, b) => b - a));
+    expect(new Set([remux, bluray, webdl, unknown, webrip, hdtv]).size).toBe(6);
+    expect(t("Show.S01E01.720p.BluRay.REMUX")).toBeLessThan(hdtv);
+    const uhd = qualityEngine.getReleaseScore("Show S01E01 4K HDR", pid("std"));
+    expect(uhd.resolution).toBe(2160);
+    expect(uhd.qualityName).toBe("2160p");
   });
-});
 
-describe("testReleaseName (settings test box)", () => {
-  test("full breakdown", () => {
-    seedAnimeProfile();
-    db.db.run("UPDATE quality_profiles SET cutoff_quality_id = 'q_webdl_1080p' WHERE id = 'anime'");
-    const r = testReleaseName('[Team] Frieren - 01 VOSTFR 1080p WEBRip x265', 'anime');
+  test("resolution target/min, unknown toggle, skipped sources", () => {
+    saveProfileModel(db, { id: pid("res"), name: "Res", minResolution: 720, targetResolution: 1080, allowUnknownResolution: false, skipSources: ["hdtv"] });
+    const s = (n: string) => qualityEngine.getReleaseScore(n, pid("res"));
+    expect(s("Show.S01E01.2160p.WEB-DL").rejectCode).toBe("QUALITY_NOT_ALLOWED");
+    expect(s("Show.S01E01.480p.WEB-DL").rejectCode).toBe("QUALITY_NOT_ALLOWED");
+    expect(s("Show.S01E01.WEB-DL").rejectCode).toBe("QUALITY_UNKNOWN");
+    expect(s("Show.S01E01.1080p.HDTV").rejectReason).toContain("HDTV is skipped");
+    expect(s("Show.S01E01.720p.WEB-DL").rejected).toBe(false);
+    saveProfileModel(db, { id: pid("res"), name: "Res", allowUnknownResolution: true });
+    expect(s("Show.S01E01.WEB-DL").rejected).toBe(false);
+  });
+
+  test("custom regex terms score with their weight and disappear when deleted", () => {
+    saveCustomTerm(db, { id: `${RUN}_ct`, name: "Team", regex: "\\[Team\\]" });
+    saveProfileModel(db, { id: pid("ct"), name: "Ct", terms: [{ termId: `custom:${RUN}_ct`, mode: "avoid", weight: -50 }] });
+    expect(qualityEngine.getReleaseScore("[Team] Show - 01 (1080p)", pid("ct")).formatScore).toBe(-50);
+    removeCustomTerm(db, `${RUN}_ct`);
+    expect(getProfileModel(db, pid("ct"))!.terms).toEqual([]);
+  });
+
+  test("upgrades off really means off: no import replacement either", () => {
+    saveProfileModel(db, { id: pid("off"), name: "Off", upgradesEnabled: false });
+    saveProfileModel(db, { id: pid("on"), name: "On", upgradesEnabled: true });
+    const old = "Show.S01E01.720p.HDTV.x264", better = "Show.S01E01.1080p.WEB-DL.x264";
+    expect(qualityEngine.shouldUpgrade(old, better, pid("on"))).toBe(true);
+    expect(qualityEngine.shouldUpgrade(old, better, pid("off"))).toBe(false);
+    const probe = { video: { codec: "h264", width: 1280, height: 720, hdr: false } as any, audio: [], overallBitrate: 3_000_000, fileSize: 1 };
+    expect(qualityEngine.shouldUpgradeWithMedia(probe, "Show - S01E01.mkv", better, pid("on"))).toBe(true);
+    expect(qualityEngine.shouldUpgradeWithMedia(probe, "Show - S01E01.mkv", better, pid("off"))).toBe(false);
+    expect(getProfileCutoff(db, pid("off"))).toBeNull();
+  });
+
+  test("probed files assume the best source; a stored release title can override", () => {
+    saveProfileModel(db, { id: pid("probe"), name: "Probe", upgradesEnabled: true });
+    const probe = { video: { codec: "h264", width: 1920, height: 1080, hdr: false } as any, audio: [{ codec: "eac3" } as any], overallBitrate: 6_000_000, fileSize: 1 };
+    const s = qualityEngine.getReleaseScoreFromMedia(probe, pid("probe"));
+    expect(s.qualityName).toBe("1080p");
+    expect(s.totalScore).toBe(37000);
+    expect(qualityEngine.shouldUpgradeWithMedia(probe, "x.mkv", "Show.S01E01.1080p.WEB-DL.H.264", pid("probe"))).toBe(false);
+    expect(qualityEngine.shouldUpgradeWithMedia(probe, "x.mkv", "Show.S01E01.1080p.WEB-DL.H.264", pid("probe"), "Show.S01E01.1080p.WEBRip.x264")).toBe(true);
+    const merged = mergeProbeWithRelease(s, qualityEngine.getReleaseScore("Show.S01E01.1080p.WEBRip.x264", pid("probe")));
+    expect(merged.qualityName).toBe("WEBRip-1080p");
+  });
+
+  test("upgrade until quality, and until a term score", () => {
+    saveProfileModel(db, { id: pid("until"), name: "Until", upgradesEnabled: true, upgradeUntilResolution: 1080, upgradeUntilSource: "webdl", upgradeUntilScore: 100, terms: [{ termId: "hevc", mode: "prefer" }] });
+    const c = getProfileCutoff(db, pid("until"))!;
+    expect(c.name).toBe("WEBDL-1080p");
+    expect(isCutoffMet({ rank: 33, qualityName: "WEBRip-1080p", termScore: 100 }, c)).toBe(false);
+    expect(isCutoffMet({ rank: 35, qualityName: "WEBDL-1080p", termScore: 0 }, c)).toBe(false);
+    expect(isCutoffMet({ rank: 35, qualityName: "WEBDL-1080p", termScore: 100 }, c)).toBe(true);
+    expect(isCutoffMet({ rank: 34, qualityName: "1080p", termScore: 100 }, c)).toBe(true); // probed bare 1080p
+  });
+
+  test("test box breakdown", () => {
+    saveProfileModel(db, { id: pid("box"), name: "Box", upgradesEnabled: true, upgradeUntilResolution: 1080, upgradeUntilSource: "webdl", terms: [{ termId: "hevc", mode: "prefer" }, { termId: "vostfr", mode: "strong_avoid" }] });
+    const r = testReleaseName("[Team] Frieren - 01 VOSTFR 1080p WEBRip x265", pid("box"));
     expect(r.resolution).toBe(1080);
-    expect(r.source).toBe('WEBRip');
-    expect(r.tier?.name).toBe('WEBRip-1080p');
-    expect(r.tierVia).toBe('exact');
-    expect(r.formatScore).toBe(0);
-    expect(r.totalScore).toBe(32000);
+    expect(r.source).toBe("WEBRip");
+    expect(r.quality).toEqual({ name: "WEBRip-1080p", rank: 33 });
+    expect(r.termScore).toBe(-200);
+    expect(r.totalScore).toBe(33000 - 200);
     expect(r.allowed).toBe(true);
-    expect(r.formats.filter(f => f.matched && f.deduped).length).toBe(4);
-    expect(r.cutoff).toEqual({ name: 'WEBDL-1080p', rank: 33, met: false });
-    const met = testReleaseName('Frieren.S01E01.1080p.BluRay.REMUX', 'anime');
-    expect(met.cutoff?.met).toBe(true);
+    expect(r.terms.filter(t => t.matched).map(t => t.termId).sort()).toEqual(["hevc", "vostfr"]);
+    expect(r.cutoff).toEqual({ name: "WEBDL-1080p", rank: 35, met: false, minTermScore: null });
+  });
+});
+
+describe("sonarr profile -> model", () => {
+  test("allowed + cutoff + upgradeAllowed", () => {
+    const m = sonarrProfileToModel({
+      id: 4, name: "HD-1080p", upgradeAllowed: true, cutoff: 3,
+      items: [
+        { quality: { id: 1, name: "HDTV-720p" }, allowed: false },
+        { quality: { id: 2, name: "WEBRip-1080p" }, allowed: true },
+        { quality: { id: 3, name: "WEBDL-1080p" }, allowed: true },
+        { quality: { id: 4, name: "Bluray-1080p" }, allowed: true },
+        { quality: { id: 5, name: "WEBDL-720p" }, allowed: true },
+      ],
+    }, "sonarr-4");
+    expect(m).toMatchObject({ minResolution: 720, targetResolution: 1080, upgradesEnabled: true, upgradeUntilResolution: 1080, upgradeUntilSource: "webdl" });
+    expect(m.skipSources).toEqual(["remux", "hdtv", "dvd", "sdtv"]);
+  });
+});
+
+describe("boot conversion persists once", () => {
+  test("legacy profiles become model v2, idempotent", () => {
+    const mem = new DatabaseManager(":memory:");
+    // boot already converted the seeded Standard/Anime profiles
+    expect(getProfileModel(mem, "standard")!.modelVersion).toBe(2);
+    expect(getProfileModel(mem, "standard")!.terms.map(t => t.termId).sort()).toEqual(["hdr", "hevc"]);
+    mem.saveQuality({ id: "q_webdl_1080p", name: "WEBDL-1080p", rank: 33 });
+    mem.saveProfile({ id: "legacy", name: "Legacy", cutoffId: "q_webdl_1080p" });
+    mem.saveCustomFormat({ id: "f_vost", name: "VOSTFR", regex: "vostfr", score: -50 });
+    mem.saveCustomFormat({ id: "f_x265b", name: "x265", regex: "x265", score: 50 });
+    mem.saveCustomFormat({ id: "f_team", name: "Team", regex: "\\[Team\\]", score: 25 });
+    for (const f of ["f_vost", "f_x265b", "f_team"]) mem.addProfileFormat("legacy", f);
+    // before persisting the engine reads it converted in memory
+    expect(getProfileModel(mem, "legacy")!.modelVersion).toBe(0);
+    const first = convertLegacyProfiles(mem);
+    expect(first.map(c => c.profileId)).toEqual(["legacy"]);
+    expect(convertLegacyProfiles(mem)).toEqual([]);
+    const m = getProfileModel(mem, "legacy")!;
+    expect(m.modelVersion).toBe(2);
+    expect(m.upgradesEnabled).toBe(true);
+    expect(m.terms).toEqual(expect.arrayContaining([
+      { termId: "vostfr", mode: "strong_avoid", weight: null },
+      { termId: "hevc", mode: "prefer", weight: null },
+      { termId: "custom:f_team", mode: "prefer", weight: 25 },
+    ]));
+    mem.close();
   });
 });

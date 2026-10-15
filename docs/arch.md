@@ -5,10 +5,12 @@ ShowFlow is an automated media library manager inspired by Sonarr/Radarr, distri
 ## Core Architecture
 
 ### Quality & Profile Engine
-ShowFlow uses a scoring system (`core/quality_engine.ts`) to determine the "best" version of a media file.
-- **Quality Definitions**: Ranked tiers (e.g., 1080p > 720p), seeded by default on first boot (SDTV through Remux-2160p).
-- **Custom Formats**: Regex-based patterns that add score as `bonus`, or gate a release as `required` / `forbidden`.
-- **Profiles**: A named group of custom formats plus an optional quality allow-list. An empty allow-list means unrestricted; a non-empty one rejects any release outside it. A profile's `cutoff_quality_id` drives "upgrade until cutoff" (`core/cutoff.ts`): an episode whose file (scored from its probed media, like the import check) ranks below the cutoff is "cutoff unmet" and gets low-priority upgrade searches until it meets it. No cutoff = no automatic upgrades. Listed at `GET /api/wanted/cutoff`.
+ShowFlow uses a scoring system (`core/quality_engine.ts`, model in `core/quality_terms.ts`) to determine the "best" version of a media file.
+- **Profiles** (`quality_profiles`): a resolution target + minimum (+ an allow-unknown-resolution toggle), a fixed source order (Remux > BluRay > WEB-DL > unknown > WEBRip > HDTV > DVD/SD) with per-profile skipped sources, and **terms**.
+- **Terms** (`profile_terms`): chips from a built-in grouped library (codec, HDR/DV, 10-bit, audio, dual audio/subs, language tags like VOSTFR/MULTi, release groups) or user regex terms (`custom_terms`), each set to Prefer (+100) / Strong prefer (+300) / Avoid (-100) / Strong avoid (-300) / Must have / Never, with an optional numeric override. Each term counts once per release.
+- **Score**: `rank * 1000 + termScore` where rank = resolution step * 10 + source step. Never/Must, resolution out of range and skipped sources reject outright.
+- **Upgrades**: "keep upgrading until <resolution [source]>" (+ optional term score). Off means off: no cutoff-unmet searches (`core/cutoff.ts`, listed at `GET /api/wanted/cutoff`) AND imports never replace an existing file.
+- Legacy profiles (custom formats + allow-list + tier cutoff) are converted once at boot (`db/quality_model.ts` + `core/quality_migration.ts`); the legacy tables stay read-only for one release, and `GET /api/quality/migration-preview` re-scores recent grabs + current files under both engines (`core/quality_engine_legacy.ts`).
 
 ### Import Pipeline (reactive)
 A `DownloadManager` (`core/download_manager.ts`) coordinates whichever download client(s) are configured:
@@ -39,7 +41,7 @@ The cheap front half is the `rss-sync` task (`core/rss_sync.ts`, every 15 min, o
 Takes a raw filename and resolves it into a structured show/season/episode. Handles `SxxExx`, `1x01`, multi-episode ranges, and absolute anime numbering; disambiguates by checking the local `show_titles` alias index before falling back to fuzzy matching (`fuse.js`) and live provider lookups.
 
 ### 2. Quality Engine — `core/quality_engine.ts`
-Calculates a `ReleaseScore`: quality rank × 1000, plus/minus custom format scores, with `rejected: true` short-circuiting anything that hits a forbidden format, a missing required format, or a disallowed quality.
+Calculates a `ReleaseScore`: rank (resolution + source) × 1000 plus term weights, with `rejected: true` short-circuiting a Never term, a missing Must-have term, a resolution outside the profile's range, or a skipped source.
 
 ### 3. Metadata Providers — `providers/`
 `tmdb.ts`, `tvdb.ts`, `anilist.ts` behind a shared `IMetadataProvider` interface (`providers/base.ts`) and a factory (`providers/factory.ts`). Each show can have multiple linked providers with per-role assignment (which one supplies metadata vs. air-time data), plus a "primary" provider. Responses are cached in `metadata_cache` (6h TTL).

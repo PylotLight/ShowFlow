@@ -28,6 +28,7 @@ const SEED_INCLUDE_TABLES = new Set([
   'shows', 'show_providers', 'seasons', 'episodes', 'show_artworks',
   'root_folders', 'settings',
   'quality_definitions', 'quality_profiles', 'custom_formats', 'profile_formats',
+  'custom_terms', 'profile_terms',
 ]);
 
 const EPHEMERAL_TABLES = new Set([

@@ -2,25 +2,24 @@ import path from 'node:path';
 import type { DatabaseManager } from '../db';
 import type { EpisodeWithFileRow } from '../db/grabs';
 import { qualityEngine, mergeProbeWithRelease, type ReleaseScore } from './quality_engine';
+import { getProfileModel } from '../db/quality_model';
+import { qualityLabel, qualityRank, RESOLUTIONS } from './quality_terms';
 import { mediaFromStoredRow } from './media_probe';
 
 /**
- * Cutoff upgrades ("upgrade until cutoff", Sonarr's Cutoff Unmet).
+ * Cutoff upgrades ("upgrade until X", Sonarr's Cutoff Unmet).
  *
- * A quality profile's `cutoff_quality_id` is the quality at which ShowFlow
- * stops looking for something better. An episode is "cutoff unmet" when it
- * has a file on disk whose quality ranks below the cutoff; the auto-grabber
+ * A profile with upgrades on keeps looking for something better until the
+ * file reaches its "upgrade until" quality (resolution + optional source),
+ * and optionally until its term score reaches `upgrade_until_score`. An
+ * episode is "cutoff unmet" when its file is below that; the auto-grabber
  * runs a small, low-priority upgrade slice for those and RSS may grab an
- * upgrade straight off a feed. Profiles with no cutoff never upgrade
- * automatically (there's no separate "allow upgrades" flag on profiles - a
- * cutoff IS the opt-in). Once the cutoff is met the episode drops out.
+ * upgrade straight off a feed. Upgrades off means off: no searches here and
+ * the import path won't replace files either (QualityEngine.shouldUpgrade*).
  *
  * The existing file is scored the same way the import path judges it
  * (blackhole.ts shouldUpgradeWithMedia): from its probed media when we have
  * it, so a grab is only sent when the import would actually keep it.
- *
- * Custom-format score cutoffs aren't a thing yet (profiles have no
- * cutoff_format_score) - only the quality cutoff is enforced.
  */
 
 /** Upgrade-search backoff by consecutive misses: 6h, 1d, 3d, then weekly.
@@ -34,9 +33,12 @@ export const MAX_UPGRADES_PER_CYCLE = 3;
 export interface CutoffTarget {
   profileId: string;
   profileName: string;
+  /** Kept for callers that log it; the streamlined model has no tier row. */
   qualityId: string;
   rank: number;
   name: string;
+  /** Also keep upgrading until the file's term score reaches this. */
+  minTermScore?: number | null;
 }
 
 /** Resolve a show's quality profile id the same way GrabberService does. */
@@ -48,14 +50,20 @@ export function resolveShowProfileId(
   return libraryType?.quality_profile_id ?? dbm.resolveProfileId(show.profile ?? null) ?? '';
 }
 
-/** The profile's cutoff quality, or null when the profile has none (= no upgrades). */
+/**
+ * The profile's "upgrade until" target, or null when upgrades are off.
+ * Until a source ("1080p WEB-DL") = that exact rank; until a bare resolution
+ * = any source at that resolution. No until resolution = the target (or top).
+ */
 export function getProfileCutoff(dbm: DatabaseManager, profileId: string): CutoffTarget | null {
   if (!profileId) return null;
-  const profile = dbm.getProfile(profileId);
-  if (!profile?.cutoff_quality_id) return null;
-  const q = dbm.getQuality(profile.cutoff_quality_id);
-  if (!q) return null;
-  return { profileId, profileName: profile.name, qualityId: q.id, rank: q.rank ?? 0, name: q.name };
+  const m = getProfileModel(dbm, profileId);
+  if (!m || !m.upgradesEnabled) return null;
+  const res = m.upgradeUntilResolution ?? m.targetResolution ?? RESOLUTIONS[RESOLUTIONS.length - 1]!;
+  const src = m.upgradeUntilSource;
+  const rank = src ? qualityRank(res, src) : qualityRank(res, 'sdtv'); // bare: lowest source step at that res
+  const name = qualityLabel(res, src) ?? `${res}p`;
+  return { profileId, profileName: m.name, qualityId: '', rank, name, minTermScore: m.upgradeUntilScore };
 }
 
 /** Vertical resolution a quality name implies ("WEBDL-1080p" -> 1080), or null. */
@@ -77,6 +85,8 @@ function isBareResolution(name: string | null | undefined): boolean {
 export interface ExistingQuality {
   rank: number;
   qualityName?: string | null;
+  /** The file's term score, for a profile's score-based upgrade-until. */
+  termScore?: number | null;
 }
 
 /**
@@ -89,8 +99,15 @@ export interface ExistingQuality {
  *    above the cutoff's resolution: met. Otherwise a probed 1080p file under a
  *    "WEBDL-1080p" cutoff would never count as done.
  */
-export function isCutoffMet(existing: ExistingQuality, cutoff: { rank: number; name: string }): boolean {
+export function isCutoffMet(existing: ExistingQuality, cutoff: { rank: number; name: string; minTermScore?: number | null }): boolean {
   if (existing.rank <= 0) return true;
+  if (!qualityMet(existing, cutoff)) return false;
+  // Score-based upgrade-until: quality is there, keep going until the terms are too.
+  if (cutoff.minTermScore != null && existing.termScore != null && existing.termScore < cutoff.minTermScore) return false;
+  return true;
+}
+
+function qualityMet(existing: ExistingQuality, cutoff: { rank: number; name: string }): boolean {
   if (existing.rank >= cutoff.rank) return true;
   const have = resolutionOf(existing.qualityName);
   const want = resolutionOf(cutoff.name);
@@ -152,8 +169,8 @@ export function scoreExistingEpisodeFile(
     const probedRes = resolutionOf(probed.qualityName);
     const releaseRes = resolutionOf(releaseScore?.qualityName);
     const quality = releaseScore && releaseScore.rank > 0 && releaseRes != null && releaseRes === probedRes
-      ? { rank: releaseScore.rank, qualityName: releaseScore.qualityName ?? null }
-      : { rank: probed.rank, qualityName: probed.qualityName ?? null };
+      ? { rank: releaseScore.rank, qualityName: releaseScore.qualityName ?? null, termScore: probed.rejected ? null : probed.formatScore }
+      : { rank: probed.rank, qualityName: probed.qualityName ?? null, termScore: probed.rejected ? null : probed.formatScore };
     // Same basis as the import check (shouldUpgradeWithMedia with the stored
     // release title): a known source at the probed resolution sets the bar,
     // otherwise the probe's assume-best-source total does.
@@ -164,9 +181,9 @@ export function scoreExistingEpisodeFile(
   if (releaseScore && releaseScore.rank > 0 && releaseScore.rank >= fileScore.rank) {
     // Unprobed but we know what was grabbed/imported: the renamed library
     // filename usually lost its tags, the release title didn't.
-    return { compareScore: scoreValue(releaseScore), quality: { rank: releaseScore.rank, qualityName: releaseScore.qualityName ?? null }, via: 'release' };
+    return { compareScore: scoreValue(releaseScore), quality: { rank: releaseScore.rank, qualityName: releaseScore.qualityName ?? null, termScore: releaseScore.rejected ? null : releaseScore.formatScore }, via: 'release' };
   }
-  return { compareScore: scoreValue(fileScore), quality: { rank: fileScore.rank, qualityName: fileScore.qualityName ?? null }, via: 'filename' };
+  return { compareScore: scoreValue(fileScore), quality: { rank: fileScore.rank, qualityName: fileScore.qualityName ?? null, termScore: fileScore.rejected ? null : fileScore.formatScore }, via: 'filename' };
 }
 
 /** True when the episode's last upgrade search is old enough to search again. */

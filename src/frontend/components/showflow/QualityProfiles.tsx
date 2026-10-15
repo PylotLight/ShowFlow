@@ -763,23 +763,20 @@ function ProfilesPanel({ profiles, qualities, formats, onChange }: {
 
 // ---- Test a release name ----------------------------------------------------
 
-interface FormatHit {
-  id: string;
-  name: string;
-  type: "bonus" | "required" | "forbidden";
-  score: number;
+interface TermHit {
+  termId: string;
+  label: string;
+  mode: "prefer" | "strong_prefer" | "avoid" | "strong_avoid" | "must" | "never";
+  weight: number;
   matched: boolean;
-  deduped: boolean;
-  countedAs?: string;
 }
 
 interface ReleaseTestResult {
   resolution: number | null;
   source: string | null;
-  tier: { id: string; name: string; rank: number } | null;
-  tierVia: string;
-  formats: FormatHit[];
-  formatScore: number;
+  quality: { name: string; rank: number } | null;
+  terms: TermHit[];
+  termScore: number;
   totalScore: number;
   allowed: boolean;
   rejectReason: string | null;
@@ -816,7 +813,7 @@ function ReleaseTestPanel({ profiles }: { profiles: Profile[] }) {
       .finally(() => setBusy(false));
   }
 
-  const matched = result?.formats.filter(f => f.matched) ?? [];
+  const matched = result?.terms.filter(f => f.matched) ?? [];
 
   return (
     <GlassPanel className="p-6 space-y-4">
@@ -858,15 +855,15 @@ function ReleaseTestPanel({ profiles }: { profiles: Profile[] }) {
             </span>
             <span className="font-mono text-foreground/90">score {result.totalScore}</span>
             <span className="text-muted-foreground">
-              tier <span className="font-mono text-foreground/90">{result.tier?.name ?? "unknown"}</span>
-              {result.tier && <span className="font-mono"> (rank {result.tier.rank})</span>}
+              quality <span className="font-mono text-foreground/90">{result.quality?.name ?? "unknown"}</span>
+              {result.quality && <span className="font-mono"> (rank {result.quality.rank})</span>}
             </span>
             {result.cutoff ? (
               <span className={cn("font-mono text-[12px]", result.cutoff.met ? "text-emerald-300" : "text-amber-300")}>
                 cutoff {result.cutoff.name}: {result.cutoff.met ? "met" : "not met"}
               </span>
             ) : (
-              <span className="text-muted-foreground font-mono text-[12px]">no cutoff</span>
+              <span className="text-muted-foreground font-mono text-[12px]">upgrades off</span>
             )}
           </div>
 
@@ -877,39 +874,28 @@ function ReleaseTestPanel({ profiles }: { profiles: Profile[] }) {
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
             <span>resolution <span className="font-mono text-foreground/90">{result.resolution ? `${result.resolution}p` : "?"}</span></span>
             <span>source <span className="font-mono text-foreground/90">{result.source ?? "?"}</span></span>
-            <span>matched via <span className="font-mono text-foreground/90">{result.tierVia}</span></span>
-            <span>formats <span className="font-mono text-foreground/90">{signed(result.formatScore)}</span></span>
+            <span>terms <span className="font-mono text-foreground/90">{signed(result.termScore)}</span></span>
           </div>
 
           {matched.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {matched.map(f => (
                 <Badge
-                  key={f.id}
+                  key={f.termId}
                   variant="outline"
-                  title={f.deduped ? `Same concept as ${f.countedAs} - counted once` : undefined}
                   className={cn(
                     "font-mono text-[11px]",
-                    f.deduped && "text-muted-foreground",
-                    f.type === "forbidden" && "border-red-400/50 text-red-300",
-                    f.type === "required" && "border-emerald-400/50 text-emerald-300",
+                    f.mode === "never" && "border-red-400/50 text-red-300",
+                    f.mode === "must" && "border-emerald-400/50 text-emerald-300",
                   )}
                 >
-                  <span className={cn(f.deduped && "line-through")}>
-                    {f.name}
-                    {f.type === "bonus" ? ` ${signed(f.score)}` : ` (${f.type})`}
-                  </span>
-                  {f.deduped && <span>· dup</span>}
+                  {f.label}
+                  {f.mode === "must" || f.mode === "never" ? ` (${f.mode})` : ` ${signed(f.weight)}`}
                 </Badge>
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground text-[12px]">No custom formats on this profile matched.</p>
-          )}
-          {matched.some(f => f.deduped) && (
-            <p className="text-muted-foreground text-[11px]">
-              Struck-through formats spell the same thing as another match, so only the highest score counts.
-            </p>
+            <p className="text-muted-foreground text-[12px]">No terms on this profile matched.</p>
           )}
         </div>
       )}
