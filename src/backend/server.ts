@@ -75,6 +75,8 @@ import { backgroundJobRoutes } from "./routes/background-jobs";
 import { notificationRoutes } from "./routes/notifications";
 import { blocklistRoutes } from "./routes/blocklist";
 import { wantedRoutes } from "./routes/wanted";
+import { connectRoutes } from "./routes/connect";
+import { startConnect, stopConnect } from "./core/connect";
 import { loadConfig, invalidateConfigCache, ADMIN_TOKEN } from "./routes/_shared";
 import type { RouteReq } from "./routes/_shared";
 
@@ -137,6 +139,7 @@ const routeDefinitions: Record<string, any> = {
   ...notificationRoutes(),
   ...blocklistRoutes(),
   ...wantedRoutes(),
+  ...connectRoutes(),
 };
 
 // ---- Lazy route definitions (depend on scheduler / systemManager) ----------
@@ -263,6 +266,9 @@ const server = serve({
 
 scheduler.start();
 
+// External notifications + Jellyfin/Plex refresh-after-import (Settings > Connect).
+startConnect();
+
 // Auto-start the download watcher when a blackhole watch folder is
 // configured. Without this, /api/manual-import/* and the Queue page's "watch
 // folder" reader would 500 ("Watcher is not running.") on every fresh boot
@@ -322,6 +328,7 @@ process.on("SIGTERM", async () => {
   }
 
   await scheduler.stop?.();
+  await stopConnect().catch(() => {});
 
   db.close?.();
 

@@ -1,5 +1,5 @@
 import {
-  Archive, BarChart3, Bug, Clock, Database, Download, FileText, Gauge, KeyRound, Palette, Plug, Settings2,
+  Archive, BarChart3, BellRing, Bug, Clock, Database, Download, FileText, Gauge, KeyRound, Palette, Plug, Settings2,
 } from "lucide-react";
 import type * as React from "react";
 
@@ -31,6 +31,7 @@ export const SETTINGS_GROUPS: { label: string; tabs: SettingsTabDef[] }[] = [
       { id: "providers", label: "Providers", icon: KeyRound, mobileStyle: "sheet" },
       { id: "indexers", label: "Indexers", icon: Database, mobileStyle: "sheet" },
       { id: "integrations", label: "Integrations", icon: Plug, mobileStyle: "sheet" },
+      { id: "connect", label: "Connect", icon: BellRing, mobileStyle: "drill" },
     ],
   },
   {

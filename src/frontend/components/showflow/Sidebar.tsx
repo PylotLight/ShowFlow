@@ -127,6 +127,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
     { id: "providers", label: "Providers" },
     { id: "indexers", label: "Indexers" },
     { id: "integrations", label: "Integrations" },
+    { id: "connect", label: "Connect" },
     { id: "quality", label: "Quality" },
     { id: "downloads", label: "Downloads" },
     { id: "tasks", label: "Tasks" },
