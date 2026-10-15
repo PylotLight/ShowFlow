@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.83] - 2026-10-15
 - **Faster updates**: the update unpacks while it downloads, status polls every 500ms (also during the handoff), and the staged banner estimates how long apply takes. Supervisor apply ~1.1s → ~0.5s. The new image also hashes the binary once and checks readiness every 100ms, so the next update after this one is quicker still.
 - **Settings density**: setting rows put the label on the left and the control on the right (stacking on narrow widths), one compact 13/12px text scale, a slimmer left nav that becomes a dropdown under 1280px, sticky section pills on General, and Quality rows are tighter so score selects no longer clip.
 
