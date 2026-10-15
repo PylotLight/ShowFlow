@@ -21,11 +21,6 @@ on:
         required: false
         type: boolean
         default: false
-      github_hosted:
-        description: Run on ubuntu-latest instead of the self-hosted runners
-        required: false
-        type: boolean
-        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -39,11 +34,6 @@ on:
         default: ''
       prerelease:
         description: Skip the `latest` image tag
-        required: false
-        type: boolean
-        default: false
-      github_hosted:
-        description: Run on ubuntu-latest instead of the self-hosted runners
         required: false
         type: boolean
         default: false
@@ -68,14 +58,13 @@ jobs:
   # ~39s exporting a cache that every release invalidates anyway (`COPY . .`),
   # plus ~8s buildx setup/boot. None of that is needed now.
   #
-  # Runner: self-hosted ARC scale set on the NAS k3s (docker-in-docker) by
-  # default. Override with the repo variable RUNNER_LABELS (a label like
-  # `ubuntu-latest`, or a JSON array like ["self-hosted","linux"]), or tick
-  # github_hosted on a manual run. Arch doesn't matter: the binaries are
-  # cross-compiled with --target=bun-linux-x64 and Dockerfile.release has no
-  # RUN steps, so an arm64 runner builds the amd64 image without QEMU.
+  # Runner: GitHub-hosted ubuntu-latest by default. Override with the repo
+  # variable RUNNER_LABELS (a label like `k3s-runners-showflow`, or a JSON
+  # array like ["self-hosted","linux"]); a self-hosted runner needs docker and
+  # the gh CLI. Arch doesn't matter: the binaries are cross-compiled with
+  # --target=bun-linux-x64 and Dockerfile.release has no RUN steps.
   release:
-    runs-on: ${{ inputs.github_hosted && 'ubuntu-latest' || (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'k3s-runners-showflow' }}
+    runs-on: ${{ (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -102,22 +91,6 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short=${sha::7}" >> "$GITHUB_OUTPUT"
 
-      # ARC runner pods are ephemeral: nothing survives between jobs unless the
-      # runner mounts a volume. If SHOWFLOW_CI_CACHE is set (or a writable /cache
-      # is mounted) keep bun's install cache there; otherwise install cold (~1s).
-      - name: Persistent bun cache (only if the runner mounts one)
-        run: |
-          dir="${SHOWFLOW_CI_CACHE:-}"
-          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/showflow; fi
-          if [ -n "$dir" ] && mkdir -p "$dir/bun-install-cache" 2>/dev/null && [ -w "$dir" ]; then
-            echo "using persistent cache at $dir"
-            echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache" >> "$GITHUB_ENV"
-            echo "PERSISTENT_CACHE=1" >> "$GITHUB_ENV"
-          else
-            echo "no persistent cache mounted"
-          fi
-          echo "runner arch: $(uname -m)"
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -137,15 +110,6 @@ jobs:
 
       - name: Package release assets
         run: tar -czf showflow-${{ steps.sha.outputs.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations
-
-      # The ARC runner image may not ship the gh CLI (GitHub-hosted does).
-      - name: Ensure gh CLI
-        run: |
-          command -v gh >/dev/null && { gh --version | head -1; exit 0; }
-          case "$(uname -m)" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch $(uname -m)"; exit 1;; esac
-          v=2.62.0
-          curl -fsSL "https://github.com/cli/cli/releases/download/v${v}/gh_${v}_linux_${a}.tar.gz" | tar -xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/gh_${v}_linux_${a}/bin" >> "$GITHUB_PATH"
 
       - name: Upload release asset
         run: gh release upload "${{ steps.tag.outputs.tag }}" "showflow-${{ steps.sha.outputs.sha }}.tar.gz" --clobber

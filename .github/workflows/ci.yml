@@ -1,18 +1,13 @@
 name: CI
 
-# Lightweight PR check: install, test, build. Runs on the self-hosted ARC
-# scale set on the NAS k3s by default; set the repo variable RUNNER_LABELS to
-# `ubuntu-latest` (or a JSON array of labels) to move it. Nothing here needs
-# docker.
+# Lightweight PR check: install, test, build. Runs on GitHub-hosted
+# ubuntu-latest (public repo, so minutes are free). Opt in to other runners
+# (e.g. the NAS k3s ARC scale set) with the repo variable RUNNER_LABELS: a
+# label like `k3s-runners-showflow` or a JSON array of labels. Nothing here
+# needs docker.
 on:
   pull_request:
   workflow_dispatch:
-    inputs:
-      github_hosted:
-        description: Run on ubuntu-latest instead of the self-hosted runners
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -22,41 +17,23 @@ permissions:
   contents: read
 
 jobs:
-  # Fork PRs always go to ubuntu-latest: this repo is public, and the NAS
-  # runners have docker-in-docker, so untrusted PR code never lands there.
+  # Fork PRs always go to ubuntu-latest even if RUNNER_LABELS points at
+  # self-hosted runners: untrusted PR code never lands on the NAS.
   test-and-build:
-    runs-on: ${{ (inputs.github_hosted || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'k3s-runners-showflow' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # ARC runner pods are ephemeral: nothing survives between jobs unless the
-      # runner mounts a volume. If SHOWFLOW_CI_CACHE is set (or a writable /cache
-      # is mounted) keep bun's install cache there; otherwise install cold.
-      - name: Persistent bun cache (only if the runner mounts one)
-        run: |
-          dir="${SHOWFLOW_CI_CACHE:-}"
-          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/showflow; fi
-          if [ -n "$dir" ] && mkdir -p "$dir/bun-install-cache" 2>/dev/null && [ -w "$dir" ]; then
-            echo "using persistent cache at $dir"
-            echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache" >> "$GITHUB_ENV"
-            echo "PERSISTENT_CACHE=1" >> "$GITHUB_ENV"
-          else
-            echo "no persistent cache mounted"
-          fi
-          echo "runner arch: $(uname -m)"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # No actions/cache: on the NAS runner a cold `bun install` is ~5s, but
-      # saving the ~190MB cache back to GitHub took ~70s ("Post Cache bun
-      # install"), and PR-branch caches aren't visible to other PRs so most
-      # runs missed and paid that save. Restoring 190MB over the NAS uplink
-      # wouldn't beat a cold install either. Same as the release workflow.
+      # No actions/cache: a cold `bun install` is ~5s, while saving the ~190MB
+      # cache cost far more, and PR-branch caches aren't visible to other PRs
+      # so most runs missed anyway. Same as the release workflow.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
