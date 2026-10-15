@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix**: v0.1.81 shipped stamped as version `main`, so the app listed every release as an update and tried to reinstall the running build (`ETXTBSY`). Builds now get the tag/commit explicitly and fail if the stamp is wrong. The app never re-installs the active release (supervisor installs via temp dir + rename), falls back to the active release's manifest if the version stamp is bad, only offers newer releases (older ones show as previous), and the post-update refresh matches on the active release sha with a 60 attempt cap. Coming from v0.1.81 you'll need to hit Update + Activate once by hand.
+- **Settings**: General now starts with Updates and Grabbing, Defaults moved down.
 
 ## [v0.1.81] - 2026-10-15
 - **Safer updates**: activating an update now waits (up to 2 min) for running scans/imports/backups to finish, takes a DB backup first when the new release has migrations, and the app notices on boot whether the swap took or got rolled back (no more endless reconnect spinner or re-downloading the same release every cycle). Downloads stream to disk with size + sha256 checks, real progress and retries; a release whose tarball isn't uploaded yet is retried with backoff instead of hammering the API. Updates panel shows release notes, migration count, what it's waiting on and expected downtime. New optional auto-activate (off / when idle / nightly at an hour, idle only), off by default.
