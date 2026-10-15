@@ -22,7 +22,7 @@ export function describeFetchError(raw: unknown, what = "this"): string {
 export function ErrorNotice({ error, what, onRetry }: { error: unknown; what?: string; onRetry?: () => void }) {
   return (
     <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/30 bg-red-900/20 p-3">
-      <p className="min-w-0 flex-1 text-sm text-red-300">{describeFetchError(error, what)}</p>
+      <p className="min-w-0 flex-1 text-sub text-red-300">{describeFetchError(error, what)}</p>
       {onRetry && (
         <button
           type="button"

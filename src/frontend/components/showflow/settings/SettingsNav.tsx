@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "../SettingsShared";
@@ -12,10 +12,10 @@ const ring = "outline-none focus-visible:ring-2 focus-visible:ring-signal/70";
  */
 export function SettingsSideNav({ tab, onSelect }: { tab: string; onSelect: (id: string) => void }) {
   return (
-    <nav aria-label="Settings sections" className="sticky top-4 flex w-48 shrink-0 flex-col gap-4 self-start lg:w-52">
+    <nav aria-label="Settings sections" className="sticky top-4 hidden w-[200px] shrink-0 flex-col gap-3 self-start xl:flex">
       {SETTINGS_GROUPS.map(group => (
         <div key={group.label}>
-          <div className="px-3 pb-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{group.label}</div>
+          <div className="px-2.5 pb-1 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{group.label}</div>
           <ul className="space-y-0.5">
             {group.tabs.map(t => {
               const Icon = t.icon;
@@ -27,14 +27,14 @@ export function SettingsSideNav({ tab, onSelect }: { tab: string; onSelect: (id:
                     onClick={() => onSelect(t.id)}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sub transition-colors",
                       ring,
                       active
                         ? "bg-signal/15 text-signal font-semibold shadow-[inset_0_0_0_0.5px_var(--signal)]"
                         : "text-foreground/80 hover:bg-white/[0.05] hover:text-foreground",
                     )}
                   >
-                    <Icon className={cn("size-4 shrink-0", active ? "text-signal" : "text-muted-foreground")} />
+                    <Icon className={cn("size-3.5 shrink-0", active ? "text-signal" : "text-muted-foreground")} />
                     {t.label}
                   </button>
                 </li>
@@ -44,6 +44,32 @@ export function SettingsSideNav({ tab, onSelect }: { tab: string; onSelect: (id:
         </div>
       ))}
     </nav>
+  );
+}
+
+/**
+ * Mid widths (sm..xl): the side nav would squeeze content between it and the
+ * app sidebar, so it collapses to a native grouped select above the content.
+ */
+export function SettingsCompactNav({ tab, onSelect }: { tab: string; onSelect: (id: string) => void }) {
+  const Icon = findTab(tab)?.icon;
+  return (
+    <div className="relative w-full max-w-xs xl:hidden">
+      {Icon && <Icon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-signal" />}
+      <select
+        aria-label="Settings section"
+        value={tab}
+        onChange={e => onSelect(e.target.value)}
+        className={cn("h-9 w-full appearance-none rounded-md border border-white/10 bg-white/[0.04] [color-scheme:dark] [&_option]:bg-[#1c2028] pr-8 pl-9 text-sub font-medium text-foreground hover:bg-white/[0.06]", ring)}
+      >
+        {SETTINGS_GROUPS.map(group => (
+          <optgroup key={group.label} label={group.label}>
+            {group.tabs.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </optgroup>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+    </div>
   );
 }
 

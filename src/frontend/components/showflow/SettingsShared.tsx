@@ -12,14 +12,34 @@ export function formatBytes(bytes: number): string {
   return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
 }
 
+/**
+ * Settings type scale (keep settings on these, nothing bigger/smaller):
+ *   section title  font-display text-base   (panel <h3>)
+ *   label / body   text-sub (13px)          row labels, control text
+ *   meta           text-caption (12px)      descriptions, helper lines
+ *   floor          text-[11px]              mono tags/kickers only
+ */
+export const SETTINGS_TEXT = {
+  label: "text-sub font-medium text-foreground",
+  desc: "text-caption leading-snug text-muted-foreground",
+} as const;
+
+/**
+ * One setting: label + description on the left taking the free width, the
+ * control on the right. Sized off the row's own width (container query), not
+ * the viewport, since settings content sits next to two sidebars. Under ~28rem
+ * it stacks with the control below.
+ */
 export function FieldRow({ label, description, children }: { label: string; description: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-      <div className="min-w-0 shrink-0 sm:w-[170px] sm:pt-2.5">
-        <Label className="font-mono text-sub font-bold uppercase tracking-widest text-foreground/80">{label}</Label>
-        <p className="text-muted-foreground mt-0.5 text-sub leading-tight">{description}</p>
+    <div className="@container">
+      <div className="flex flex-col gap-2 @md:flex-row @md:items-center @md:justify-between @md:gap-6">
+        <div className="min-w-0 flex-1">
+          <Label className={SETTINGS_TEXT.label}>{label}</Label>
+          <p className={cn("mt-0.5", SETTINGS_TEXT.desc)}>{description}</p>
+        </div>
+        <div className="flex min-w-0 @md:w-[min(20rem,45%)] @md:shrink-0 @md:justify-end [&>*]:max-w-full [&>div]:w-full">{children}</div>
       </div>
-      <div className="min-w-0 flex-1 sm:max-w-lg">{children}</div>
     </div>
   );
 }
