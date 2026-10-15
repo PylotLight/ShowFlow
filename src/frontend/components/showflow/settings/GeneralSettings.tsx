@@ -18,11 +18,13 @@ function SectionHeading({ id, title, description }: { id: string; title: string;
   );
 }
 
+// Order matters: it's both the chip order and the page order. Updates and
+// Grabbing are what people come here for; Defaults is set-once, so it sits last.
 const SECTIONS = [
-  { id: "defaults", label: "Defaults" },
+  { id: "updates", label: "Updates" },
   { id: "grabbing", label: "Grabbing" },
   { id: "libraries", label: "Libraries" },
-  { id: "updates", label: "Updates" },
+  { id: "defaults", label: "Defaults" },
 ];
 
 export function GeneralSettings({ scrollToSection, onReRunWizard }: {
@@ -52,6 +54,60 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
           </a>
         ))}
       </nav>
+
+      <div ref={updatesRef}>
+        <SectionHeading id="updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
+      </div>
+      <UpdatesPanel />
+
+      <SectionHeading id="grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
+      <GlassPanel className="p-6 space-y-5">
+        <FieldRow
+          label="Upgrade until cutoff"
+          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Profiles with no cutoff are never upgraded."
+        >
+          <Switch
+            aria-label="Upgrade until cutoff"
+            checked={config.upgradeUntilCutoff !== false}
+            onCheckedChange={v => saveConfig({ upgradeUntilCutoff: v })}
+          />
+        </FieldRow>
+        <FieldRow
+          label="Prefer season packs"
+          description="For a season that has finished airing, try one season pack before searching episode by episode."
+        >
+          <Switch
+            aria-label="Prefer season packs"
+            checked={config.preferSeasonPacks !== false}
+            onCheckedChange={v => saveConfig({ preferSeasonPacks: v })}
+          />
+        </FieldRow>
+        {config.preferSeasonPacks !== false && (
+          <FieldRow
+            label="Pack threshold"
+            description="Missing episodes a finished season needs before a pack is tried."
+          >
+            <Select
+              value={String(config.seasonPackMinMissing ?? 2)}
+              onValueChange={v => saveConfig({ seasonPackMinMissing: Number(v) })}
+            >
+              <SelectTrigger className="w-24" aria-label="Pack threshold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[2, 3, 4, 6, 8].map(n => (
+                  <SelectItem key={n} value={String(n)}>{n}+</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        )}
+      </GlassPanel>
+
+      <SectionHeading id="libraries" title="Libraries" description="Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates." />
+      <GlassPanel className="p-6 space-y-5">
+        <LibraryTypeManager />
+      </GlassPanel>
 
       <SectionHeading id="defaults" title="Defaults" description="How new shows are added and how file collisions are handled." />
       <GlassPanel className="p-6 space-y-5">
@@ -110,60 +166,6 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
           </Select>
         </FieldRow>
       </GlassPanel>
-
-      <SectionHeading id="grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
-      <GlassPanel className="p-6 space-y-5">
-        <FieldRow
-          label="Upgrade until cutoff"
-          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Profiles with no cutoff are never upgraded."
-        >
-          <Switch
-            aria-label="Upgrade until cutoff"
-            checked={config.upgradeUntilCutoff !== false}
-            onCheckedChange={v => saveConfig({ upgradeUntilCutoff: v })}
-          />
-        </FieldRow>
-        <FieldRow
-          label="Prefer season packs"
-          description="For a season that has finished airing, try one season pack before searching episode by episode."
-        >
-          <Switch
-            aria-label="Prefer season packs"
-            checked={config.preferSeasonPacks !== false}
-            onCheckedChange={v => saveConfig({ preferSeasonPacks: v })}
-          />
-        </FieldRow>
-        {config.preferSeasonPacks !== false && (
-          <FieldRow
-            label="Pack threshold"
-            description="Missing episodes a finished season needs before a pack is tried."
-          >
-            <Select
-              value={String(config.seasonPackMinMissing ?? 2)}
-              onValueChange={v => saveConfig({ seasonPackMinMissing: Number(v) })}
-            >
-              <SelectTrigger className="w-24" aria-label="Pack threshold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[2, 3, 4, 6, 8].map(n => (
-                  <SelectItem key={n} value={String(n)}>{n}+</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldRow>
-        )}
-      </GlassPanel>
-
-      <SectionHeading id="libraries" title="Libraries" description="Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates." />
-      <GlassPanel className="p-6 space-y-5">
-        <LibraryTypeManager />
-      </GlassPanel>
-
-      <div ref={updatesRef}>
-        <SectionHeading id="updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
-      </div>
-      <UpdatesPanel />
 
       {onReRunWizard && (
         <>
