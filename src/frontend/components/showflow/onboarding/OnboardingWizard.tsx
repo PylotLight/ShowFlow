@@ -189,7 +189,7 @@ export function OnboardingWizard({ onFinish }: { onFinish: () => void }) {
                 {!stepProps.isLast && step < TOTAL_STEPS - 1 && (
                    <button
                      onClick={stepProps.onSkip}
-                     className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors italic"
+                     className="text-xs text-muted-foreground hover:text-muted-foreground/70 transition-colors italic"
                    >
                      Skip and set up manually
                    </button>
@@ -221,7 +221,7 @@ function StepIndicator({ current, onGoTo }: { current: number; onGoTo: (i: numbe
                 "flex items-center justify-center size-10 rounded-full border-2 text-sm font-mono font-bold transition-all duration-300",
                 i === current && "border-signal bg-signal/10 text-signal scale-110 shadow-lg shadow-signal/20",
                 i < current && "border-green-500/60 bg-green-500/10 text-green-400",
-                i > current && "border-white/10 text-muted-foreground/30"
+                i > current && "border-white/10 text-muted-foreground"
               )}>
                 {i < current ? <CheckIcon className="size-4" /> : i + 1}
               </div>
@@ -229,7 +229,7 @@ function StepIndicator({ current, onGoTo }: { current: number; onGoTo: (i: numbe
                 "text-xs font-medium uppercase tracking-wide transition-all whitespace-nowrap",
                 i === current && "text-signal",
                 i < current && "text-green-400/80",
-                i > current && "text-muted-foreground/30"
+                i > current && "text-muted-foreground"
               )}>
                 {s.short}
               </span>

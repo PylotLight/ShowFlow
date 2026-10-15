@@ -126,7 +126,7 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
                       <div className="flex items-center gap-2">
                         <h4 className="font-mono text-sm font-medium text-white">{task.displayName}</h4>
                         {!task.enabled && (
-                          <span className="px-2 py-0.5 rounded-full bg-white/5 text-muted-foreground text-[10px] font-mono uppercase">
+                          <span className="px-2 py-px rounded-full bg-white/5 text-muted-foreground text-[11px] font-mono uppercase">
                             Disabled
                           </span>
                         )}
@@ -145,14 +145,14 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
                                 min="1"
                               />
                               <span>minutes</span>
-                              <button
+                              <button aria-label="Save interval"
                                 onClick={() => saveEdit(task)}
                                 disabled={saving === `task-${task.name}`}
                                 className="text-emerald-400 hover:text-emerald-300"
                               >
                                 <CheckIcon className="size-3" />
                               </button>
-                              <button
+                              <button aria-label="Cancel"
                                 onClick={cancelEdit}
                                 className="text-muted-foreground hover:text-foreground"
                               >
@@ -182,7 +182,7 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
                         onCheckedChange={(checked) => onUpdateTask(task.name, { enabled: checked })}
                         disabled={saving === `task-${task.name}`}
                       />
-                      <Button
+                      <Button aria-label="Run task now"
                         size="sm"
                         variant="ghost"
                         onClick={() => onRunTask(task.name)}

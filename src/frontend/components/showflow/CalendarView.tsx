@@ -223,7 +223,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
       {/* Header */}
       <div className="flex items-center justify-between shrink-0 px-1">
         <div className="flex items-center gap-1.5">
-          <button
+          <button aria-label="Previous month"
             onClick={() => goMonth(-1)}
             className="rounded-lg p-1.5 text-muted-foreground hover:text-white hover:bg-white/5 transition-all"
           >
@@ -237,7 +237,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
               {cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
             </h2>
           </button>
-          <button
+          <button aria-label="Next month"
             onClick={() => goMonth(1)}
             className="rounded-lg p-1.5 text-muted-foreground hover:text-white hover:bg-white/5 transition-all"
           >
@@ -252,7 +252,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
           </span>
           <button
             onClick={() => setCursor(new Date())}
-            className="rounded-full px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider bg-signal/15 text-signal border border-signal/10 hover:bg-signal/20 transition-all"
+            className="rounded-full px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide bg-signal/15 text-signal border border-signal/10 hover:bg-signal/20 transition-all"
           >
             Today
           </button>
@@ -304,13 +304,13 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                       <span
                         className={cn(
                           "font-mono text-sm font-bold leading-none",
-                          isToday ? "text-signal" : isPast ? "text-white/35" : "text-white/75",
+                          isToday ? "text-signal" : isPast ? "text-white/60" : "text-white/75",
                         )}
                       >
                         {day}
                       </span>
                       {count > 0 && (
-                        <span className="font-mono text-[10px] text-signal font-semibold bg-signal/10 px-1.5 py-0.5 rounded leading-none">
+                        <span className="font-mono text-[11px] text-signal font-semibold bg-signal/10 px-1.5 py-px rounded leading-none">
                           {count}
                         </span>
                       )}
@@ -334,7 +334,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                               <span className="text-[13px] font-medium text-white/90 leading-snug truncate flex-1 min-w-0">
                                 {ep.showTitle}
                               </span>
-                              <span className="font-mono text-[10px] text-signal/80 shrink-0">
+                              <span className="font-mono text-[11px] text-signal/80 shrink-0">
                                 S{String(ep.season).padStart(2, "0")}E{String(ep.episode).padStart(2, "0")}
                               </span>
                             </div>
@@ -343,7 +343,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                 {ep.episodeTitle || "TBA"}
                               </span>
                               {clockLabel(ep) && (
-                                <span className="font-mono text-[10px] text-muted-foreground/70 shrink-0">
+                                <span className="font-mono text-[11px] text-muted-foreground/70 shrink-0">
                                   {clockLabel(ep)}
                                 </span>
                               )}
@@ -369,7 +369,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                         onMouseLeave={handleMouseLeave}
                       >
                         <div className="glass-panel rounded-xl p-3 space-y-2 shadow-2xl border border-white/10">
-                          <div className="font-mono text-[9px] font-bold uppercase tracking-wider text-signal border-b border-white/5 pb-1.5">
+                          <div className="font-mono text-[11px] font-bold uppercase tracking-wider text-signal border-b border-white/5 pb-1.5">
                             {new Date(dateStr).toLocaleDateString(undefined, {
                               weekday: "long", month: "short", day: "numeric",
                             })}
@@ -398,7 +398,7 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                     />
                                   ) : (
                                     <div className="w-7 h-10 shrink-0 rounded bg-white/[0.03] border border-white/5 flex items-center justify-center">
-                                      <span className="font-mono text-[6px] text-white/20">N/A</span>
+                                      <span className="font-mono text-[11px] text-white/30" aria-hidden="true">N/A</span>
                                     </div>
                                   )}
                                   <div className="min-w-0 flex-1">
@@ -406,19 +406,19 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
                                       <span className="text-xs font-semibold text-white truncate">
                                         {ep.showTitle}
                                       </span>
-                                      <EpisodeChip season={ep.season} episode={ep.episode} state={available ? "tracked" : "airing"} className="shrink-0 text-[9px]" />
+                                      <EpisodeChip season={ep.season} episode={ep.episode} state={available ? "tracked" : "airing"} className="shrink-0 text-[11px]" />
                                       {clockLabel(ep) && (
-                                        <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">{clockLabel(ep)}</span>
+                                        <span className="font-mono text-[11px] text-muted-foreground/80 shrink-0">{clockLabel(ep)}</span>
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">
                                       {ep.episodeTitle && (
-                                        <span className="text-[10px] text-muted-foreground truncate">
+                                        <span className="text-[11px] text-muted-foreground truncate">
                                           {ep.episodeTitle}
                                         </span>
                                       )}
                                       {available && (
-                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-signal/10 px-1.5 py-0.5 font-mono text-[7px] font-bold uppercase tracking-wider text-signal border border-signal/15">
+                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-signal/10 px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-signal border border-signal/15">
                                           <CheckIcon className="size-2" strokeWidth={3} />
                                           Grabbed
                                         </span>

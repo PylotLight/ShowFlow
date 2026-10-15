@@ -390,7 +390,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <div className="space-y-4">
       <GlassPanel className="p-5">
-        <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Indexer Search</span>
+        <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Indexer Search</span>
         <h2 className="font-display text-2xl font-bold text-white mb-1">Indexer Search</h2>
         <p className="text-muted-foreground text-sm mb-4">
           Query any configured indexer directly — no show or release attached. Grab sends the release to your download client.
@@ -425,7 +425,7 @@ function IndexerSearch({ onOpenSettings }: { onOpenSettings: () => void }) {
             Save preset
           </Button>
           {activePresetId && (
-            <Button variant="outline" size="sm" onClick={deletePreset} title="Delete the active preset">
+            <Button aria-label="Delete the active preset" variant="outline" size="sm" onClick={deletePreset} title="Delete the active preset">
               <Trash2Icon className="size-3.5" />
             </Button>
           )}

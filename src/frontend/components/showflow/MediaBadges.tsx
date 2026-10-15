@@ -73,7 +73,7 @@ export function MediaBadges({ media, className, max }: { media?: FileMedia | nul
       {shown.map((b) => (
         <span
           key={b.key}
-          className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+          className={`rounded px-1.5 py-px font-mono text-[11px] ${
             b.tone === 'accent'
               ? "bg-accent-amber/15 text-accent-amber border border-accent-amber/20"
               : "bg-white/[0.06] text-white/70"

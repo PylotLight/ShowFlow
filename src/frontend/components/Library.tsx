@@ -5,6 +5,7 @@ import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
 import { PosterCard, type ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { BulkUpdateDialog } from "@frontend/components/showflow/BulkUpdateDialog";
 import { DuplicatesDialog } from "@frontend/components/showflow/DuplicatesDialog";
+import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { cn } from "@frontend/lib/utils";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
@@ -218,7 +219,7 @@ export function Library({
                   const pts = Array.from(new Set(shows.map(s => s.providerType))).sort();
                   return (
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Provider</span>
+                      <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Provider</span>
                       <button onClick={() => setFilter(f => ({ ...f, providerType: null }))}
                         className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.providerType === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {pts.map(pt => (
@@ -235,7 +236,7 @@ export function Library({
                   if (profiles.length === 0) return null;
                   return (
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Profile</span>
+                      <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Profile</span>
                       <button onClick={() => setFilter(f => ({ ...f, profile: null }))}
                         className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.profile === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {profiles.map(p => (
@@ -252,7 +253,7 @@ export function Library({
                   if (seriesTypes.length === 0) return null;
                   return (
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Type</span>
+                      <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Type</span>
                       <button onClick={() => setSeriesTypeFilter(null)}
                         className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {seriesTypes.map(st => (
@@ -265,7 +266,7 @@ export function Library({
 
                 {/* Tracking filter */}
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Tracking</span>
+                  <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Tracking</span>
                   <button onClick={() => setTrackingFilter('all')}
                     className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'all' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                   <button onClick={() => setTrackingFilter('tracked')}
@@ -276,7 +277,7 @@ export function Library({
 
                 {/* Sort dropdown */}
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-caption uppercase tracking-wider text-white/40 mr-1">Sort</span>
+                  <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Sort</span>
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as any)}
@@ -288,7 +289,7 @@ export function Library({
                     <option value="tracked">Tracked</option>
                     <option value="grabbed">Grabbed</option>
                   </select>
-                  <button
+                  <button aria-label="Toggle sort order"
                     onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
                     className="rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
                   >
@@ -364,6 +365,11 @@ export function Library({
                       ? "Try a different search or filter."
                       : "Add a show to get it appearing here."}
                   </p>
+                  {!(shows && shows.length > 0) && (
+                    <div className="mt-2">
+                      <AddShowDialog onAdded={loadShows} />
+                    </div>
+                  )}
                 </div>
               ) : (
               <div

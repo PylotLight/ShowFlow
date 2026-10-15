@@ -99,13 +99,13 @@ function InfoPopover({ episode }: { episode: EpisodeData }) {
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         aria-label="File and release details"
         title="File & release details"
-        className="text-muted-foreground/40 hover:text-white/80 transition-colors p-0.5"
+        className="text-muted-foreground hover:text-white/80 transition-colors p-0.5"
       >
         <Info className="size-3.5" />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1.5 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[#15181f] shadow-2xl shadow-black/50 p-3 text-left animate-fade-in">
-          <div className="font-mono text-[9px] font-bold uppercase tracking-widest text-signal mb-2">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal mb-2">
             // Release provenance
           </div>
           {rel ? (
@@ -141,7 +141,7 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
       <span className="text-muted-foreground shrink-0">{label}</span>
       {/* min-w-0 lets the value shrink inside the flex row — without it long
           release titles/paths overflow the card instead of wrapping. */}
-      <span className={`text-white/85 text-right break-all min-w-0 flex-1 ${mono ? "font-mono text-[10px]" : "font-medium"}`} title={value}>
+      <span className={`text-white/85 text-right break-all min-w-0 flex-1 ${mono ? "font-mono text-[11px]" : "font-medium"}`} title={value}>
         {value}
       </span>
     </div>
@@ -195,7 +195,7 @@ function EpisodeRow({
           available
             ? "border-signal bg-signal text-[#051208]"
             : episode.tracked
-              ? "border-signal/60 bg-signal/20 text-signal/60"
+              ? "border-signal/60 bg-signal/20 text-signal"
               : "border-white/20 group-hover:border-white/40 text-transparent"
         }`}
       >
@@ -235,7 +235,7 @@ function EpisodeRow({
       {showStatus && (
         <span className="flex items-center gap-1.5 whitespace-nowrap">
           <span className={`font-mono text-caption uppercase tracking-wider ${
-            available ? "text-signal/70" : "text-muted-foreground/50"
+            available ? "text-signal/70" : "text-muted-foreground"
           }`}>
             {available ? "Available" : "Missing"}
           </span>
@@ -282,7 +282,7 @@ function EpisodeRow({
               <MousePointerClick className="size-3.5" />
             </span>
           ) : (
-            <span className="text-muted-foreground/50 hover:text-signal/70 flex items-center gap-1">
+            <span className="text-muted-foreground hover:text-signal/70 flex items-center gap-1">
               <RefreshCw className="size-3.5" />
             </span>
           )}

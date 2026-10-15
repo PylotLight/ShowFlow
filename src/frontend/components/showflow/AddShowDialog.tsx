@@ -385,7 +385,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
         <div className="flex flex-wrap items-center gap-2">
           {libraryTypes.length > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Type</span>
+              <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Type</span>
               <Select value={selectedLibraryTypeId} onValueChange={setSelectedLibraryTypeId}>
                 <SelectTrigger className="w-28 h-7 text-xs">
                   <SelectValue />
@@ -400,7 +400,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
           )}
           {libraryTypes.length <= 1 && qualityProfiles.length > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quality</span>
+              <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Quality</span>
               <Select value={selectedQualityProfile} onValueChange={setSelectedQualityProfile}>
                 <SelectTrigger className="w-32 h-7 text-xs">
                   <SelectValue />
@@ -414,7 +414,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Series</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Series</span>
             <Select value={isMovieKind ? "movie" : seriesType} onValueChange={setSeriesType} disabled={isMovieKind}>
               <SelectTrigger className="w-28 h-7 text-xs">
                 <SelectValue />
@@ -436,7 +436,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                 onCheckedChange={setMonitorNewEpisodes}
                 aria-label="Monitor new episodes"
               />
-              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Monitor new episodes</span>
+              <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Monitor new episodes</span>
             </label>
           )}
         </div>
@@ -463,7 +463,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                   )}
                   <span className="text-sm truncate flex-1">{r.title}</span>
                   {!r.ok && r.error && (
-                    <span className="text-[10px] text-red-400 font-mono truncate max-w-[160px] shrink-0">{r.error}</span>
+                    <span className="text-[11px] text-red-400 font-mono truncate max-w-[160px] shrink-0">{r.error}</span>
                   )}
                 </div>
               ))}
@@ -479,7 +479,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
             {/* Results pane */}
             <div className="flex h-full min-h-0 flex-col rounded-lg border border-white/10 overflow-hidden">
               <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
-                <span className="text-muted-foreground font-mono text-[10px] font-bold uppercase tracking-widest">
+                <span className="text-muted-foreground font-mono text-[11px] font-bold uppercase tracking-widest">
                   {results.length} {results.length === 1 ? "result" : "results"}
                 </span>
                 <Select value={sortMode} onValueChange={(v) => setSortMode(v as SortMode)}>
@@ -555,7 +555,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                         )}
                       </div>
                       {r.existingShowId && (
-                        <span className="text-emerald-400 font-mono text-[10px] shrink-0">Already added</span>
+                        <span className="text-emerald-400 font-mono text-[11px] shrink-0">Already added</span>
                       )}
                     </button>
                   );
@@ -656,7 +656,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
           {rating != null && (
             <Badge variant="amber" className="gap-1">
               <StarIcon className="size-3 fill-amber-400" /> {rating}
-              {detail.ratingSource && <span className="text-amber-400/70 font-mono text-[9px] uppercase">{detail.ratingSource}</span>}
+              {detail.ratingSource && <span className="text-amber-400/70 font-mono text-[11px] uppercase">{detail.ratingSource}</span>}
             </Badge>
           )}
           {detail.status && <Badge variant="signal">{detail.status}</Badge>}
@@ -676,7 +676,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
         {genres.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pt-2">
             {genres.map(g => (
-              <span key={g} className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted-foreground">
+              <span key={g} className="rounded-full border border-white/10 px-2 py-px text-[11px] text-muted-foreground">
                 {g}
               </span>
             ))}
@@ -694,7 +694,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-4 pb-2 text-xs">
           {(detail.creators?.length ?? 0) > 0 && (
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                 {source === "anilist" ? "Studios" : "Created by"}
               </p>
               <p className="mt-0.5 truncate">{detail.creators!.join(", ")}</p>
@@ -702,13 +702,13 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
           )}
           {(detail.networks?.length ?? 0) > 0 && source !== "anilist" && (
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Network</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Network</p>
               <p className="mt-0.5 truncate">{detail.networks!.join(", ")}</p>
             </div>
           )}
           {detail.firstAirDate && (
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">First aired</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">First aired</p>
               <p className="mt-0.5 truncate">{detail.firstAirDate}</p>
             </div>
           )}
@@ -718,7 +718,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
           <>
             <Separator className="my-3" />
             <div className="px-4 pb-2">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Seasons</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Seasons</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {seasons.map(s => (
                   <span
@@ -738,7 +738,7 @@ function DetailPane({ detail, source }: { detail: ShowDetail; source: string }) 
           <>
             <Separator className="my-3" />
             <div className="px-4 pb-4">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Links</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Links</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {links.map(link => (
                   <a

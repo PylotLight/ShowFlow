@@ -114,12 +114,12 @@ function StageHeader({ stage }: { stage: string }) {
         {stage}
       </span>
       {stage === FAILED_STAGE && (
-        <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[9px] font-mono text-destructive border border-destructive/10">
+        <span className="rounded bg-destructive/15 px-1.5 py-px text-[11px] font-mono text-destructive border border-destructive/10">
           Blocked
         </span>
       )}
       {stage === "AVAILABLE" && (
-        <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-mono text-emerald-400 border border-emerald-500/10">
+        <span className="rounded bg-emerald-500/15 px-1.5 py-px text-[11px] font-mono text-emerald-400 border border-emerald-500/10">
           Done
         </span>
       )}
@@ -148,7 +148,7 @@ function EventRow({ event }: { event: TraceEvent }) {
           <div className="flex items-center gap-2 min-w-0">
             <span
               className={cn(
-                "rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider shrink-0",
+                "rounded px-1.5 py-px text-[11px] font-mono uppercase tracking-wide shrink-0",
                 isError
                   ? "bg-destructive/15 text-destructive border border-destructive/10"
                   : "bg-white/5 text-white/60 border border-white/5",
@@ -158,7 +158,7 @@ function EventRow({ event }: { event: TraceEvent }) {
             </span>
             <span className="text-xs text-white/80 break-words">{event.message}</span>
           </div>
-          <span className="text-muted-foreground font-mono text-[9px] shrink-0 whitespace-nowrap">
+          <span className="text-muted-foreground font-mono text-[11px] shrink-0 whitespace-nowrap">
             {formatDate(event.createdAt)}
           </span>
         </div>
@@ -172,12 +172,12 @@ function EventRow({ event }: { event: TraceEvent }) {
 
         {/* Release title + indexer */}
         {event.releaseTitle && (
-          <p className="text-muted-foreground text-[10px] font-mono truncate" title={event.releaseTitle}>
+          <p className="text-muted-foreground text-[11px] font-mono truncate" title={event.releaseTitle}>
             {event.releaseTitle}
           </p>
         )}
         {event.indexerName && (
-          <p className="text-muted-foreground text-[10px]">
+          <p className="text-muted-foreground text-[11px]">
             via {event.indexerName}
           </p>
         )}
@@ -228,7 +228,7 @@ function TracePanel({
       <div className="flex flex-col items-center justify-center py-12 gap-2">
         <SearchIcon className="size-6 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">No pipeline events recorded for this episode.</p>
-        <p className="text-xs text-muted-foreground/60">Events appear once the grabber or import process touches it.</p>
+        <p className="text-xs text-muted-foreground/80">Events appear once the grabber or import process touches it.</p>
       </div>
     );
   }

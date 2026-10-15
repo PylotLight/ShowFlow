@@ -139,7 +139,7 @@ function StageBadge({ stage, small }: { stage: string; small?: boolean }) {
     ? "bg-blue-500/15 border-blue-500/10"
     : "bg-white/5 border-white/5";
   return (
-    <span className={cn("rounded px-1.5 py-0.5 font-mono border", bg, color, small ? "text-[9px]" : "text-[10px]")}>
+    <span className={cn("rounded px-1.5 py-0.5 font-mono border", bg, color, small ? "text-[11px]" : "text-[11px]")}>
       {stage === "AVAILABLE" ? "On disk" : stage}
     </span>
   );
@@ -188,9 +188,9 @@ function KanbanCard({
           </p>
           <EpisodeChip season={ep.seasonNumber} episode={ep.episodeNumber} state="none" className="text-[11px]" />
           {ep.episodeTitle && (
-            <p className="truncate text-[10px] text-muted-foreground">{ep.episodeTitle}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{ep.episodeTitle}</p>
           )}
-          <p className="text-[10px] text-muted-foreground/70">
+          <p className="text-[11px] text-muted-foreground/70">
             {formatAirDate(ep.airDate)}
           </p>
         </div>
@@ -200,12 +200,12 @@ function KanbanCard({
       <div className="flex items-center gap-2">
         <StageBadge stage={ep.currentStage} small />
         {ep.eventCreatedAt && ep.currentStage !== "AVAILABLE" && (
-          <span className="text-[9px] text-muted-foreground/60 font-mono">
+          <span className="text-[11px] text-muted-foreground/80 font-mono">
             {formatRelative(ep.eventCreatedAt)}
           </span>
         )}
         {ep.currentStage === "AVAILABLE" && ep.filePath && (
-          <span className="text-[9px] text-emerald-400/60 font-mono truncate" title={ep.filePath}>
+          <span className="text-[11px] text-emerald-400/90 font-mono truncate" title={ep.filePath}>
             {ep.filePath.split(/[\\/]/).pop()}
           </span>
         )}
@@ -213,7 +213,7 @@ function KanbanCard({
 
       {/* Message */}
       {ep.message && ep.currentStage !== "AVAILABLE" && (
-        <p className="text-[10px] text-muted-foreground/80 truncate leading-relaxed" title={ep.message}>
+        <p className="text-[11px] text-muted-foreground/80 truncate leading-relaxed" title={ep.message}>
           {ep.message}
         </p>
       )}
@@ -221,22 +221,22 @@ function KanbanCard({
       {/* Actions */}
       <div className="flex items-center gap-1 pt-0.5">
         {showGrab && (
-          <Button size="sm" variant={grabbed ? "outline" : "default"} onClick={onGrab} disabled={grabbing} className="h-6 px-2 text-[10px]">
+          <Button size="sm" variant={grabbed ? "outline" : "default"} onClick={onGrab} disabled={grabbing} className="h-6 px-2 text-[11px]">
             {grabbing ? <Loader2Icon className="size-2.5 animate-spin" /> : grabbed ? <CheckIcon className="size-2.5" /> : <DownloadIcon className="size-2.5" />}
             {grabbed ? "Sent" : "Grab"}
           </Button>
         )}
         {showTrace && (
-          <Button size="sm" variant="outline" onClick={onTrace} className="h-6 px-2 text-[10px]">
+          <Button size="sm" variant="outline" onClick={onTrace} className="h-6 px-2 text-[11px]">
             Trace
           </Button>
         )}
         {showDiagnose && (
-          <Button size="sm" variant="outline" onClick={onDiagnose} className="h-6 px-2 text-[10px]">
+          <Button size="sm" variant="outline" onClick={onDiagnose} className="h-6 px-2 text-[11px]">
             Diagnose
           </Button>
         )}
-        <Button size="sm" variant="outline" onClick={onSearch} className="h-6 px-2 text-[10px] ml-auto">
+        <Button size="sm" variant="outline" onClick={onSearch} className="h-6 px-2 text-[11px] ml-auto">
           <SearchIcon className="size-2.5" />
           Search
         </Button>
@@ -280,16 +280,16 @@ function GroupedLaneItems({ items, expandedShows, onToggleShow, grabbing, grabbe
                 <PosterImage showId={group.showId} alt={group.showTitle} size="card" className="w-7 h-10 shrink-0 rounded" />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="truncate text-xs font-semibold text-white/90">{group.showTitle}</p>
-                  <p className="text-[10px] text-muted-foreground/70">
+                  <p className="text-[11px] text-muted-foreground/70">
                     {count} episode{count !== 1 ? "s" : ""}
                   </p>
                 </div>
               </button>
-              <button
+              <button aria-label={expanded ? "Collapse" : "Expand"}
                 type="button"
                 onClick={() => onToggleShow(group.showId)}
                 title={expanded ? "Collapse" : "Expand"}
-                className="font-mono text-[10px] text-muted-foreground/60 shrink-0 p-1 rounded hover:bg-white/10"
+                className="font-mono text-[11px] text-muted-foreground/80 shrink-0 p-1 rounded hover:bg-white/10"
               >
                 {expanded ? "−" : "+"}
               </button>
@@ -343,15 +343,15 @@ function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, on
       <div className={cn("flex items-center gap-2 px-3 py-2.5 mb-2 rounded-lg border", bg, color)}>
         <Icon className="size-3.5 shrink-0" />
         <span className="text-xs font-semibold uppercase tracking-wider">{lane.label}</span>
-        <span className={cn("ml-auto font-mono text-[10px] opacity-60", color)}>{lane.count}</span>
+        <span className={cn("ml-auto font-mono text-[11px] opacity-80", color)}>{lane.count}</span>
       </div>
 
       {/* Cards */}
       <div className="space-y-2 overflow-y-auto pr-1 flex-1 min-h-0">
         {lane.items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground/40">
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
             <SearchXIcon className="size-5 mb-1" />
-            <p className="text-[10px]">Empty</p>
+            <p className="text-[11px]">Empty</p>
           </div>
         ) : (
           <GroupedLaneItems
@@ -457,7 +457,7 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
         <div className="flex items-center gap-3">
           <LayersIcon className="size-5 text-signal" />
           <div>
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Pipeline</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Pipeline</span>
             <h2 className="font-display text-2xl font-bold text-white mt-0.5">
               {data === null ? "—" : total} tracked episode{total !== 1 ? "s" : ""}
             </h2>
@@ -528,7 +528,7 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
                 <div className={cn("flex items-center gap-2 px-3 py-2 rounded-lg border mb-2", LANE_BG[lane.stage] ?? "", LANE_COLORS[lane.stage] ?? "")}>
                   {LANE_ICONS[lane.stage] && React.createElement(LANE_ICONS[lane.stage]!, { className: "size-3.5 shrink-0" })}
                   <span className="text-xs font-semibold uppercase tracking-wider">{lane.label}</span>
-                  <span className={cn("ml-auto font-mono text-[10px] opacity-60", LANE_COLORS[lane.stage])}>{lane.count}</span>
+                  <span className={cn("ml-auto font-mono text-[11px] opacity-80", LANE_COLORS[lane.stage])}>{lane.count}</span>
                 </div>
                 <GroupedLaneItems
                   items={lane.items}

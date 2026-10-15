@@ -99,7 +99,7 @@ function SourcesPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         <div className="flex items-center gap-3">
           <HardDriveIcon className="size-5 text-signal" />
           <div>
-            <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-signal">// Sources</span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Sources</span>
             <h2 className="font-display text-2xl font-bold text-white">
               {activeSourceCount} indexer{activeSourceCount !== 1 ? "s" : ""} active
             </h2>
@@ -136,7 +136,7 @@ function SourcesPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                 <p className="text-muted-foreground text-xs">{prowlarrStatus?.message ?? (prowlarrStatus === null ? "Checking connection…" : "")}</p>
               </div>
             </div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               {prowlarrIndexers === null ? "" : `${prowlarrIndexers.length} indexer${prowlarrIndexers.length !== 1 ? "s" : ""}`}
             </span>
           </div>
@@ -183,7 +183,7 @@ function SourcesPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                       <p className={cn("text-xs mt-0.5", status.ok ? "text-muted-foreground" : "text-red-400")}>{status.message}</p>
                     )}
                   </div>
-                  <a
+                  <a aria-label={`Open ${meta.name}`}
                     href={meta.defaultUrl}
                     target="_blank"
                     rel="noreferrer"

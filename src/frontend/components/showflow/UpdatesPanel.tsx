@@ -422,17 +422,17 @@ export function UpdatesPanel() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xs text-white/90 truncate font-semibold">{r.tagName}</span>
-              {isCurrent && <span className="text-[10px] text-signal bg-signal/10 px-1.5 py-0.5 rounded border border-signal/20 font-mono">current</span>}
-              {r.prerelease && <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 font-mono">pre</span>}
+              {isCurrent && <span className="text-[11px] text-signal bg-signal/10 px-1.5 py-px rounded border border-signal/20 font-mono">current</span>}
+              {r.prerelease && <span className="text-[11px] text-amber-400 bg-amber-400/10 px-1.5 py-px rounded border border-amber-400/20 font-mono">pre</span>}
               {r.buildInProgress && (
-                <span className="text-[10px] text-sky-400 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20 font-mono flex items-center gap-1">
+                <span className="text-[11px] text-sky-400 bg-sky-400/10 px-1.5 py-px rounded border border-sky-400/20 font-mono flex items-center gap-1">
                   <Loader2Icon className="size-2.5 animate-spin" /> CI Building ({build?.durationSeconds ? `${build.durationSeconds}s` : "in progress"})
                 </span>
               )}
-              {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded border border-red-400/20 font-mono">missing assets</span>}
+              {!r.hasRequiredAssets && !r.buildInProgress && <span className="text-[11px] text-red-400 bg-red-400/10 px-1.5 py-px rounded border border-red-400/20 font-mono">missing assets</span>}
             </div>
             {r.name && <p className="text-xs text-muted-foreground mt-0.5 truncate">{r.name}</p>}
-            <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono flex-wrap">
+            <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground font-mono flex-wrap">
               <span>{r.publishedAt ? new Date(r.publishedAt).toLocaleString() : "—"}</span>
               {r.assets.length > 0 && <span>Asset: {(r.assets[0]!.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>}
               {build?.htmlUrl && (
@@ -515,7 +515,7 @@ export function UpdatesPanel() {
                 {build ? `Actions Run "${build.name}": status is ${build.status} (${build.durationSeconds ?? 0}s elapsed)` : "Monitoring GitHub Actions release workflow..."}
               </span>
             </div>
-            <span className="text-[10px] font-mono text-sky-400/80">Polling live · {Math.round(pollDelayRef.current / 1000)}s</span>
+            <span className="text-[11px] font-mono text-sky-400/80">Polling live · {Math.round(pollDelayRef.current / 1000)}s</span>
           </div>
         )}
       </div>
@@ -540,7 +540,7 @@ export function UpdatesPanel() {
                 <p className="text-muted-foreground text-xs mt-0.5">
                   The new build is staged on disk. Activating briefly restarts ShowFlow — you can do it now or later.
                 </p>
-                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">
+                <p className="text-[11px] text-muted-foreground/70 mt-1 font-mono">
                   releaseId {pending.releaseId.slice(0, 12)} · staged {new Date(pending.stagedAt).toLocaleString()}
                 </p>
               </div>
@@ -582,7 +582,7 @@ export function UpdatesPanel() {
                 Update Pipeline: <span className="font-mono text-signal">{activeUpdateTag}</span>
               </h3>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setActiveUpdateTag(null)} className="text-white/40 hover:text-white text-xs">
+            <Button variant="ghost" size="sm" onClick={() => setActiveUpdateTag(null)} className="text-white/60 hover:text-white text-xs">
               Dismiss
             </Button>
           </div>
@@ -595,10 +595,10 @@ export function UpdatesPanel() {
                 ? "bg-white/[0.08] border-signal/50 text-white" 
                 : currentStep > 1 
                   ? "bg-white/[0.02] border-emerald-500/30 text-emerald-400" 
-                  : "bg-white/[0.01] border-white/5 text-white/40"
+                  : "bg-white/[0.01] border-white/5 text-white/60"
             }`}>
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase font-semibold">1. CI Build</span>
+                <span className="font-mono text-[11px] uppercase font-semibold">1. CI Build</span>
                 {currentStep === 1 && stepStatus === "running" && <Loader2Icon className="size-3 animate-spin text-signal" />}
                 {currentStep > 1 && <CheckCircle2Icon className="size-3 text-emerald-400" />}
               </div>
@@ -611,10 +611,10 @@ export function UpdatesPanel() {
                 ? "bg-white/[0.08] border-signal/50 text-white" 
                 : currentStep > 2 
                   ? "bg-white/[0.02] border-emerald-500/30 text-emerald-400" 
-                  : "bg-white/[0.01] border-white/5 text-white/40"
+                  : "bg-white/[0.01] border-white/5 text-white/60"
             }`}>
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase font-semibold">2. Download</span>
+                <span className="font-mono text-[11px] uppercase font-semibold">2. Download</span>
                 {currentStep === 2 && stepStatus === "running" && <Loader2Icon className="size-3 animate-spin text-signal" />}
                 {currentStep > 2 && <CheckCircle2Icon className="size-3 text-emerald-400" />}
               </div>
@@ -627,10 +627,10 @@ export function UpdatesPanel() {
                 ? "bg-white/[0.08] border-signal/50 text-white" 
                 : currentStep > 3 
                   ? "bg-white/[0.02] border-emerald-500/30 text-emerald-400" 
-                  : "bg-white/[0.01] border-white/5 text-white/40"
+                  : "bg-white/[0.01] border-white/5 text-white/60"
             }`}>
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase font-semibold">3. Activate</span>
+                <span className="font-mono text-[11px] uppercase font-semibold">3. Activate</span>
                 {currentStep === 3 && stepStatus === "running" && <Loader2Icon className="size-3 animate-spin text-signal" />}
                 {currentStep > 3 && <CheckCircle2Icon className="size-3 text-emerald-400" />}
               </div>
@@ -643,10 +643,10 @@ export function UpdatesPanel() {
                 ? "bg-white/[0.02] border-emerald-500/30 text-emerald-400"
                 : currentStep === 4 
                   ? "bg-white/[0.08] border-signal/50 text-white" 
-                  : "bg-white/[0.01] border-white/5 text-white/40"
+                  : "bg-white/[0.01] border-white/5 text-white/60"
             }`}>
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase font-semibold">4. Refresh</span>
+                <span className="font-mono text-[11px] uppercase font-semibold">4. Refresh</span>
                 {currentStep === 4 && stepStatus === "running" && <Loader2Icon className="size-3 animate-spin text-signal" />}
                 {currentStep === 4 && stepStatus === "success" && <CheckCircle2Icon className="size-3 text-emerald-400" />}
               </div>
@@ -664,7 +664,7 @@ export function UpdatesPanel() {
           <div className="bg-white/[0.03] border border-white/5 rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-white/80 font-mono text-[11px]">{stepMessage || "Processing update phase..."}</span>
-              {stepStatus === "error" && <span className="text-red-400 font-semibold text-[10px]">Failed</span>}
+              {stepStatus === "error" && <span className="text-red-400 font-semibold text-[11px]">Failed</span>}
             </div>
 
             {currentStep === 2 && stepStatus === "running" && (
@@ -699,7 +699,7 @@ export function UpdatesPanel() {
             </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/70">
+        <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground/70">
           <span className="relative flex h-1.5 w-1.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
@@ -765,7 +765,7 @@ export function UpdatesPanel() {
             <p className="text-muted-foreground text-xs mt-0.5">Current state from the supervisor</p>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading}>
+            <Button aria-label="Refresh" variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading}>
               <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -773,19 +773,19 @@ export function UpdatesPanel() {
         {status && (
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">Active</span>
+              <span className="font-mono text-[11px] text-white/60">Active</span>
               <p className="font-mono text-xs text-white/90 mt-0.5">{status.activeReleaseId ? status.activeReleaseId.slice(0, 12) : "—"}</p>
             </div>
             <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">Phase</span>
+              <span className="font-mono text-[11px] text-white/60">Phase</span>
               <p className="font-mono text-xs text-signal mt-0.5 capitalize">{status.phase || "—"}</p>
             </div>
             <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">App Version</span>
+              <span className="font-mono text-[11px] text-white/60">App Version</span>
               <p className="font-mono text-xs text-white/90 mt-0.5">{status.appVersion || "—"}</p>
             </div>
             <div className="rounded-lg bg-white/[0.03] p-3 border border-white/5">
-              <span className="font-mono text-[10px] text-white/60">lastKnownGood</span>
+              <span className="font-mono text-[11px] text-white/60">lastKnownGood</span>
               <p className="font-mono text-xs text-white/90 mt-0.5">{status.lastKnownGood ? status.lastKnownGood.slice(0, 12) : "—"}</p>
             </div>
           </div>

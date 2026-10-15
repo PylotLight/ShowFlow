@@ -91,7 +91,7 @@ export function FeedbackButton() {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); else setOpen(true) }}>
       <DialogTrigger asChild>
-        <Button
+        <Button aria-label="Send feedback"
           size="icon-sm"
           variant="ghost"
           className="relative size-8 rounded-full"

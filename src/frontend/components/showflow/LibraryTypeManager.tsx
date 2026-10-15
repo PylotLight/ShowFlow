@@ -206,7 +206,7 @@ export function LibraryTypeManager() {
                   {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <PlusIcon className="size-3.5" />}
                   Add
                 </Button>
-                <button
+                <button aria-label="Cancel"
                   type="button"
                   onClick={() => { setAdding(false); setNewName(""); setNewPath(""); }}
                   className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
@@ -252,13 +252,13 @@ function LibraryTypeRow({ type, qualityProfiles, saving, onSave, onRemove }: {
     return (
       <div className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
         <div className="size-8 rounded-lg bg-signal/10 grid place-items-center shrink-0">
-          <span className="text-signal font-mono text-[10px] font-bold uppercase leading-none">{type.name.slice(0, 2)}</span>
+          <span className="text-signal font-mono text-[11px] font-bold uppercase leading-none">{type.name.slice(0, 2)}</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-mono text-sm font-medium flex items-center gap-1.5">
             {type.name}
             {type.is_default === 1 && (
-              <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-signal">
+              <span className="flex items-center gap-1 text-[11px] font-mono uppercase tracking-wider text-signal">
                 <StarIcon className="size-3 fill-signal" /> Default
               </span>
             )}
@@ -284,7 +284,7 @@ function LibraryTypeRow({ type, qualityProfiles, saving, onSave, onRemove }: {
         >
           Edit
         </button>
-        <button
+        <button aria-label="Remove library"
           type="button"
           onClick={onRemove}
           disabled={saving}
@@ -316,14 +316,14 @@ function LibraryTypeRow({ type, qualityProfiles, saving, onSave, onRemove }: {
             ))}
           </SelectContent>
         </Select>
-        <Button
+        <Button aria-label="Save library"
           size="sm"
           onClick={() => { onSave({ name, rootFolderPath: path, qualityProfileId: qualityProfileId || undefined, isDefault: type.is_default === 1 }); setEditing(false); }}
           disabled={saving || !name.trim() || !path.trim()}
         >
           {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
         </Button>
-        <button
+        <button aria-label="Cancel editing"
           type="button"
           onClick={() => setEditing(false)}
           className="text-muted-foreground hover:text-foreground transition-colors p-1.5"

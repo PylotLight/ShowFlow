@@ -128,7 +128,7 @@ export function HistoryPage() {
                 key={t.id}
                 onClick={() => setKind(t.id)}
                 className={cn(
-                  "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide transition-all",
+                  "rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-all",
                   kind === t.id
                     ? "bg-signal/15 text-signal font-semibold"
                     : "text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06]",
@@ -144,10 +144,10 @@ export function HistoryPage() {
               placeholder="Filter history..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="h-8 w-44 sm:w-56 rounded-md bg-white/5 border border-white/5 pl-8 pr-2 text-xs placeholder:text-muted-foreground/60 focus:border-signal/50 focus:outline-none focus:ring-1 focus:ring-signal/30"
+              className="h-8 w-44 sm:w-56 rounded-md bg-white/5 border border-white/5 pl-8 pr-2 text-xs placeholder:text-muted-foreground/80 focus:border-signal/50 focus:outline-none focus:ring-1 focus:ring-signal/30"
             />
           </div>
-          <button
+          <button aria-label="Refresh history"
             onClick={() => { setLoading(true); refresh(); }}
             title="Refresh history"
             className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
@@ -223,7 +223,7 @@ export function HistoryPage() {
                       {it.releaseTitle && it.releaseTitle !== it.message && (
                         <span
                           title={it.releaseTitle}
-                          className="text-[11px] font-mono text-white/40 break-all line-clamp-1 hidden lg:inline"
+                          className="text-[11px] font-mono text-white/60 break-all line-clamp-1 hidden lg:inline"
                         >
                           {it.releaseTitle}
                         </span>
@@ -231,12 +231,12 @@ export function HistoryPage() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {it.indexerName && (
-                        <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-white/50 border border-white/10 max-w-[120px] truncate">
+                        <span className="rounded-full bg-white/[0.04] px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-white/60 border border-white/10 max-w-[120px] truncate">
                           {it.indexerName}
                         </span>
                       )}
                       {it.eventType && it.kind === "event" && (
-                        <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider text-white/40 border border-white/10">
+                        <span className="rounded-full bg-white/[0.04] px-1.5 py-px font-mono text-[11px] font-bold uppercase tracking-wide text-white/60 border border-white/10">
                           {it.eventType.replace(/_/g, " ")}
                         </span>
                       )}
@@ -252,7 +252,7 @@ export function HistoryPage() {
                   <button
                     onClick={loadMore}
                     disabled={loadingMore}
-                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] px-4 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white/60 border border-white/10 hover:text-white hover:bg-white/[0.08] transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-full bg-white/[0.04] px-4 py-1.5 font-mono text-[11px] font-bold uppercase tracking-wide text-white/60 border border-white/10 hover:text-white hover:bg-white/[0.08] transition-all disabled:opacity-50"
                   >
                     <ChevronDownIcon className="size-3.5" />
                     {loadingMore ? "Loading..." : "Load more"}

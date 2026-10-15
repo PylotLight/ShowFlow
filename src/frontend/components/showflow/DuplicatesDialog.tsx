@@ -113,7 +113,7 @@ function DuplicatesDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+    <div role="dialog" aria-modal="true" aria-label="Overlapping folders" className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
       <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-white/10 bg-[#15181f] shadow-2xl"
         style={{ backdropFilter: "blur(16px)" }}>
         <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-white/5 shrink-0">
@@ -199,7 +199,7 @@ function DuplicatesDialog({
                     {isExpanded ? <ChevronDown className="size-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />}
                     <span className="truncate text-sm text-white/90">{group.key}</span>
                   </div>
-                  <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+                  <span className="font-mono text-[11px] text-muted-foreground/80 shrink-0">
                     {group.folders.length} folders · {group.wouldMove.length} files
                   </span>
                 </button>
@@ -207,7 +207,7 @@ function DuplicatesDialog({
                 {isExpanded && (
                   <>
                     <div className="px-4 py-2.5 border-b border-white/5 bg-white/[0.01]">
-                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Library root</div>
+                      <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Library root</div>
                       <div className="truncate font-mono text-xs text-white/70">{group.rootFolder}</div>
                     </div>
 
@@ -217,10 +217,10 @@ function DuplicatesDialog({
                         return (
                           <div key={f.path} className="flex items-center gap-3 px-4 py-2.5">
                             {isCanonical && (
-                              <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider shrink-0">keep</span>
+                              <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-px font-mono text-[11px] uppercase tracking-wide shrink-0">keep</span>
                             )}
                             {!isCanonical && (
-                              <span className="rounded bg-amber-500/15 text-amber-400 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider shrink-0">merge</span>
+                              <span className="rounded bg-amber-500/15 text-amber-400 px-1.5 py-px font-mono text-[11px] uppercase tracking-wide shrink-0">merge</span>
                             )}
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm text-white/90">{f.name}</div>
@@ -237,12 +237,12 @@ function DuplicatesDialog({
 
                     <div className="border-t border-white/5 bg-white/[0.01]">
                       <div className="px-4 py-2.5 max-h-48 overflow-y-auto space-y-1">
-                        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+                        <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
                           {group.wouldMove.length} file{group.wouldMove.length === 1 ? "" : "s"} will move
                         </div>
                         {group.wouldMove.slice(0, 50).map((m, i) => (
                           <div key={i} className="flex items-start gap-1.5 text-[11px]">
-                            <Copy className="size-3 text-muted-foreground/50 shrink-0 mt-0.5" />
+                            <Copy className="size-3 text-muted-foreground shrink-0 mt-0.5" />
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-white/70 font-mono">{m.from}</div>
                               <div className="text-muted-foreground/70 font-mono">→ {m.to}</div>
@@ -250,7 +250,7 @@ function DuplicatesDialog({
                           </div>
                         ))}
                         {group.wouldMove.length > 50 && (
-                          <div className="text-[11px] text-muted-foreground/60 pt-1">
+                          <div className="text-[11px] text-muted-foreground/80 pt-1">
                             … and {group.wouldMove.length - 50} more
                           </div>
                         )}

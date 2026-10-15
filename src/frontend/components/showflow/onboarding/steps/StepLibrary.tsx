@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@frontend/components/ui/dialog";
 import { cn } from "@frontend/lib/utils";
 import {
@@ -214,7 +215,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                 {/* Library name + delete */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
-                    <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50 mb-1.5 block">
+                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1.5 block">
                       Library Name
                     </label>
                     <Input
@@ -224,11 +225,11 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                       className="font-medium text-sm"
                     />
                   </div>
-                  <Button
+                  <Button aria-label="Remove folder"
                     size="icon-sm"
                     variant="ghost"
                     onClick={() => removeFolder(folder)}
-                    className="text-muted-foreground/50 hover:text-red-400 shrink-0 mt-5"
+                    className="text-muted-foreground hover:text-red-400 shrink-0 mt-5"
                   >
                     <Trash2Icon className="size-3.5" />
                   </Button>
@@ -236,7 +237,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
 
                 {/* Root folder */}
                 <div>
-                  <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50 mb-1.5 block">
+                  <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1.5 block">
                     Root Folder
                   </label>
                   <button
@@ -245,17 +246,17 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                   >
                     <FolderIcon className="size-4 shrink-0 text-signal" />
                     <span className="flex-1 text-sm font-mono truncate text-muted-foreground/80">{folder}</span>
-                    <ChevronRightIcon className="size-3.5 text-muted-foreground/40 shrink-0" />
+                    <ChevronRightIcon className="size-3.5 text-muted-foreground shrink-0" />
                   </button>
                 </div>
 
                 {/* Naming convention */}
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/50">
+                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
                       Naming Convention
                     </label>
-                    <span className="text-[10px] text-muted-foreground/30">(can be changed later)</span>
+                    <span className="text-[11px] text-muted-foreground">(can be changed later)</span>
                   </div>
                   <div className="flex gap-1.5">
                     {NAMING_OPTIONS.map(opt => {
@@ -269,7 +270,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                             "flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium transition-all duration-200",
                             isActive
                               ? "bg-signal/10 text-signal ring-1 ring-signal/30"
-                              : "text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.03]"
+                              : "text-muted-foreground hover:text-muted-foreground hover:bg-white/[0.03]"
                           )}
                         >
                           <OptIcon className="size-3.5" />
@@ -278,17 +279,17 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                       );
                     })}
                   </div>
-                  <p className="text-[10px] text-muted-foreground/30 mt-1.5">
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
                     Controls episode/file naming format per {namingType.toLowerCase()} standard. Configured per-series in Sonarr.
                   </p>
                 </div>
 
                 {/* Quality profile */}
                 <div className="flex items-start gap-2.5 p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                  <InfoIcon className="size-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
+                  <InfoIcon className="size-3.5 text-muted-foreground shrink-0 mt-0.5" />
                   <div>
                     <p className="text-xs font-medium text-muted-foreground/70">Quality Profile: Standard (default)</p>
-                    <p className="text-[10px] text-muted-foreground/30 mt-0.5">
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
                       Controls resolution &amp; file format preferences. Additional profiles
                       can be created and assigned in Settings later.
                     </p>
@@ -311,6 +312,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
         <DialogContent className="max-w-xl p-0 max-h-[90vh] overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/10">
             <DialogTitle>Browse Directories</DialogTitle>
+            <DialogDescription className="sr-only">Pick a folder to use as a library root</DialogDescription>
           </DialogHeader>
 
           <div className="px-6 py-4 space-y-4 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(90vh - 140px)' }}>
@@ -364,7 +366,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                       >
                         <FolderIcon className="size-4 shrink-0 text-amber-400/70" />
                         <span className="flex-1 truncate min-w-0">{dir}</span>
-                        <ChevronRightIcon className="size-3.5 text-muted-foreground/40 shrink-0" />
+                        <ChevronRightIcon className="size-3.5 text-muted-foreground shrink-0" />
                       </button>
                     ))}
                   </>
@@ -390,10 +392,10 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                     className="flex-1 font-mono text-sm h-8"
                     autoFocus
                   />
-                  <Button size="sm" variant="ghost" onClick={() => { setNewFolderOpen(false); setNewFolderName(""); setNewFolderError(null); }} disabled={newFolderSaving}>
+                  <Button aria-label="Cancel" size="sm" variant="ghost" onClick={() => { setNewFolderOpen(false); setNewFolderName(""); setNewFolderError(null); }} disabled={newFolderSaving}>
                     <XIcon className="size-3.5" />
                   </Button>
-                  <Button size="sm" className="shrink-0" disabled={!newFolderName.trim() || newFolderSaving} onClick={createFolder}>
+                  <Button aria-label="Create folder" size="sm" className="shrink-0" disabled={!newFolderName.trim() || newFolderSaving} onClick={createFolder}>
                     {newFolderSaving ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
                   </Button>
                 </div>
@@ -402,7 +404,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
                   variant="ghost"
                   size="sm"
                   onClick={() => { setNewFolderOpen(true); setNewFolderError(null); }}
-                  className="gap-1.5 text-muted-foreground/60 hover:text-muted-foreground"
+                  className="gap-1.5 text-muted-foreground/80 hover:text-muted-foreground"
                 >
                   <FolderInputIcon className="size-3.5" />
                   New Folder
@@ -433,7 +435,7 @@ export function StepLibrary({ data, setData, onNext, onSkip }: StepProps) {
       <div className="mt-6 flex items-center justify-between shrink-0">
         <div>
           {data.rootFolders.length === 0 && (
-            <p className="text-xs text-muted-foreground/50">
+            <p className="text-xs text-muted-foreground">
               Add at least one library to continue
             </p>
           )}

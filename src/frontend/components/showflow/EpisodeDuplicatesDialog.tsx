@@ -123,7 +123,7 @@ function EpisodeDuplicatesDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
+    <div role="dialog" aria-modal="true" aria-label="Duplicate episodes" className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.6)" }}>
       <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-white/10 bg-[#15181f] shadow-2xl"
         style={{ backdropFilter: "blur(16px)" }}>
         <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-white/5 shrink-0">
@@ -168,7 +168,7 @@ function EpisodeDuplicatesDialog({
                     <span className="font-mono text-xs text-white/90 shrink-0">S{group.season}E{group.episode}</span>
                     <span className="truncate text-sm text-white/70">{group.title || ""}</span>
                   </div>
-                  <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+                  <span className="font-mono text-[11px] text-muted-foreground/80 shrink-0">
                     {group.files.length} file{group.files.length === 1 ? "" : "s"} · {group.onDiskCount} on disk
                   </span>
                 </div>
@@ -192,13 +192,13 @@ function EpisodeDuplicatesDialog({
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="truncate text-sm text-white/90">{f.name}</span>
                             {isBest && f.onDisk && (
-                              <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider shrink-0">best</span>
+                              <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-px font-mono text-[11px] uppercase tracking-wide shrink-0">best</span>
                             )}
                             {isCurrent && (
-                              <span className="rounded bg-sky-500/10 text-sky-400 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider shrink-0">tracked</span>
+                              <span className="rounded bg-sky-500/10 text-sky-400 px-1.5 py-px font-mono text-[11px] uppercase tracking-wide shrink-0">tracked</span>
                             )}
                             {!f.onDisk && (
-                              <span className="rounded bg-red-500/10 text-red-400 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider shrink-0">missing</span>
+                              <span className="rounded bg-red-500/10 text-red-400 px-1.5 py-px font-mono text-[11px] uppercase tracking-wide shrink-0">missing</span>
                             )}
                           </div>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">

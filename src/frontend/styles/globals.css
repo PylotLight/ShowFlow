@@ -45,6 +45,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* smallest allowed type size: nothing in the app should go below 11px */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
   --text-caption: var(--text-caption, 0.75rem);
   --text-sub: var(--text-sub, 0.8125rem);
   --text-sm: var(--text-sm, 0.9375rem);
@@ -72,7 +75,8 @@
   --secondary: oklch(0.27 0.02 265);
   --secondary-foreground: oklch(0.96 0.01 265);
   --muted: oklch(0.22 0.02 265);
-  --muted-foreground: oklch(0.65 0.02 265);
+  /* 0.72 L: ~8.1:1 on background, ~7.4:1 on card, ~6:1 on secondary (WCAG AA) */
+  --muted-foreground: oklch(0.72 0.02 265);
   --accent: oklch(0.27 0.02 265);
   --accent-foreground: oklch(0.96 0.01 265);
   --destructive: oklch(0.6 0.22 27);
@@ -101,6 +105,12 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans, "Inter", ui-sans-serif, sans-serif);
+  }
+  /* visible keyboard focus everywhere by default; components that use
+     outline-none must bring their own focus-visible ring */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
