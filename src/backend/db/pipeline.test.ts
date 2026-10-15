@@ -89,3 +89,66 @@ test('listHistory merges grabs, imports, and pipeline events', () => {
 
   db.close();
 });
+
+test('getPipelineSummary matches the kanban counts', () => {
+  const db = new DatabaseManager(':memory:');
+  seed(db);
+  db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'SEARCHING', eventType: 'search_completed', message: 'x' });
+  db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'GRABBED', eventType: 'grab_sent', message: 'y' });
+  db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 3, stage: 'FAILED', eventType: 'grab_failed', message: 'z' });
+
+  const kanban = db.listKanbanEpisodes();
+  const attention = kanban.filter(e => ['WANTED', 'SEARCHING', 'FAILED'].includes(e.currentStage)).length;
+  const summary = db.getPipelineSummary();
+  expect(summary.total).toBe(kanban.length);
+  expect(summary.attentionCount).toBe(attention);
+  expect(summary.attentionCount).toBe(1); // 1x1 grabbed, 1x3 failed
+  db.close();
+});
+
+test('hasRecentPipelineEvent looks past newer events for the item', () => {
+  const db = new DatabaseManager(':memory:');
+  seed(db);
+  const since = new Date(Date.now() - 60_000).toISOString();
+  db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'WANTED', eventType: 'no_qualifying_releases', message: 'miss' });
+  // A later search_completed is the latest row — the old "latest only" check missed this.
+  db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'SEARCHING', eventType: 'search_completed', message: 'done' });
+  expect(db.hasRecentPipelineEvent('show1', 1, 1, 'no_qualifying_releases', since)).toBe(true);
+  expect(db.hasRecentPipelineEvent('show1', 1, 2, 'no_qualifying_releases', since)).toBe(false);
+  // Season-pack (null episode) rows are a separate item.
+  expect(db.hasRecentPipelineEvent('show1', 1, null, 'no_qualifying_releases', since)).toBe(false);
+  expect(db.hasRecentPipelineEvent('show1', 1, 1, 'no_qualifying_releases', new Date(Date.now() + 60_000).toISOString())).toBe(false);
+  db.close();
+});
+
+test('listShowSummaries aggregates tracked/on-disk counts per show', () => {
+  const db = new DatabaseManager(':memory:');
+  seed(db);
+  db.saveShow({ uuid: 'show2', providerId: 'p2', type: 'tvdb', title: 'Empty', config: {} });
+  db.updateEpisodeFilePath('show1', 1, 1, '/m/s1e1.mkv');
+  const rows = db.listShowSummaries();
+  const s1 = rows.find(r => r.id === 'show1')!;
+  const s2 = rows.find(r => r.id === 'show2')!;
+  expect(s1.tracked_count).toBe(4);
+  expect(s1.grabbed_count).toBe(1);
+  expect(s1.provider_type).toBe('tmdb');
+  expect(s2.tracked_count).toBe(0);
+  expect(s2.grabbed_count).toBe(0);
+  expect(db.countShows()).toBe(2);
+  db.close();
+});
+
+test('artwork meta omits blobs and the blob loads by id', () => {
+  const db = new DatabaseManager(':memory:');
+  seed(db);
+  db.saveShowArtwork('show1', 2, 'https://img/poster.jpg', undefined, undefined, undefined, new Uint8Array([1, 2, 3]), 'image/jpeg', 'tmdb');
+  db.saveShowArtwork('show1', 3, 'https://img/back.jpg', undefined, undefined, undefined, undefined, undefined, 'tmdb');
+  const meta = db.getShowArtworkMeta('show1');
+  expect(meta.length).toBe(2);
+  expect((meta[0] as any).data).toBeUndefined();
+  const poster = db.getShowArtworkMeta('show1', 2)[0]!;
+  expect(poster.data_len).toBe(3);
+  expect(meta.find(m => m.artwork_type === '3')!.data_len).toBe(0);
+  expect(Array.from(db.getShowArtworkBlob(poster.id)!)).toEqual([1, 2, 3]);
+  db.close();
+});

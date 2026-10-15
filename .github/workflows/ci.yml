@@ -1,0 +1,49 @@
+name: CI
+
+# Lightweight PR check: install, test, build. Runs on GitHub-hosted runners
+# (no self-hosted runner is registered for this repo as far as we can tell);
+# swap `runs-on` to `[self-hosted, linux]` once one is — nothing here needs
+# docker.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: bun test
+
+      # tsc isn't a gate yet: main has a handful of pre-existing type errors.
+      # Turn this into a blocking step once those are fixed.
+      - name: Typecheck (non-blocking)
+        continue-on-error: true
+        run: bunx tsc --noEmit -p .
+
+      - name: Build
+        run: bun run build.ts

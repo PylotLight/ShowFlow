@@ -25,9 +25,11 @@ import type { DownloadManager } from './download_manager';
  *   - no successful grab recorded in the last GRAB_INFLIGHT_HOURS — the
  *     re-grab guard. Without it, every cycle would re-submit the same release
  *     while the TorBox download is still in flight (file_path only lands when
- *     the import completes), or hammer a failed download endlessly. Failed
- *     *searches* intentionally have no cooldown: a release published after
- *     the last look should be caught by the next cycle.
+ *     the import completes), or hammer a failed download endlessly.
+ *   - outside its search backoff: a scheduled search that ends without a
+ *     grab backs the episode off 15m -> 1h -> 6h -> 24h (db/grabs.ts
+ *     SEARCH_BACKOFF_MINUTES), so freshly aired eps are still searched every
+ *     cycle at first but long-missing ones stop eating the cycle budget.
  *
  * Movies are excluded: they have no episode rows to track and no monitor
  * concept, so they stay on the manual per-title grab.
@@ -90,6 +92,17 @@ export function isDueForSearch(  ep: { air_date: string | null; air_time: string
   return new Date(ep.expected_release_at).getTime() <= nowMs;
 }
 
+/**
+ * Bucket an unsuccessful grabBestRelease result for the cycle summary.
+ * Every one of these is a "searched, nothing grabbed" outcome and backs
+ * the episode off (db.recordEpisodeSearchMiss).
+ */
+export function classifyMiss(message: string): 'notUpgrade' | 'notFound' | 'failed' {
+  if (message.includes('not an upgrade')) return 'notUpgrade';
+  if (message.includes('No releases found')) return 'notFound';
+  return 'failed';
+}
+
 export async function runAutoGrabCycle(
   config: Config,
   downloadManager?: DownloadManager | null,
@@ -128,12 +141,10 @@ export async function runAutoGrabCycle(
         // Success is self-limiting for the next cycle two ways: the 12h
         // grabbed_at cooldown, and (once imported) episodes dropping out of
         // the due query via file_path.
-      } else if (res.message.includes('not an upgrade')) {
-        result.notUpgrade++;
-      } else if (res.message.includes('No releases found')) {
-        result.notFound++;
       } else {
-        result.failed++;
+        result[classifyMiss(res.message)]++;
+        // Searched, nothing grabbed -> back off this episode.
+        try { db.recordEpisodeSearchMiss(ep.show_id, ep.season_number, ep.episode_number); } catch {}
       }
     } catch (err) {
       result.failed++;

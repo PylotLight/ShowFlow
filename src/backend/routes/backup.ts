@@ -59,8 +59,7 @@ export function backupRoutes() {
       POST: async (req: Request & { params: Record<string, string> }) => {
         try {
           const file = req.params.file!;
-          await restoreBackup(file, 'showflow.db');
-          db.reload();
+          await db.replaceFile((dbPath) => restoreBackup(file, dbPath));
           db.logEvent({ type: 'restore', message: `Database restored from backup: ${file}` });
           return json({ ok: true });
         } catch (err) {

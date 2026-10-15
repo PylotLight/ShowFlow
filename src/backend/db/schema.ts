@@ -184,6 +184,14 @@ export const episodes = sqliteTable('episodes', {
    */
   expected_release_at: text('expected_release_at'),
   search_mode: text('search_mode').default('auto'),
+  /**
+   * Auto-grab search backoff (db/grabs.ts listEpisodesDueForGrab): ISO time
+   * of the last scheduled search that ended without a grab, and how many
+   * such misses in a row. Cleared when a grab is recorded; ignored when the
+   * episode's release window moved past the last search (air date changed).
+   */
+  last_searched_at: text('last_searched_at'),
+  search_attempts: integer('search_attempts').notNull().default(0),
   last_updated: text('last_updated').default(sql`(datetime('now'))`),
 }, (table) => ({
   pk: primaryKey({
@@ -610,10 +618,15 @@ export const pipelineEvents = sqliteTable('pipeline_events', {
   metadata_json: text('metadata_json'),
   created_at: text('created_at').default(sql`(datetime('now'))`),
 }, (table) => ({
-  itemIndex: index('idx_pipeline_events_item').on(
+  // Covers the "latest event per item" lookups (kanban, no-results dedup,
+  // getLatestPipelineEvent): equality on the item + ORDER BY created_at, id
+  // DESC resolves straight off the index instead of sorting the item's rows.
+  itemIndex: index('idx_pipeline_events_item_latest').on(
     table.show_id,
     table.season_number,
     table.episode_number,
+    table.created_at,
+    table.id,
   ),
   createdAtIndex: index('idx_pipeline_events_created_at').on(table.created_at),
   stageIndex: index('idx_pipeline_events_stage').on(table.stage),

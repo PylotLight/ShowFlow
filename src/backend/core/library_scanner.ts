@@ -277,7 +277,7 @@ export class LibraryScanner {
     const files: string[] = [];
     for (const rf of rootFolders) {
       try {
-        files.push(...this.walk(rf));
+        files.push(...await this.walk(rf));
       } catch (e: any) {
         if (e?.code === 'ENOENT') {
           debugLog(`Root folder not found: ${rf}`);
@@ -312,6 +312,8 @@ export class LibraryScanner {
       if (!arr.includes(file)) arr.push(file);
       candidates.set(key, arr);
     };
+
+    const showLookupCache = new Map<string, any[]>();
 
     for (const file of files) {
       // Known non-media cruft (.DS_Store, download.log, partials, …) is
@@ -350,19 +352,27 @@ export class LibraryScanner {
       // leaves on-disk files permanently unmapped/unreconciled. Fall back to
       // the normalized show_titles index (same matching the per-show scan
       // uses) so variant-titled files still get picked up and reconciled.
-      let shows = db.getShowByName(parsed.show);
-      if (shows.length === 0) {
-        const normalized = normalizeShowTitle(parsed.show);
-        const normalizedHits = db.findShowsByNormalizedTitle(normalized) ?? [];
-        // Normalized lookups return a different shape (showId/showTitle); map
-        // to the same shape getShowByName returns so the rest of scan() is
-        // agnostic.
-        shows = normalizedHits.map((r: any) => ({
-          ...r,
-          id: r.showId,
-          title: r.showTitle,
-          original_title: r.showOriginalTitle,
-        }));
+      //
+      // Cached per parsed title for the duration of this scan: a season folder
+      // is dozens of files with the same parsed show, and getShowByName is a
+      // LIKE scan + a provider lookup per hit.
+      let shows = showLookupCache.get(parsed.show);
+      if (!shows) {
+        shows = db.getShowByName(parsed.show) as any[];
+        if (shows.length === 0) {
+          const normalized = normalizeShowTitle(parsed.show);
+          const normalizedHits = db.findShowsByNormalizedTitle(normalized) ?? [];
+          // Normalized lookups return a different shape (showId/showTitle); map
+          // to the same shape getShowByName returns so the rest of scan() is
+          // agnostic.
+          shows = normalizedHits.map((r: any) => ({
+            ...r,
+            id: r.showId,
+            title: r.showTitle,
+            original_title: r.showOriginalTitle,
+          }));
+        }
+        showLookupCache.set(parsed.show, shows);
       }
       if (shows.length === 0) {
         if (isMovieFile && await this.mapMovieFile(file, filename) === 'changed') { foundCount++; continue; }
@@ -507,7 +517,7 @@ export class LibraryScanner {
       let movieFound = 0;
       const quarantineDir = resolveQuarantineDir(this.config);
       try {
-        for (const file of this.walk(movieDir)) {
+        for (const file of await this.walk(movieDir)) {
           const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
           if (junkOutcome) continue;
           if (!this.shouldScanFile(file)) continue;
@@ -551,7 +561,7 @@ export class LibraryScanner {
     };
 
     try {
-      const files = this.walk(scanDir);
+      const files = await this.walk(scanDir);
       for (const file of files) {
         const junkOutcome = await this.maybeQuarantineJunk(file, quarantineDir);
         if (junkOutcome) {
@@ -736,11 +746,11 @@ export class LibraryScanner {
    * directories are followed but cycle-guarded via canonical realpaths so
    * a symlink loop can't recurse forever and crash the process.
    */
-  private walk(dir: string, seen?: Set<string>): string[] {
+  private async walk(dir: string, seen?: Set<string>): Promise<string[]> {
     seen ??= new Set<string>();
     let canonical = dir;
     try {
-      canonical = fs.realpathSync(dir);
+      canonical = await fs.promises.realpath(dir);
     } catch {
       // Unresolvable root (broken symlink, vanished mount) — nothing to do.
       return [];
@@ -748,9 +758,13 @@ export class LibraryScanner {
     if (seen.has(canonical)) return [];
     seen.add(canonical);
 
-    let entries: string[];
+    // Async + withFileTypes: one readdir per directory gives each entry's
+    // type for free, so plain files/dirs need no per-entry stat syscall and
+    // a slow NAS mount no longer blocks the event loop for the whole walk.
+    // Only symlinks (and the rare fs that reports DT_UNKNOWN) get a stat.
+    let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir);
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch (e: any) {
       debugLog(`Skipping unreadable directory ${dir}: ${e?.code ?? e?.message ?? e}`);
       return [];
@@ -759,17 +773,23 @@ export class LibraryScanner {
     for (const entry of entries) {
       // Never descend into quarantine dirs, even if one sits under a
       // scanned root (e.g. downloads pointed inside a library folder).
-      if (entry === QUARANTINE_DIR_NAME) continue;
-      const fullPath = path.join(dir, entry);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(fullPath);
-      } catch {
-        continue;
+      if (entry.name === QUARANTINE_DIR_NAME) continue;
+      const fullPath = path.join(dir, entry.name);
+      let isDir = entry.isDirectory();
+      let isFile = entry.isFile();
+      if (!isDir && !isFile) {
+        // Symlink / unknown type: follow it like statSync did.
+        try {
+          const st = await fs.promises.stat(fullPath);
+          isDir = st.isDirectory();
+          isFile = st.isFile();
+        } catch {
+          continue;
+        }
       }
-      if (stat.isDirectory()) {
-        results.push(...this.walk(fullPath, seen));
-      } else if (stat.isFile()) {
+      if (isDir) {
+        results.push(...await this.walk(fullPath, seen));
+      } else if (isFile) {
         results.push(fullPath);
       }
     }

@@ -48,6 +48,22 @@ export function pipelineRoutes() {
         }
       },
     },
+    // Counts-only endpoint for badge polling (Sidebar, every 15s). Same
+    // numbers as /api/pipeline/kanban's total/attentionCount plus the library
+    // show count, without serializing every tracked episode + its latest
+    // event on each tick.
+    "/api/pipeline/summary": {
+      async GET() {
+        try {
+          const { total, attentionCount } = db.getPipelineSummary();
+          const showCount = db.countShows();
+          return json({ total, attentionCount, showCount });
+        } catch (err) {
+          console.error("[pipeline/summary]", err);
+          return errorResponse(err, 500);
+        }
+      },
+    },
     "/api/history": {
       async GET(req: Request) {
         try {

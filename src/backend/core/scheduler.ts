@@ -110,6 +110,19 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       
       // Clean up expired cache entries
       db.cleanupExpiredCache();
+
+      // Old self-update binaries/tarballs on the /data PVC (~230MB each,
+      // never deleted before). Keeps live + staged + 3 newest.
+      try {
+        const { pruneOldReleases } = await import('./release_retention');
+        const { getPendingUpdate } = await import('./update_watcher');
+        const pruned = await pruneOldReleases({ protectIds: [getPendingUpdate()?.releaseId] });
+        if (pruned.deleted.length > 0) {
+          debugLog(`Housekeeping: removed ${pruned.deleted.length} old release dir(s), freed ${(pruned.freedBytes / 1048576).toFixed(0)} MiB`);
+        }
+      } catch (err) {
+        debugLog(`Housekeeping: release retention failed: ${err}`);
+      }
       
       debugLog('Task housekeeping complete: Old logs and cache cleaned');
     },
@@ -146,7 +159,15 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       // anything older than 7d so a future storm self-drains (#29).
       const scanCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const purgedScans = db.purgeOldScanLogs(scanCutoff);
-      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days, pruned ${pruned} superseded episode file row(s), purged ${purgedScans} scan log row(s)`);
+      // Planner stats + return freed pages + shrink the WAL after the purges.
+      let maint = '';
+      try {
+        const m = db.runMaintenance();
+        maint = `, freelist ${m.freelistBefore} -> ${m.freelistAfter} page(s)${m.autoVacuum === 2 ? '' : ' (auto_vacuum off; run a manual Vacuum once to enable)'}`;
+      } catch (err) {
+        maint = `, maintenance failed: ${err}`;
+      }
+      debugLog(`Task pipeline-cleanup complete: removed ${result.changes} pipeline event(s) older than 14 days, pruned ${pruned} superseded episode file row(s), purged ${purgedScans} scan log row(s)${maint}`);
     },
   },
   'quarantine-cleanup': {

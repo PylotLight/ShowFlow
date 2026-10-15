@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { isDueForSearch } from './auto_grabber';
+import { isDueForSearch, classifyMiss } from './auto_grabber';
 
 const HOUR = 3_600_000;
 
@@ -53,4 +53,10 @@ test('dateless episode trusts the stored forecast', () => {
     expected_release_at: null,
     release_delay_minutes: null,
   }, now)).toBe(false);
+});
+
+test('unsuccessful grab results are bucketed for the cycle summary', () => {
+  expect(classifyMiss('Best release is not an upgrade over the file on disk')).toBe('notUpgrade');
+  expect(classifyMiss('No releases found for "Show S01E01"')).toBe('notFound');
+  expect(classifyMiss('TorBox rejected the magnet')).toBe('failed');
 });

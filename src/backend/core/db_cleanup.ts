@@ -23,11 +23,13 @@ const DB_PATH = './showflow.db';
 const PURGE_CHUNK = 100_000;
 
 async function dbSizeBytes(): Promise<number> {
-  try {
-    return (await stat(DB_PATH)).size;
-  } catch {
-    return 0;
+  // Main file + WAL: under journal_mode=WAL recent writes live in -wal
+  // until a checkpoint, so the main file alone under-reports.
+  let total = 0;
+  for (const p of [DB_PATH, `${DB_PATH}-wal`]) {
+    try { total += (await stat(p)).size; } catch {}
   }
+  return total;
 }
 
 /** Yield to the event loop between heavy chunks so HTTP/readiness stay alive. */
@@ -80,7 +82,12 @@ export async function runDbCleanup(action: DbCleanupAction, opts: DbCleanupOptio
   // vacuum
   report(0, 'Vacuuming database — the UI may 502 until this finishes…');
   await yieldLoop();
+  // Switch to incremental auto-vacuum as part of the same rebuild (the mode
+  // change only applies on VACUUM), so from here on the daily maintenance
+  // pass returns freed pages without another full manual vacuum.
+  db.db.run('PRAGMA auto_vacuum = INCREMENTAL');
   db.db.run('VACUUM');
+  try { db.db.run('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   const sizeAfterBytes = await dbSizeBytes();
   debugLog(`DB vacuum complete: ${(sizeBeforeBytes / 1024 / 1024).toFixed(0)}MB -> ${(sizeAfterBytes / 1024 / 1024).toFixed(0)}MB`);
   return {

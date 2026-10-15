@@ -22,6 +22,8 @@ export function analyticsRoutes() {
           try {
             const stats = await stat(DB_PATH);
             dbSizeBytes = stats.size;
+            // WAL mode: count the -wal companion too (uncheckpointed pages).
+            dbSizeBytes += (await stat(`${DB_PATH}-wal`).catch(() => null))?.size ?? 0;
           } catch {
             // DB file not found at the expected relative path (e.g. custom
             // working directory) - report 0 rather than failing the whole

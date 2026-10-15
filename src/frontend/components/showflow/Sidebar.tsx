@@ -60,18 +60,16 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
         })
         .catch(() => setIsHealthy(false));
 
-    // Poll library series count
-    const pollLibrary = () =>
-      fetch("/api/shows")
+    // Poll library series count + pipeline attention count from one
+    // counts-only endpoint (was full /api/shows + full /api/pipeline/kanban
+    // every 15s just to read two numbers).
+    const pollCounts = () =>
+      fetch("/api/pipeline/summary")
         .then((r) => r.json())
-        .then((shows: any[]) => setSeriesCount(shows.length))
-        .catch(() => {});
-
-    // Poll pipeline attention count
-    const pollPipeline = () =>
-      fetch("/api/pipeline/kanban")
-        .then((r) => r.json())
-        .then((d: { attentionCount: number }) => setAttentionCount(d.attentionCount ?? 0))
+        .then((d: { attentionCount: number; showCount: number }) => {
+          setSeriesCount(d.showCount ?? 0);
+          setAttentionCount(d.attentionCount ?? 0);
+        })
         .catch(() => {});
 
     // Poll manual import file count
@@ -83,15 +81,13 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, className }: Side
 
     pollQueue();
     pollHealth();
-    pollLibrary();
-    pollPipeline();
+    pollCounts();
     pollManual();
 
     const id = setInterval(() => {
       pollQueue();
       pollHealth();
-      pollLibrary();
-      pollPipeline();
+      pollCounts();
       pollManual();
     }, 15_000);
     return () => clearInterval(id);

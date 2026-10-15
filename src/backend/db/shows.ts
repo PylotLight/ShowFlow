@@ -620,6 +620,52 @@ export function listShows(self: DatabaseManager) {
   });
 }
 
+export interface ShowSummaryRow {
+  id: string;
+  title: string;
+  year: number | null;
+  profile: string | null;
+  series_type: string | null;
+  root_folder_path: string | null;
+  added_at: string | null;
+  last_updated: string | null;
+  provider_type: string | null;
+  tracked_count: number;
+  grabbed_count: number;
+}
+
+/**
+ * Library grid rows for GET /api/shows: show columns + primary provider type
+ * + per-show tracked/on-disk counts in ONE query. Replaces listShows() +
+ * pulling every episode row into JS to count them (and dragging each show's
+ * provider metadata_json blob along for a field the route never sent).
+ */
+export function listShowSummaries(self: DatabaseManager): ShowSummaryRow[] {
+  return self.db.query(`
+    SELECT
+      s.id, s.title, s.year, s.profile, s.series_type, s.root_folder_path,
+      s.added_at, s.last_updated,
+      (SELECT sp.provider_type FROM show_providers sp
+        WHERE sp.show_id = s.id AND sp.is_primary = 1 LIMIT 1) AS provider_type,
+      COALESCE(st.tracked_count, 0) AS tracked_count,
+      COALESCE(st.grabbed_count, 0) AS grabbed_count
+    FROM shows s
+    LEFT JOIN (
+      SELECT show_id,
+        SUM(CASE WHEN is_tracked = 1 THEN 1 ELSE 0 END) AS tracked_count,
+        SUM(CASE WHEN file_path IS NOT NULL AND file_path != '' THEN 1 ELSE 0 END) AS grabbed_count
+      FROM episodes
+      GROUP BY show_id
+    ) st ON st.show_id = s.id
+    ORDER BY s.rowid
+  `).all() as ShowSummaryRow[];
+}
+
+export function countShows(self: DatabaseManager): number {
+  const row = self.db.query('SELECT count(*) AS c FROM shows').get() as { c: number } | null;
+  return row?.c ?? 0;
+}
+
 export function hasUpcomingEpisodes(self: DatabaseManager, showId: string) {
   const row = self.drizz.select({ one: sql<number>`1` })
     .from(schema.episodes)
@@ -1311,6 +1357,46 @@ export function getShowArtworks(self: DatabaseManager, showId: string, type?: nu
     .where(and(...conditions))
     .orderBy(asc(schema.showArtworks.artwork_type))
     .all() as any[];
+}
+
+/** show_artworks row without its image bytes (see getShowArtworkMeta). */
+export interface ShowArtworkMeta {
+  id: number;
+  show_id: string;
+  provider_type: string;
+  artwork_type: string;
+  image_url: string;
+  width: number | null;
+  height: number | null;
+  thumbnail: string | null;
+  content_type: string | null;
+  /** Byte length of the stored image, 0 when no bytes are cached. */
+  data_len: number;
+}
+
+/**
+ * Same rows as getShowArtworks minus the `data` blob. Image routes pick the
+ * one row they need from this, then load only that blob via
+ * getShowArtworkBlob — instead of reading every cached poster/backdrop/thumb
+ * blob for the show on every request. length(data) is answered from the
+ * record header, so the blobs themselves aren't read here.
+ */
+export function getShowArtworkMeta(self: DatabaseManager, showId: string, type?: number): ShowArtworkMeta[] {
+  const typeClause = type !== undefined ? 'AND artwork_type = ?' : '';
+  const params: (string)[] = type !== undefined ? [showId, String(type)] : [showId];
+  return self.db.query(`
+    SELECT id, show_id, provider_type, artwork_type, image_url, width, height,
+           thumbnail, content_type, COALESCE(length(data), 0) AS data_len
+    FROM show_artworks
+    WHERE show_id = ? ${typeClause}
+    ORDER BY artwork_type ASC
+  `).all(...params) as ShowArtworkMeta[];
+}
+
+/** The image bytes for one show_artworks row. */
+export function getShowArtworkBlob(self: DatabaseManager, id: number): Uint8Array | null {
+  const row = self.db.query('SELECT data FROM show_artworks WHERE id = ?').get(id) as { data: Uint8Array | null } | null;
+  return row?.data ?? null;
 }
 
 export function updateShowArtworkData(self: DatabaseManager, showId: string, type: number, data: Uint8Array, providerType?: string) {

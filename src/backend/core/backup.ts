@@ -79,6 +79,9 @@ export async function runBackup(backupDir = 'backups', keepCount = 10): Promise<
   const dbFile = join(backupDir, `showflow-${timestamp}.db`);
   const sqlFile = join(backupDir, `showflow-${timestamp}.sql`);
 
+  // VACUUM INTO reads a single consistent snapshot (WAL included), so the
+  // copy is safe while the app keeps writing — never fs-copy the .db file
+  // directly under WAL, it'd miss pages still sitting in showflow.db-wal.
   const src = new Database(DB);
   src.run(`VACUUM INTO '${dbFile.replace(/'/g, "''")}'`);
   src.close();
