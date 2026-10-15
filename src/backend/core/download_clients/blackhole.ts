@@ -682,7 +682,7 @@ export class BlackholeClient implements DownloadClient {
           existingProbe = await probeMediaFile(existing.file_path);
         }
         const isUpgrade = existingProbe
-          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
+          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId, existing.release_title || existing.original_name)
           : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
         if (!isUpgrade) {
           console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}. Skipping. File remains in watch folder for manual review.`);
@@ -1395,7 +1395,7 @@ export class BlackholeClient implements DownloadClient {
           if (existingProbe) via = 'probed-on-disk';
         }
         const isUpgrade = existingProbe
-          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
+          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId, row?.release_title || row?.original_name)
           : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
         if (!isUpgrade) {
           return {

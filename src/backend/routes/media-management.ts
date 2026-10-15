@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { json, errorResponse } from "./_shared";
+import { testReleaseName } from "../core/release_test";
 
 export function mediaManagementRoutes() {
   return {
@@ -118,6 +119,23 @@ export function mediaManagementRoutes() {
           return json({ ok: true });
         } catch (err) {
           return errorResponse(err);
+        }
+      },
+    },
+
+    // Dry-run a release title against a profile: parsed resolution/source,
+    // tier, per-format hits (incl. de-duped aliases), total, allowed, cutoff.
+    "/api/quality/test": {
+      async POST(req: Request & { params: Record<string, string> }) {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const name = typeof body?.name === "string" ? body.name.trim() : "";
+          const profileId = typeof body?.profileId === "string" ? body.profileId : "";
+          if (!name) return errorResponse("name is required");
+          if (!profileId || !db.getProfile(profileId)) return errorResponse("unknown profileId", 404);
+          return json(testReleaseName(name, profileId));
+        } catch (err) {
+          return errorResponse(err, 500);
         }
       },
     },
