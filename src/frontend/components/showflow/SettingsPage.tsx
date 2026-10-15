@@ -6,11 +6,20 @@ import { HeaderActions } from "@frontend/lib/header-actions";
 
 import { ErrorNotice } from "./settings/errors";
 import { SettingsProvider, useSettings } from "./settings/SettingsContext";
-import { SettingsMobileList, SettingsSideNav, findTab } from "./settings/SettingsNav";
+import { SettingsCompactNav, SettingsMobileList, SettingsSideNav, findTab } from "./settings/SettingsNav";
 import { SettingsTabContent } from "./settings/SettingsTabContent";
 import { cn } from "./SettingsShared";
 
 const SM_QUERY = "(min-width: 640px)";
+
+/**
+ * One compact type scale for every settings tab: controls (selects, inputs,
+ * buttons) read at text-sub instead of each component's own text-sm, so
+ * values don't outgrow their boxes ("Preferred (+50" clipping) or dwarf the
+ * labels next to them. Scoped here so the rest of the app is untouched.
+ */
+const SETTINGS_SCALE =
+  "[&_[data-slot=select-trigger]]:text-sub [&_[data-slot=input]]:text-sub [&_[data-slot=button]]:text-sub";
 
 function useIsDesktop() {
   const [desktop, setDesktop] = React.useState(() => typeof window === "undefined" || window.matchMedia(SM_QUERY).matches);
@@ -159,7 +168,9 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
   }
 
   const body = (id: string) => (
-    <SettingsTabContent id={id} scrollToSection={scrollToSection} onReRunWizard={onReRunWizard} />
+    <div className={cn("space-y-6", SETTINGS_SCALE)}>
+      <SettingsTabContent id={id} scrollToSection={scrollToSection} onReRunWizard={onReRunWizard} />
+    </div>
   );
 
   return (
@@ -174,9 +185,12 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
       </HeaderActions>
 
       {isDesktop ? (
-        <div className="flex items-start gap-6 lg:gap-8">
+        // Side nav only once there's room for it next to the app sidebar;
+        // in between it collapses to a dropdown above the content.
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:gap-6">
           <SettingsSideNav tab={tab} onSelect={setTab} />
-          <div className="min-w-0 flex-1 space-y-6">{body(tab)}</div>
+          <SettingsCompactNav tab={tab} onSelect={setTab} />
+          <div className="min-w-0 flex-1">{body(tab)}</div>
         </div>
       ) : (
         <>

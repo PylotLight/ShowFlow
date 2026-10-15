@@ -101,7 +101,7 @@ function ColorField({ label, description, value, fallback, onChange }: {
 }) {
   return (
     <FieldRow label={label} description={description}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 @md:justify-end">
         <input
           type="color"
           value={hexVal(value, fallback)}

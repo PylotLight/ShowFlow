@@ -109,7 +109,7 @@ function ScoreSelect({ value, onChange, disabled }: { value: number; onChange: (
         }}
         disabled={disabled}
       >
-        <SelectTrigger size="sm" className="w-40">
+        <SelectTrigger size="sm" className="w-52 min-w-52">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -188,10 +188,10 @@ function CustomFormatsPanel({ formats, onChange }: { formats: CustomFormat[]; on
       </div>
 
       {formats.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {formats.map(f => (
-            <div key={f.id} className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
-              <span className="font-mono flex-1 text-sm tracking-wide">{f.name}</span>
+            <div key={f.id} className="flex items-center gap-3 rounded-md px-3 py-1.5 bg-white/[0.03]">
+              <span className="font-mono min-w-0 flex-1 truncate text-sub tracking-wide">{f.name}</span>
               <code className="text-muted-foreground font-mono text-xs bg-white/[0.04] rounded px-2 py-1 max-w-56 truncate">{f.regex}</code>
               <ScoreSelect value={f.score} onChange={(v) => updateScore(f, v)} />
               <button aria-label="Remove custom format"
@@ -324,9 +324,9 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
       </div>
 
       {sorted.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {sorted.map((q, i) => (
-            <div key={q.id} className="flex items-center gap-3 rounded-lg px-4 py-3 bg-white/[0.03]">
+            <div key={q.id} className="flex items-center gap-3 rounded-md px-3 py-1.5 bg-white/[0.03]">
               <div className="flex flex-col shrink-0">
                 <button aria-label="Move up"
                   type="button"
@@ -345,7 +345,7 @@ function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities:
                   <ChevronDownIcon className="size-3.5" />
                 </button>
               </div>
-              <span className="font-mono flex-1 text-sm tracking-wide">{q.name}</span>
+              <span className="font-mono min-w-0 flex-1 truncate text-sub tracking-wide">{q.name}</span>
               <button aria-label="Remove quality"
                 type="button"
                 onClick={() => remove(q.id)}
@@ -634,8 +634,8 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
   }
 
   return (
-    <div className="rounded-lg bg-white/[0.03] overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3">
+    <div className="rounded-md bg-white/[0.03] overflow-hidden">
+      <div className="flex items-center gap-3 px-3 py-1.5">
         <button aria-label={expanded ? "Collapse profile" : "Expand profile"}
           type="button"
           onClick={() => setExpanded(v => !v)}
@@ -643,7 +643,7 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
         >
           <ChevronDownIcon className={cn("size-4 transition-transform", expanded && "rotate-180")} />
         </button>
-        <span className="font-mono flex-1 text-sm font-medium tracking-wide">{profile.name}</span>
+        <span className="font-mono min-w-0 flex-1 truncate text-sub font-medium tracking-wide">{profile.name}</span>
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground font-mono text-caption uppercase tracking-wider">Cutoff</span>
           <Select value={profile.cutoff_quality_id ?? ""} onValueChange={setCutoff}>
@@ -667,7 +667,7 @@ function ProfileRow({ profile, qualities, allFormats, onChange }: {
         </button>
       </div>
       {expanded && (
-        <div className="px-4 pb-4 space-y-3">
+        <div className="px-3 pb-3 space-y-3">
           <ProfileQualitiesEditor profileId={profile.id} qualities={qualities} />
           <ProfileFormatsEditor profileId={profile.id} allFormats={allFormats} />
         </div>
@@ -707,7 +707,7 @@ function ProfilesPanel({ profiles, qualities, formats, onChange }: {
       </div>
 
       {profiles.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {profiles.map(p => (
             <ProfileRow key={p.id} profile={p} qualities={qualities} allFormats={formats} onChange={onChange} />
           ))}

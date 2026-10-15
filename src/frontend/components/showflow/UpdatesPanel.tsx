@@ -866,12 +866,12 @@ export function UpdatesPanel() {
 
       {/* AVAILABLE RELEASES LIST */}
       <GlassPanel className="p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+          <div className="min-w-0 flex-1 basis-56">
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Available Releases</h3>
             <p className="text-muted-foreground text-xs mt-0.5">Published GitHub releases with showflow + manifest.json assets</p>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <label className="flex items-center gap-2 cursor-pointer select-none" title="When on, a newly published release is auto-downloaded and verified in the background, then waits for you to Activate.">
               <span className="text-[11px] text-muted-foreground font-mono">Auto-download</span>
               <Switch checked={autoDownload} onCheckedChange={toggleAutoDownload} />

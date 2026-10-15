@@ -11,9 +11,9 @@ import { TIMEZONE_PRESETS } from "@frontend/lib/timezones";
 /** Group heading so General reads as distinct sections, not one long stack. */
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }) {
   return (
-    <div id={id} className="scroll-mt-4 pt-2 first:pt-0">
+    <div id={id} className="scroll-mt-14 pt-2 first:pt-0">
       <h2 className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-signal">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <p className="mt-1 text-sub text-muted-foreground">{description}</p>
     </div>
   );
 }
@@ -42,13 +42,14 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
 
   return (
     <div className="space-y-6">
-      <nav aria-label="General sections" className="flex flex-wrap gap-1.5">
+      {/* sticky so the jump chips stay reachable while scrolling a long tab */}
+      <nav aria-label="General sections" className="sticky top-0 z-20 -mx-1 flex flex-wrap gap-1.5 rounded-b-lg bg-background/70 px-1 py-2 backdrop-blur-md">
         {SECTIONS.map(sec => (
           <a
             key={sec.id}
             href={`#${sec.id}`}
             onClick={(e) => { e.preventDefault(); document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-            className="rounded-full bg-white/[0.04] px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+            className="rounded-full bg-white/[0.06] px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
           >
             {sec.label}
           </a>
