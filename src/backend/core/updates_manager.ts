@@ -22,7 +22,9 @@
 // distroless images.
 
 import { mkdir, rename, unlink } from "node:fs/promises";
-import { isPrereleaseTag } from "./update_policy";
+import { isPrereleaseTag, releaseRelation, type ReleaseRelation } from "./update_policy";
+
+const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -114,6 +116,8 @@ export interface ReleaseSummary {
   publishedAt: string | null;
   prerelease: boolean;
   isLikelyCurrent: boolean;
+  /** vs the running release: only `newer` gets an "Update to" button. */
+  relation: ReleaseRelation;
   hasRequiredAssets: boolean;
   buildInProgress: boolean;
   buildDetails?: BuildDetails | null;
@@ -145,7 +149,25 @@ function githubHeaders(token: string | undefined, accept = "application/vnd.gith
 
 const RELEASES_PER_PAGE = 100;
 
-export async function listReleases(currentVersion: string, page = 1): Promise<{ releases: ReleaseSummary[]; hasMore: boolean }> {
+export interface CurrentReleaseRef {
+  /** Resolved release version, or null when unknown (bad stamp, dev build). */
+  version: string | null;
+  /** The supervisor's active release dir (tarball sha). */
+  releaseId: string | null;
+}
+
+/** Fills in isLikelyCurrent / relation per call (the list itself is cached). */
+function withRelation(r: ReleaseSummary, current: CurrentReleaseRef): ReleaseSummary {
+  const tarball = r.assets.find((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
+  const relation = releaseRelation(r.tagName, tarball ? releaseIdFromAsset(tarball.name) : null, current);
+  return { ...r, relation, isLikelyCurrent: relation === "current" };
+}
+
+export async function listReleases(current: CurrentReleaseRef, page = 1): Promise<{ releases: ReleaseSummary[]; hasMore: boolean }> {
+  const withCurrent = (res: { releases: ReleaseSummary[]; hasMore: boolean }) => ({
+    ...res,
+    releases: res.releases.map((r) => withRelation(r, current)),
+  });
   let token: string | undefined;
   let repo: string | undefined;
   try {
@@ -162,7 +184,7 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
   const cacheKey = `releases:${repo}:${token ? 'auth' : 'unauth'}:${page}`;
   const ttl = ttlFor(token, RELEASE_LIST_TTL_AUTHED_MS, RELEASE_LIST_TTL_UNAUTHED_MS);
   const cached = cacheGet<{ releases: ReleaseSummary[]; hasMore: boolean }>(cacheKey);
-  if (cached) return cached;
+  if (cached) return withCurrent(cached);
 
   const res = await fetch(`${GITHUB_API}/repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`, {
     headers: githubHeaders(token),
@@ -190,7 +212,8 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
           body: typeof r.body === 'string' && r.body.trim() ? r.body : null,
           publishedAt: r.published_at ?? null,
           prerelease: !!r.prerelease,
-          isLikelyCurrent: r.tag_name === currentVersion,
+          isLikelyCurrent: false,
+          relation: "unknown",
           hasRequiredAssets: hasTarball,
           buildInProgress: inProgress,
           buildDetails: build,
@@ -201,7 +224,7 @@ export async function listReleases(currentVersion: string, page = 1): Promise<{ 
 
   const result = { releases, hasMore: raw.length === RELEASES_PER_PAGE };
   cacheSet(cacheKey, result, ttl);
-  return result;
+  return withCurrent(result);
 }
 
 /**
@@ -363,8 +386,16 @@ async function stageRelease(
   token: string | undefined,
   repo: string,
   onProgress?: (received: number, total: number | null) => void,
-): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+): Promise<{ ok: boolean; message: string; releaseId?: string; alreadyActive?: boolean }> {
   const releaseId = releaseIdFromAsset(tarballAsset.name);
+  // Never re-stage the release we're running: the supervisor would rewrite
+  // /data/releases/<sha>/showflow while it's executing (ETXTBSY), and there's
+  // nothing to update anyway.
+  if (await isActiveRelease(releaseId)) {
+    const message = `Already running ${tag} (${releaseId.slice(0, 12)}) — nothing to install.`;
+    downloadProgress = null;
+    return { ok: false, alreadyActive: true, message, releaseId };
+  }
   setProgress({ tag, releaseId, phase: "downloading", receivedBytes: 0, totalBytes: tarballAsset.size ?? null, attempt: 1, message: null });
   try {
     await installTarball(tarballAsset, token, repo, (received, total, attempt) => {
@@ -396,7 +427,7 @@ function releaseIdFromAsset(name: string): string {
 export async function downloadAndInstallByTag(
   tag: string,
   onProgress?: (received: number, total: number | null) => void,
-): Promise<{ ok: boolean; message: string; releaseId?: string; skipped?: boolean }> {
+): Promise<{ ok: boolean; message: string; releaseId?: string; skipped?: boolean; alreadyActive?: boolean }> {
   // Auto-download path only (the watcher): never pull a prerelease. Manual
   // installs by release id (downloadAndInstall) still allow it on purpose.
   if (isPrereleaseTag(tag)) {
@@ -436,7 +467,7 @@ export async function downloadAndInstallByTag(
  * /admin/install-archive, which extracts and verifies the content
  * independently before copying into its own releases directory.
  */
-export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok: boolean; message: string; releaseId?: string; alreadyActive?: boolean }> {
   const { token, repo } = githubConfig();
 
   const relRes = await fetch(`${GITHUB_API}/repos/${repo}/releases/${githubReleaseId}`, {
@@ -530,6 +561,30 @@ export async function triggerActivate(releaseId: string): Promise<{ ok: boolean;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * The release dir the supervisor is running (its `activeReleaseId`), falling
+ * back to our compiled-in commit when the supervisor can't be asked. Short
+ * timeout: this sits in front of every install.
+ */
+export async function getActiveReleaseId(): Promise<string | null> {
+  try {
+    const res = await fetch(`${ADMIN_BASE}/admin/status`, { signal: AbortSignal.timeout(2_000) });
+    if (res.ok) {
+      const body = (await res.json()) as { activeReleaseId?: string | null; active?: string | null };
+      const id = body.activeReleaseId ?? body.active ?? null;
+      if (id) return id;
+    }
+  } catch {
+    /* supervisor unreachable (dev / tests) */
+  }
+  return BUILD_COMMIT !== "development" ? BUILD_COMMIT : null;
+}
+
+async function isActiveRelease(releaseId: string): Promise<boolean> {
+  if (releaseId === BUILD_COMMIT) return true;
+  return releaseId === (await getActiveReleaseId());
 }
 
 export async function getSupervisorStatus(): Promise<any> {

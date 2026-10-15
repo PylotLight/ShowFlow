@@ -13,16 +13,10 @@
 //   kubectl exec deploy/showflow -- /supervisor activate v0.2.0
 //   kubectl exec deploy/showflow -- /supervisor status
 
-import { mkdir, chmod, cp } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { installRelease, installArchive } from "./install";
 import {
   ADMIN_PORT,
   PUBLIC_PORT,
-  DOWNLOADS_DIR,
-  BOOTSTRAP_MIGRATIONS,
-  readManifest,
-  verifyArtifact,
-  releasePath,
   readState,
   writeStateAtomic,
 } from "./state";
@@ -166,7 +160,7 @@ async function runDaemon(): Promise<void> {
       if (url.pathname === "/admin/install" && req.method === "POST") {
         try {
           const { releaseId } = await req.json();
-          const result = await installRelease(releaseId);
+          const result = await installRelease(releaseId, manager.activeReleaseId);
           return Response.json(result, { status: result.ok ? 200 : 400 });
         } catch (err) {
           return Response.json({ ok: false, message: String(err) }, { status: 500 });
@@ -176,7 +170,7 @@ async function runDaemon(): Promise<void> {
       if (url.pathname === "/admin/install-archive" && req.method === "POST") {
         try {
           const { releaseId, tarball } = await req.json();
-          const result = await installArchive(releaseId, tarball);
+          const result = await installArchive(releaseId, tarball, manager.activeReleaseId);
           return Response.json(result, { status: result.ok ? 200 : 400 });
         } catch (err) {
           return Response.json({ ok: false, message: String(err) }, { status: 500 });
@@ -219,65 +213,4 @@ async function runDaemon(): Promise<void> {
     adminServer.stop(true);
     process.exit(0);
   });
-}
-
-async function installRelease(releaseId: string): Promise<{ ok: boolean; message: string }> {
-  if (!releaseId) return { ok: false, message: "releaseId is required." };
-
-  const src = `${DOWNLOADS_DIR}/${releaseId}`;
-  const manifest = await readManifest(src);
-  if (!manifest) {
-    return { ok: false, message: `No manifest.json found under ${src}. Place the extracted release there first (e.g. via kubectl cp), then retry install.` };
-  }
-  if (!(await verifyArtifact(src, manifest))) {
-    return { ok: false, message: `Artifact checksum mismatch for release "${releaseId}" in ${src} — refusing to install.` };
-  }
-
-  const dest = releasePath(releaseId);
-  await mkdir(dest, { recursive: true });
-
-  // Copy content rather than rename(). `docker cp` / `kubectl cp` typically
-  // land files owned by root inside the container, and rename() needs
-  // write+execute on the *source* directory (to unlink the entry) as well
-  // as the destination — which the nonroot supervisor process doesn't have
-  // for a root-owned /data/downloads/<id>. Copying only needs read access
-  // to the source file and write access to the destination, both of which
-  // the supervisor already has.
-  await Bun.write(`${dest}/${manifest.artifact.name}`, Bun.file(`${src}/${manifest.artifact.name}`));
-  await Bun.write(`${dest}/manifest.json`, Bun.file(`${src}/manifest.json`));
-  await chmod(`${dest}/${manifest.artifact.name}`, 0o755);
-
-  // Copy the migrations folder alongside the binary — the compiled app
-  // resolves migrations relative to process.execPath (db/index.ts), so an
-  // update release without them can't start. The bootstrap path copies these
-  // too (supervisor/bootstrap.ts); keep them in sync.
-  if (existsSync(`${src}/migrations`)) {
-    await cp(`${src}/migrations`, `${dest}/migrations`, { recursive: true });
-  } else if (existsSync(BOOTSTRAP_MIGRATIONS)) {
-    // Legacy tarballs predate migrations being shipped — fall back to the
-    // migrations baked into the image so older releases can still install.
-    await cp(BOOTSTRAP_MIGRATIONS, `${dest}/migrations`, { recursive: true });
-  }
-
-  return { ok: true, message: `Installed release "${releaseId}". Run "activate ${releaseId}" to switch to it.` };
-}
-
-async function installArchive(releaseId: string, tarballPath: string): Promise<{ ok: boolean; message: string }> {
-  if (!releaseId) return { ok: false, message: "releaseId is required." };
-  if (!tarballPath) return { ok: false, message: "tarball path is required." };
-
-  const tarballFile = Bun.file(tarballPath);
-  if (!(await tarballFile.exists())) {
-    return { ok: false, message: `Tarball not found at "${tarballPath}".` };
-  }
-  const src = `${DOWNLOADS_DIR}/${releaseId}`;
-  await mkdir(src, { recursive: true });
-
-  const archive = new Bun.Archive(await tarballFile.arrayBuffer());
-  const entryCount = await archive.extract(src);
-  if (entryCount === 0) {
-    return { ok: false, message: `Archive "${tarballPath}" extracted 0 entries — nothing to install.` };
-  }
-
-  return installRelease(releaseId);
 }

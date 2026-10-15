@@ -52,6 +52,8 @@ interface ReleaseItem {
   publishedAt: string | null;
   prerelease: boolean;
   isLikelyCurrent: boolean;
+  /** vs the running release (sha match or semver); only newer/unknown get "Update to". */
+  relation?: "current" | "newer" | "older" | "unknown";
   hasRequiredAssets: boolean;
   buildInProgress: boolean;
   buildDetails?: {
@@ -359,6 +361,21 @@ export function UpdatesPanel() {
     setReconnectAttempt(0);
 
     let attempt = 0;
+    const MAX_ATTEMPTS = 60;
+
+    function giveUp(message: string) {
+      setStepStatus("error");
+      setStepMessage(message);
+      setErr(message);
+      try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+    }
+
+    function done() {
+      setStepStatus("success");
+      setStepMessage("Update applied! Reloading page…");
+      try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+      setTimeout(() => window.location.reload(), 400);
+    }
 
     function backoffDelay(n: number): number {
       const base = Math.min(800 * Math.pow(1.4, n), 4000);
@@ -367,6 +384,10 @@ export function UpdatesPanel() {
 
     function poll() {
       attempt++;
+      if (attempt > MAX_ATTEMPTS) {
+        giveUp(`Gave up waiting for release ${pendingReleaseId.slice(0, 12)} after ${MAX_ATTEMPTS} checks — check the supervisor status below.`);
+        return;
+      }
       setReconnectAttempt(attempt);
       setStepMessage(`Waiting for new app process… (attempt ${attempt})`);
 
@@ -378,44 +399,48 @@ export function UpdatesPanel() {
         .then(body => {
           const releaseId = body?.releaseId;
           if (!pendingReleaseId || releaseId === pendingReleaseId) {
-            // New release is live!
-            setStepStatus("success");
-            setStepMessage("Update applied! Reloading page…");
-            try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
-            setTimeout(() => window.location.reload(), 400);
+            done(); // new release is live
             return;
           }
-          // Server responded but it's still the old (or rolled-back) release.
-          // Ask it what happened to the attempt — after a failed readiness
-          // gate the supervisor relaunches lastKnownGood, whose boot records
-          // the rollback. Without this the panel polled forever.
-          fetch("/api/admin/updates/pending", { headers: headers() })
+          // The binary's own stamp can be wrong (v0.1.81 reported "main" and
+          // the pre-bump commit), so the supervisor's active release dir is
+          // the source of truth: same sha + stable = the update is done.
+          fetch("/api/admin/updates/status", { headers: headers() })
             .then(r => (r.ok ? r.json() : null))
-            .then((d: UpdateInfo | null) => {
-              const last = d?.lastActivation;
-              if (last && last.releaseId === pendingReleaseId && (last.outcome === "rolled-back" || last.outcome === "failed")) {
-                setStepStatus("error");
-                setStepMessage(last.message ?? "Activation failed — rolled back to the previous release.");
-                setErr(last.message ?? "Activation failed — rolled back to the previous release.");
-                if (d) setInfo(d);
-                try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
-                return;
-              }
-              if (attempt >= 60) {
-                setStepStatus("error");
-                setStepMessage("Still on the previous release after several minutes — check the supervisor status below.");
-                return;
-              }
-              setStepMessage(`Server is up but still switching release… (attempt ${attempt})`);
-              reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+            .then((st: { activeReleaseId?: string | null; phase?: string } | null) => {
+              if (st && st.activeReleaseId === pendingReleaseId && st.phase === "stable") done();
+              else checkAttempt();
             })
-            .catch(() => { reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt)); });
+            .catch(() => checkAttempt());
         })
         .catch(() => {
           // Server not ready yet
           setStepMessage(`Waiting for server startup… (attempt ${attempt})`);
           reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
         });
+    }
+
+    function checkAttempt() {
+      // Server responded but it's still the old (or rolled-back) release.
+      // Ask it what happened to the attempt — after a failed readiness
+      // gate the supervisor relaunches lastKnownGood, whose boot records
+      // the rollback. Without this the panel polled forever.
+      fetch("/api/admin/updates/pending", { headers: headers() })
+        .then(r => (r.ok ? r.json() : null))
+        .then((d: UpdateInfo | null) => {
+          const last = d?.lastActivation;
+          if (last && last.releaseId === pendingReleaseId && (last.outcome === "rolled-back" || last.outcome === "failed")) {
+            setStepStatus("error");
+            setStepMessage(last.message ?? "Activation failed — rolled back to the previous release.");
+            setErr(last.message ?? "Activation failed — rolled back to the previous release.");
+            if (d) setInfo(d);
+            try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+            return;
+          }
+          setStepMessage(`Server is up but still switching release… (attempt ${attempt}/${MAX_ATTEMPTS})`);
+          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+        })
+        .catch(() => { reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt)); });
     }
 
     // First poll after a short delay to give the supervisor time to SIGTERM
@@ -611,7 +636,9 @@ export function UpdatesPanel() {
                 Activate Now
               </Button>
             ) : (
-              r.hasRequiredAssets && !isCurrent && (
+              r.hasRequiredAssets && !isCurrent && r.relation === "older" ? (
+                <span className="text-[11px] text-muted-foreground font-mono">previous</span>
+              ) : r.hasRequiredAssets && !isCurrent && (
                 <Button
                   variant="secondary"
                   size="sm"

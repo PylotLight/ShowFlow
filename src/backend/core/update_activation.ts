@@ -3,6 +3,7 @@
 // and the optional auto-activate policy. All of this is app-side only — the
 // supervisor protocol (/admin/activate) is unchanged, so it ships OTA.
 
+import { readFileSync } from "node:fs";
 import { db } from "../db";
 import { triggerActivate } from "./updates_manager";
 import { runBackup, loadRetention, DEFAULT_RETENTION } from "./backup";
@@ -88,7 +89,8 @@ export function failedReleaseId(): string | null {
  * reconciled record (or null) so the caller can log/notify.
  */
 export function reconcileActivationOnBoot(nowMs = Date.now()): ActivationAttempt | null {
-  const next = reconcileAttempt(getLastActivation(), BUILD_COMMIT, nowMs);
+  const last = getLastActivation();
+  const next = reconcileAttempt(last, runningReleaseIdFor(last?.releaseId ?? null), nowMs);
   if (!next) return null;
   saveAttempt(next);
   db.logEvent({
@@ -99,6 +101,22 @@ export function reconcileActivationOnBoot(nowMs = Date.now()): ActivationAttempt
   });
   console.log(`[updates] last activation ${next.outcome}: ${next.message}`);
   return next;
+}
+
+/**
+ * Our release dir id. Normally BUILD_COMMIT, but the attempt is keyed by the
+ * tarball sha, and a mis-stamped build (v0.1.81 baked in the pre-bump
+ * commit) never equals it — so also accept the target dir whose manifest
+ * commit is ours, instead of reporting a bogus rollback.
+ */
+function runningReleaseIdFor(target: string | null): string {
+  if (!target || target === BUILD_COMMIT || BUILD_COMMIT === "development" || /[/.]/.test(target)) return BUILD_COMMIT;
+  try {
+    const m = JSON.parse(readFileSync(`${DATA_DIR}/releases/${target}/manifest.json`, "utf8")) as { commit?: string };
+    return m.commit === BUILD_COMMIT ? target : BUILD_COMMIT;
+  } catch {
+    return BUILD_COMMIT;
+  }
 }
 
 // ---- Migration check -----------------------------------------------------
