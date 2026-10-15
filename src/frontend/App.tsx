@@ -299,9 +299,14 @@ export function App() {
             </>
           ) : activeNav === "settings" ? (
             <SettingsPage
-              key={`${settingsTab ?? "general"}:${settingsScrollTo ?? ""}`}
+              // Tab lives in the URL (#/settings/:tab), so switching tabs
+              // re-renders instead of remounting (no config reload); only a
+              // new ?section= deep link remounts to re-run the scroll.
+              key={`settings:${settingsScrollTo ?? ""}`}
               onDone={() => goTo("dashboard")}
               initialTab={settingsTab}
+              tab={settingsTab ?? "general"}
+              onTabChange={(t) => { if (t !== (settingsTab ?? "general")) navigate(pageHash("settings", t)); }}
               scrollToSection={settingsScrollTo}
               onReRunWizard={reRunWizard}
             />

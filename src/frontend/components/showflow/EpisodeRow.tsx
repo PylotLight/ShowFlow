@@ -243,9 +243,9 @@ function EpisodeRow({
         </span>
       )}
 
-      {/* Search / grab actions - revealed on row hover so the list stays quiet at rest */}
+      {/* Search / grab actions - always visible (dimmed at rest, full on hover/focus) so touch users can reach them */}
       {showActions && (
-        <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex items-center justify-end gap-1 opacity-75 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
             type="button"
             onClick={onOpenSearch}
