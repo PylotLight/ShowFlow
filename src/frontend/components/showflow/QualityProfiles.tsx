@@ -1,776 +1,344 @@
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, Loader2Icon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ChevronRightIcon, Loader2Icon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import * as React from "react";
+import { toast } from "sonner";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
-import { Badge } from "@frontend/components/ui/badge";
 import { Button } from "@frontend/components/ui/button";
+import { confirmDialog } from "@frontend/components/ui/confirm";
 import { Input } from "@frontend/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
+import { Switch } from "@frontend/components/ui/switch";
+import { navigate, pageHash } from "@frontend/lib/router";
 import { cn } from "@frontend/lib/utils";
+import { FieldRow, SETTINGS_TEXT } from "./SettingsShared";
 
-interface Quality {
-  id: string;
-  name: string;
-  rank: number;
-}
+/**
+ * One profile-centric Quality screen (replaces the old qualities list, global
+ * custom formats and per-profile formats). A profile = resolution target/min,
+ * fixed source order with skips, term chips, upgrade-until, and a test box.
+ * Model + scoring live in src/backend/core/quality_terms.ts.
+ */
 
-interface CustomFormat {
-  id: string;
-  name: string;
-  regex: string;
-  score: number;
-}
+type Mode = "prefer" | "strong_prefer" | "avoid" | "strong_avoid" | "must" | "never";
+type Source = "remux" | "bluray" | "webdl" | "webrip" | "hdtv" | "dvd" | "sdtv";
+
+interface ProfileTerm { termId: string; mode: Mode; weight: number | null }
 
 interface Profile {
   id: string;
   name: string;
-  cutoff_quality_id: string | null;
+  minResolution: number | null;
+  targetResolution: number | null;
+  allowUnknownResolution: boolean;
+  skipSources: Source[];
+  upgradesEnabled: boolean;
+  upgradeUntilResolution: number | null;
+  upgradeUntilSource: Source | null;
+  upgradeUntilScore: number | null;
+  terms: ProfileTerm[];
+  migrationNote: string | null;
+  usedBy: { libraryTypeId: string; name: string; shows: number }[];
+  /** Read-only extras the API sends back; never saved. */
+  modelVersion?: number;
+  resolvedTerms?: unknown;
 }
 
-interface ProfileFormat extends CustomFormat {
-  profile_format_type: "bonus" | "required" | "forbidden";
+interface TermLib {
+  groups: { id: string; label: string }[];
+  builtins: { id: string; group: string; label: string }[];
+  custom: { id: string; name: string; regex: string }[];
+  modeWeights: Record<Mode, number>;
+  sources: { id: Source; label: string }[];
+  resolutions: number[];
+  presets: (Omit<Profile, "id" | "usedBy" | "migrationNote" | "upgradeUntilResolution" | "upgradeUntilSource" | "upgradeUntilScore"> & {
+    id: string;
+    description: string;
+    upgradeUntil: { resolution: number | null; source: Source | null } | null;
+    terms: { termId: string; mode: Mode }[];
+  })[];
+}
+
+const MODES: { id: Mode; label: string; short: string }[] = [
+  { id: "prefer", label: "Prefer", short: "+" },
+  { id: "strong_prefer", label: "Strong prefer", short: "++" },
+  { id: "avoid", label: "Avoid", short: "−" },
+  { id: "strong_avoid", label: "Strong avoid", short: "−−" },
+  { id: "must", label: "Must have", short: "must" },
+  { id: "never", label: "Never", short: "never" },
+];
+const MODE_LABEL = Object.fromEntries(MODES.map(m => [m.id, m.label])) as Record<Mode, string>;
+
+/** Chip colours. Every state also carries a text suffix, so colour is never the only signal. */
+const MODE_CHIP: Record<Mode, string> = {
+  prefer: "border-emerald-400/60 bg-emerald-400/10 text-emerald-200",
+  strong_prefer: "border-emerald-300 bg-emerald-400/20 text-emerald-100 font-semibold",
+  avoid: "border-amber-400/60 bg-amber-400/10 text-amber-200",
+  strong_avoid: "border-orange-400 bg-orange-500/20 text-orange-100 font-semibold",
+  must: "border-sky-400/70 bg-sky-400/10 text-sky-200",
+  never: "border-red-400/70 bg-red-500/15 text-red-200",
+};
+
+const CUSTOM = "custom:";
+const resLabel = (r: number | null) => (r == null ? "Any" : r === 4320 ? "8K" : `${r}p`);
+
+function signed(n: number) {
+  return n > 0 ? `+${n}` : String(n);
 }
 
 function slugify(name: string) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || crypto.randomUUID().slice(0, 8);
 }
 
-function post(path: string, body: unknown) {
-  return fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+async function api<T = any>(path: string, method = "GET", body?: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
   });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error ?? `HTTP ${r.status}`);
+  return data as T;
 }
 
-// ---- Catalogs ---------------------------------------------------------
-// Guided defaults so setup is pick-a-button rather than type-it-yourself.
-// Free text is reserved for naming things Claude/ShowFlow can't predict
-// (a custom profile name, a genuinely one-off quality or format) - the
-// common 90% case should never require typing.
-
-const QUALITY_CATALOG = [
-  "SDTV", "DVD",
-  "480p", "WEBRip-480p", "WEBDL-480p",
-  "720p", "HDTV-720p", "WEBRip-720p", "WEBDL-720p", "Bluray-720p",
-  "1080p", "HDTV-1080p", "WEBRip-1080p", "WEBDL-1080p", "Bluray-1080p", "Remux-1080p",
-  "2160p", "HDTV-2160p", "WEBRip-2160p", "WEBDL-2160p", "Bluray-2160p", "Remux-2160p",
-];
-
-const CUSTOM_FORMAT_CATALOG: { name: string; regex: string; score: number }[] = [
-  { name: "Dual Audio", regex: "dual.?audio", score: 50 },
-  { name: "Dolby Vision", regex: "dolby.?vision|\\bdv\\b", score: 60 },
-  { name: "HDR10+", regex: "hdr10\\+", score: 40 },
-  { name: "HDR10", regex: "hdr10(?!\\+)", score: 30 },
-  { name: "HDR", regex: "\\bhdr\\b", score: 20 },
-  { name: "Atmos", regex: "atmos", score: 30 },
-  { name: "TrueHD", regex: "true.?hd", score: 20 },
-  { name: "DTS-HD MA", regex: "dts.?hd.?ma", score: 20 },
-  { name: "H.265 / HEVC", regex: "x.?265|h.?265|hevc|hev1|hvc1|\\b265\\b", score: 20 },
-  { name: "H.264 / AVC", regex: "x.?264|h.?264|avc1?|\\b264\\b", score: 10 },
-  { name: "AV1", regex: "\\bav1\\b|av01", score: 25 },
-  { name: "10-bit", regex: "10.?bit|hi10p", score: 10 },
-  { name: "Remux", regex: "remux", score: 50 },
-  { name: "Repack / Proper", regex: "repack|proper", score: 5 },
-  { name: "Freeleech", regex: "freeleech", score: 5 },
-];
-
-const SCORE_PRESETS = [
-  { label: "Required", value: 1000 },
-  { label: "Strongly preferred", value: 100 },
-  { label: "Preferred", value: 50 },
-  { label: "Slightly preferred", value: 10 },
-  { label: "Neutral", value: 0 },
-  { label: "Slightly avoid", value: -10 },
-  { label: "Avoid", value: -50 },
-  { label: "Strongly avoid", value: -100 },
-];
-
-const PROFILE_NAME_PRESETS = ["Any", "SD", "HD - 720p", "HD - 1080p", "Ultra HD - 2160p", "Anime"];
-
-function scoreLabel(score: number) {
-  const preset = SCORE_PRESETS.find(p => p.value === score);
-  if (preset) return preset.label;
-  return score > 0 ? `+${score}` : String(score);
+function toSave(p: Profile) {
+  const { usedBy: _u, migrationNote: _m, modelVersion: _v, resolvedTerms: _r, ...rest } = p;
+  return rest;
 }
 
-function ScoreSelect({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
-  const preset = SCORE_PRESETS.find(p => p.value === value);
-  const [customOpen, setCustomOpen] = React.useState(!preset);
+// ---- small building blocks ------------------------------------------------
 
+function Section({ title, description, children, className }: { title: string; description?: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <Select
-        value={preset ? String(preset.value) : "custom"}
-        onValueChange={(v) => {
-          if (v === "custom") { setCustomOpen(true); return; }
-          setCustomOpen(false);
-          onChange(Number(v));
-        }}
-        disabled={disabled}
-      >
-        <SelectTrigger size="sm" className="w-52 min-w-52">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {SCORE_PRESETS.map(p => (
-            <SelectItem key={p.value} value={String(p.value)}>{p.label} ({p.value >= 0 ? `+${p.value}` : p.value})</SelectItem>
-          ))}
-          <SelectItem value="custom">Custom value...</SelectItem>
-        </SelectContent>
-      </Select>
-      {customOpen && (
-        <Input
-          type="number"
-          value={value}
-          onChange={e => onChange(parseInt(e.target.value, 10) || 0)}
-          className="w-20 font-mono"
-          disabled={disabled}
-        />
-      )}
+    <section className={cn("space-y-3 border-t border-white/[0.06] pt-4 first:border-t-0 first:pt-0", className)}>
+      <div>
+        <h4 className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-signal">{title}</h4>
+        {description && <p className={cn("mt-0.5", SETTINGS_TEXT.desc)}>{description}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const chipBase = "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-caption leading-none transition-colors outline-none focus-visible:ring-2 focus-visible:ring-signal/70";
+const chipOff = "border-white/15 bg-white/[0.03] text-foreground/85 hover:border-white/30 hover:bg-white/[0.06]";
+
+function ResSelect({ value, onChange, label, allowAny, options }: { value: number | null; onChange: (v: number | null) => void; label: string; allowAny: boolean; options: number[] }) {
+  return (
+    <Select value={value == null ? (allowAny ? "any" : "") : String(value)} onValueChange={v => onChange(v === "any" ? null : Number(v))}>
+      <SelectTrigger size="sm" className="w-32 text-sub" aria-label={label}>
+        <SelectValue placeholder="Pick" />
+      </SelectTrigger>
+      <SelectContent>
+        {allowAny && <SelectItem value="any">Any</SelectItem>}
+        {options.map(r => <SelectItem key={r} value={String(r)}>{resLabel(r)}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ---- terms -------------------------------------------------------------
+
+function TermChips({ draft, lib, paint, onChange }: { draft: Profile; lib: TermLib; paint: Mode; onChange: (terms: ProfileTerm[]) => void }) {
+  const byId = new Map(draft.terms.map(t => [t.termId, t]));
+  function toggle(termId: string) {
+    const cur = byId.get(termId);
+    if (cur && cur.mode === paint) onChange(draft.terms.filter(t => t.termId !== termId));
+    else if (cur) onChange(draft.terms.map(t => (t.termId === termId ? { ...t, mode: paint, weight: null } : t)));
+    else onChange([...draft.terms, { termId, mode: paint, weight: null }]);
+  }
+  const groups = [
+    ...lib.groups.map(g => ({ ...g, terms: lib.builtins.filter(t => t.group === g.id).map(t => ({ id: t.id, label: t.label })) })),
+    { id: "custom", label: "Custom", terms: lib.custom.map(c => ({ id: CUSTOM + c.id, label: c.name })) },
+  ];
+  return (
+    <div className="space-y-2.5">
+      {groups.map(({ terms, ...g }) => {
+        if (!terms.length) return null;
+        return (
+          <div key={g.id} className="grid gap-1.5 sm:grid-cols-[8.5rem_1fr] sm:items-baseline">
+            <span className="text-caption text-muted-foreground">{g.label}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {terms.map(t => {
+                const on = byId.get(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggle(t.id)}
+                    aria-pressed={!!on}
+                    aria-label={on ? `${t.label}: ${MODE_LABEL[on.mode]}. Click to ${on.mode === paint ? "clear" : `set ${MODE_LABEL[paint]}`}` : `${t.label}: off. Click to set ${MODE_LABEL[paint]}`}
+                    className={cn(chipBase, on ? MODE_CHIP[on.mode] : chipOff)}
+                  >
+                    <span className={cn(on?.mode === "never" && "line-through decoration-1")}>{t.label}</span>
+                    {on && <span className="font-mono text-[11px]">{MODES.find(m => m.id === on.mode)!.short}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ---- Custom Formats -------------------------------------------------------
+function PaintBar({ paint, setPaint, weights }: { paint: Mode; setPaint: (m: Mode) => void; weights: Record<Mode, number> }) {
+  return (
+    <div role="radiogroup" aria-label="What a click on a term sets" className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-caption text-muted-foreground">Click a term to</span>
+      {MODES.map(m => (
+        <button
+          key={m.id}
+          type="button"
+          role="radio"
+          aria-checked={paint === m.id}
+          onClick={() => setPaint(m.id)}
+          className={cn(chipBase, paint === m.id ? MODE_CHIP[m.id] : chipOff)}
+        >
+          {m.label}
+          {weights[m.id] !== 0 && <span className="font-mono text-[11px]">{signed(weights[m.id])}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
-function CustomFormatsPanel({ formats, onChange }: { formats: CustomFormat[]; onChange: () => void }) {
-  const [addingCustom, setAddingCustom] = React.useState(false);
+function AdvancedSection({ draft, lib, onChange, onLibChange }: {
+  draft: Profile;
+  lib: TermLib;
+  onChange: (terms: ProfileTerm[]) => void;
+  onLibChange: () => void;
+}) {
   const [name, setName] = React.useState("");
   const [regex, setRegex] = React.useState("");
-  const [score, setScore] = React.useState(0);
-  const [saving, setSaving] = React.useState<string | null>(null);
-  const [removing, setRemoving] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const byId = new Map(draft.terms.map(t => [t.termId, t]));
+  const builtinLabel = new Map(lib.builtins.map(b => [b.id, b.label]));
+  const active = draft.terms.filter(t => !t.termId.startsWith(CUSTOM) && t.mode !== "must" && t.mode !== "never");
 
-  const existingNames = new Set(formats.map(f => f.name.toLowerCase()));
-  const catalogRemaining = CUSTOM_FORMAT_CATALOG.filter(c => !existingNames.has(c.name.toLowerCase()));
-
-  function reset() {
-    setName("");
-    setRegex("");
-    setScore(0);
-    setAddingCustom(false);
+  function setCustomMode(id: string, mode: Mode | "off") {
+    const termId = CUSTOM + id;
+    if (mode === "off") return onChange(draft.terms.filter(t => t.termId !== termId));
+    const cur = byId.get(termId);
+    if (cur) onChange(draft.terms.map(t => (t.termId === termId ? { ...t, mode } : t)));
+    else onChange([...draft.terms, { termId, mode, weight: null }]);
   }
-
-  function addFromCatalog(entry: typeof CUSTOM_FORMAT_CATALOG[number]) {
-    setSaving(entry.name);
-    post("/api/custom-formats", { id: slugify(entry.name), name: entry.name, regex: entry.regex, score: entry.score })
-      .then(r => { if (r.ok) onChange(); })
-      .finally(() => setSaving(null));
+  function setWeight(termId: string, raw: string) {
+    const weight = raw.trim() === "" ? null : Number(raw);
+    if (weight != null && !Number.isFinite(weight)) return;
+    onChange(draft.terms.map(t => (t.termId === termId ? { ...t, weight } : t)));
   }
-
-  function saveCustom() {
+  async function addCustom(e: React.FormEvent) {
+    e.preventDefault();
     if (!name.trim() || !regex.trim()) return;
-    setSaving("__custom__");
-    post("/api/custom-formats", { id: slugify(name), name: name.trim(), regex: regex.trim(), score })
-      .then(r => { if (r.ok) { reset(); onChange(); } })
-      .finally(() => setSaving(null));
+    setBusy(true);
+    try {
+      const created = await api<{ id: string }>("/api/quality/custom-terms", "POST", { name: name.trim(), regex: regex.trim() });
+      onChange([...draft.terms, { termId: CUSTOM + created.id, mode: "prefer", weight: null }]);
+      setName("");
+      setRegex("");
+      onLibChange();
+    } catch (err) {
+      toast.error("Couldn't add term", { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
   }
-
-  function updateScore(f: CustomFormat, next: number) {
-    post("/api/custom-formats", { id: f.id, name: f.name, regex: f.regex, score: next }).then(r => { if (r.ok) onChange(); });
-  }
-
-  function remove(id: string) {
-    setRemoving(id);
-    fetch(`/api/custom-formats/${id}`, { method: "DELETE" })
-      .then(r => { if (r.ok) onChange(); })
-      .finally(() => setRemoving(null));
+  async function removeCustom(id: string, label: string) {
+    if (!(await confirmDialog({ title: `Delete custom term "${label}"?`, description: "It's removed from every profile that uses it.", destructive: true, confirmLabel: "Delete" }))) return;
+    try {
+      await api(`/api/quality/custom-terms/${encodeURIComponent(id)}`, "DELETE");
+      onChange(draft.terms.filter(t => t.termId !== CUSTOM + id));
+      onLibChange();
+    } catch (err) {
+      toast.error("Couldn't delete term", { description: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   return (
-    <GlassPanel className="p-6 space-y-5">
-      <div>
-        <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Custom Formats</h3>
-        <p className="text-muted-foreground text-xs mt-0.5">
-          Patterns that score a release up or down (e.g. Dual Audio, HDR) or that a profile can require/forbid outright.
-        </p>
-      </div>
-
-      {formats.length > 0 && (
-        <div className="space-y-1">
-          {formats.map(f => (
-            <div key={f.id} className="flex items-center gap-3 rounded-md px-3 py-1.5 bg-white/[0.03]">
-              <span className="font-mono min-w-0 flex-1 truncate text-sub tracking-wide">{f.name}</span>
-              <code className="text-muted-foreground font-mono text-xs bg-white/[0.04] rounded px-2 py-1 max-w-56 truncate">{f.regex}</code>
-              <ScoreSelect value={f.score} onChange={(v) => updateScore(f, v)} />
-              <button aria-label="Remove custom format"
-                type="button"
-                onClick={() => remove(f.id)}
-                disabled={removing === f.id}
-                className="text-muted-foreground hover:text-red-400 shrink-0 transition-colors"
-              >
-                {removing === f.id ? <Loader2Icon className="size-4 animate-spin" /> : <Trash2Icon className="size-4" />}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {catalogRemaining.length > 0 && (
+    <details className="group rounded-lg border border-white/[0.08] bg-white/[0.02]">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sub font-medium outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
+        <ChevronRightIcon className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+        Advanced
+        <span className="text-caption font-normal text-muted-foreground">custom regex terms, numeric weights</span>
+      </summary>
+      <div className="space-y-4 px-3 pb-3">
         <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common format</span>
-          <div className="flex flex-wrap gap-1.5">
-            {catalogRemaining.map(entry => (
-              <button
-                key={entry.name}
-                type="button"
-                onClick={() => addFromCatalog(entry)}
-                disabled={saving === entry.name}
-                className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 px-3 py-1.5 font-mono text-xs text-foreground/80 transition-colors disabled:opacity-50"
-              >
-                {saving === entry.name ? <Loader2Icon className="size-3 animate-spin" /> : <PlusIcon className="size-3" />}
-                {entry.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!addingCustom ? (
-        <button
-          type="button"
-          onClick={() => setAddingCustom(true)}
-          className="text-muted-foreground hover:text-foreground font-mono text-xs underline decoration-dotted underline-offset-4 transition-colors"
-        >
-          + Define a custom format (not in the list above)
-        </button>
-      ) : (
-        <div className="space-y-2 rounded-lg px-4 py-3 bg-white/[0.04]">
-          <div className="flex items-center gap-2">
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Name (e.g. Group XYZ)" className="w-48" />
-            <Input value={regex} onChange={e => setRegex(e.target.value)} placeholder="Regex to match in release titles" className="flex-1 font-mono" />
-          </div>
-          <div className="flex items-center gap-2">
-            <ScoreSelect value={score} onChange={setScore} />
-            <Button size="sm" onClick={saveCustom} disabled={saving === "__custom__" || !name.trim() || !regex.trim()}>
-              {saving === "__custom__" ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
+          <p className={SETTINGS_TEXT.label}>Custom terms</p>
+          {lib.custom.length === 0 && <p className={SETTINGS_TEXT.desc}>None yet. Add one for anything the library doesn't cover.</p>}
+          <ul className="space-y-1.5">
+            {lib.custom.map(c => {
+              const t = byId.get(CUSTOM + c.id);
+              return (
+                <li key={c.id} className="grid grid-cols-[minmax(0,1fr)_5.5rem_auto] items-center gap-2 rounded-md bg-white/[0.03] px-2.5 py-1.5 sm:grid-cols-[minmax(0,1fr)_9rem_6rem_auto]">
+                  <div className="col-span-3 min-w-0 sm:col-span-1">
+                    <span className="text-sub">{c.name}</span>
+                    <code className="ml-2 break-all font-mono text-[11px] text-muted-foreground">/{c.regex}/i</code>
+                  </div>
+                  <Select value={t?.mode ?? "off"} onValueChange={v => setCustomMode(c.id, v as Mode | "off")}>
+                    <SelectTrigger size="sm" className="w-full text-caption" aria-label={`${c.name} on this profile`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="off">Off</SelectItem>
+                      {MODES.map(m => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    disabled={!t || t.mode === "must" || t.mode === "never"}
+                    value={t?.weight ?? ""}
+                    placeholder={t ? String(lib.modeWeights[t.mode]) : "—"}
+                    onChange={e => t && setWeight(t.termId, e.target.value)}
+                    aria-label={`${c.name} weight`}
+                    className="h-8 font-mono text-caption"
+                  />
+                  <Button type="button" variant="ghost" size="icon" className="size-8" aria-label={`Delete custom term ${c.name}`} onClick={() => removeCustom(c.id, c.name)}>
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+          <form onSubmit={addCustom} className="flex flex-wrap items-center gap-2">
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Name, e.g. Team" aria-label="Custom term name" className="h-8 w-full text-sub sm:w-40" />
+            <Input value={regex} onChange={e => setRegex(e.target.value)} placeholder="Regex, e.g. \[Team\]" aria-label="Custom term regex" className="h-8 min-w-48 flex-1 font-mono text-caption" />
+            <Button type="submit" size="sm" variant="secondary" disabled={busy || !name.trim() || !regex.trim()}>
+              <PlusIcon className="size-3.5" /> Add
             </Button>
-            <button aria-label="Cancel" type="button" onClick={reset} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
-              <XIcon className="size-4" />
-            </button>
-          </div>
+          </form>
         </div>
-      )}
 
-      {formats.length === 0 && catalogRemaining.length === 0 && (
-        <p className="text-muted-foreground text-sm py-2">No custom formats yet.</p>
-      )}
-    </GlassPanel>
-  );
-}
-
-// ---- Quality Definitions ---------------------------------------------------
-
-function QualitiesPanel({ qualities, onChange, onQualitiesChange }: { qualities: Quality[]; onChange: () => void; onQualitiesChange: React.Dispatch<React.SetStateAction<Quality[]>> }) {
-  const [addingCustom, setAddingCustom] = React.useState(false);
-  const [name, setName] = React.useState("");
-  const [saving, setSaving] = React.useState<string | null>(null);
-  const [moving, setMoving] = React.useState<string | null>(null);
-
-  const sorted = [...qualities].sort((a, b) => b.rank - a.rank);
-  const nextRank = sorted.length > 0 ? sorted[0]!.rank + 10 : 100;
-  const existingNames = new Set(qualities.map(q => q.name.toLowerCase()));
-  const catalogRemaining = QUALITY_CATALOG.filter(q => !existingNames.has(q.toLowerCase()));
-
-  function addFromCatalog(qualityName: string) {
-    // Optimistic — update local state instantly, save in background
-    const q: Quality = { id: slugify(qualityName), name: qualityName, rank: nextRank };
-    onQualitiesChange(prev => [...prev, q]);
-    post("/api/qualities", { id: q.id, name: q.name, rank: q.rank })
-      .then(r => { if (!r.ok) onChange(); })
-      .catch(onChange);
-  }
-
-  function saveCustom() {
-    if (!name.trim()) return;
-    setSaving("__custom__");
-    post("/api/qualities", { id: slugify(name), name: name.trim(), rank: nextRank })
-      .then(r => { if (r.ok) { setName(""); setAddingCustom(false); onChange(); } })
-      .finally(() => setSaving(null));
-  }
-
-  function remove(id: string) {
-    // Optimistic — remove locally instantly, save in background
-    onQualitiesChange(prev => prev.filter(q => q.id !== id));
-    fetch(`/api/qualities/${id}`, { method: "DELETE" })
-      .then(r => { if (!r.ok) onChange(); })
-      .catch(onChange);
-  }
-
-  async function move(index: number, direction: -1 | 1) {
-    const self = sorted[index];
-    const other = sorted[index + direction];
-    if (!self || !other) return;
-    setMoving(self.id);
-    try {
-      await Promise.all([
-        post("/api/qualities", { id: self.id, name: self.name, rank: other.rank }),
-        post("/api/qualities", { id: other.id, name: other.name, rank: self.rank }),
-      ]);
-      onChange();
-    } finally {
-      setMoving(null);
-    }
-  }
-
-  return (
-    <GlassPanel className="p-6 space-y-5">
-      <div>
-        <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Qualities</h3>
-        <p className="text-muted-foreground text-xs mt-0.5">
-          Resolution/source tiers, ordered by preference. Use the arrows to reorder — higher in the list wins when comparing releases.
-        </p>
-      </div>
-
-      {sorted.length > 0 && (
-        <div className="space-y-1">
-          {sorted.map((q, i) => (
-            <div key={q.id} className="flex items-center gap-3 rounded-md px-3 py-1.5 bg-white/[0.03]">
-              <div className="flex flex-col shrink-0">
-                <button aria-label="Move up"
-                  type="button"
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0 || moving === q.id}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
-                >
-                  <ChevronUpIcon className="size-3.5" />
-                </button>
-                <button aria-label="Move down"
-                  type="button"
-                  onClick={() => move(i, 1)}
-                  disabled={i === sorted.length - 1 || moving === q.id}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
-                >
-                  <ChevronDownIcon className="size-3.5" />
-                </button>
-              </div>
-              <span className="font-mono min-w-0 flex-1 truncate text-sub tracking-wide">{q.name}</span>
-              <button aria-label="Remove quality"
-                type="button"
-                onClick={() => remove(q.id)}
-                className="text-muted-foreground hover:text-red-400 shrink-0 transition-colors"
-              >
-                <Trash2Icon className="size-4" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {catalogRemaining.length > 0 && (
-        <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common quality</span>
-          <div className="flex flex-wrap gap-1.5">
-            {catalogRemaining.map(qualityName => (
-              <button
-                key={qualityName}
-                type="button"
-                onClick={() => addFromCatalog(qualityName)}
-                className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 px-3 py-1.5 font-mono text-xs text-foreground/80 transition-colors"
-              >
-                <PlusIcon className="size-3" />
-                {qualityName}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!addingCustom ? (
-        <button
-          type="button"
-          onClick={() => setAddingCustom(true)}
-          className="text-muted-foreground hover:text-foreground font-mono text-xs underline decoration-dotted underline-offset-4 transition-colors"
-        >
-          + Define a custom quality (not in the list above)
-        </button>
-      ) : (
-        <div className="flex items-center gap-2 rounded-lg px-4 py-3 bg-white/[0.04]">
-          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Name (e.g. WEBDL-4320p)" className="flex-1" />
-          <Button size="sm" onClick={saveCustom} disabled={saving === "__custom__" || !name.trim()}>
-            {saving === "__custom__" ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
-          </Button>
-          <button aria-label="Cancel" type="button" onClick={() => { setAddingCustom(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
-            <XIcon className="size-4" />
-          </button>
-        </div>
-      )}
-
-      {sorted.length === 0 && catalogRemaining.length === 0 && (
-        <p className="text-muted-foreground text-sm py-2">No qualities defined — the grabber can't rank releases without at least one.</p>
-      )}
-    </GlassPanel>
-  );
-}
-
-// ---- Quality Profiles -------------------------------------------------------
-
-function ProfileFormatsEditor({ profileId, allFormats }: { profileId: string; allFormats: CustomFormat[] }) {
-  const [assigned, setAssigned] = React.useState<ProfileFormat[] | null>(null);
-  const [addingFormatId, setAddingFormatId] = React.useState("");
-  const [addingType, setAddingType] = React.useState<"bonus" | "required" | "forbidden">("bonus");
-  const [saving, setSaving] = React.useState(false);
-
-  function load() {
-    fetch(`/api/profiles/${profileId}/formats`).then(r => r.json()).then(data => setAssigned(Array.isArray(data) ? data : []));
-  }
-
-  React.useEffect(load, [profileId]);
-
-  const assignedIds = new Set((assigned ?? []).map(f => f.id));
-  const available = allFormats.filter(f => !assignedIds.has(f.id));
-
-  function addFormat() {
-    if (!addingFormatId) return;
-    setSaving(true);
-    post(`/api/profiles/${profileId}/formats`, { formatId: addingFormatId, type: addingType })
-      .then(r => { if (r.ok) { setAddingFormatId(""); load(); } })
-      .finally(() => setSaving(false));
-  }
-
-  function removeFormat(formatId: string) {
-    setSaving(true);
-    fetch(`/api/profiles/${profileId}/formats`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ formatId }),
-    }).then(r => { if (r.ok) load(); })
-      .finally(() => setSaving(false));
-  }
-
-  const typeColors: Record<string, "signal" | "amber" | "muted"> = {
-    bonus: "signal",
-    required: "amber",
-    forbidden: "muted",
-  };
-
-  if (assigned === null) {
-    return (
-      <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-        <Loader2Icon className="size-4 animate-spin" /> Loading formats...
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3 pt-3 border-t border-white/5">
-      {assigned.length === 0 ? (
-        <p className="text-muted-foreground text-xs">No custom formats attached — this profile scores purely on quality rank.</p>
-      ) : (
-        <div className="space-y-1.5">
-          {assigned.map(f => (
-            <div key={f.id} className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/[0.03]">
-              <Badge variant={typeColors[f.profile_format_type]}>{f.profile_format_type}</Badge>
-              <span className="font-mono text-xs flex-1">{f.name}</span>
-              {f.profile_format_type === "bonus" && (
-                <span className="text-muted-foreground font-mono text-xs">{scoreLabel(f.score)}</span>
-              )}
-              <button aria-label="Remove format from profile"
-                type="button"
-                onClick={() => removeFormat(f.id)}
-                disabled={saving}
-                className="text-muted-foreground hover:text-red-400 transition-colors"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {available.length > 0 && (
-        <div className="flex items-center gap-2">
-          <Select value={addingFormatId} onValueChange={setAddingFormatId}>
-            <SelectTrigger size="sm" className="flex-1">
-              <SelectValue placeholder="Attach a custom format..." />
-            </SelectTrigger>
-            <SelectContent>
-              {available.map(f => (
-                <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+        {active.length > 0 && (
+          <div className="space-y-2">
+            <p className={SETTINGS_TEXT.label}>Weight overrides</p>
+            <p className={SETTINGS_TEXT.desc}>Leave empty to use the fixed step. Only for when the steps really don't fit.</p>
+            <div className="flex flex-wrap gap-2">
+              {active.map(t => (
+                <label key={t.termId} className="flex items-center gap-1.5 rounded-md bg-white/[0.03] px-2 py-1">
+                  <span className="text-caption">{builtinLabel.get(t.termId) ?? t.termId}</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={t.weight ?? ""}
+                    placeholder={String(lib.modeWeights[t.mode])}
+                    onChange={e => setWeight(t.termId, e.target.value)}
+                    className="h-7 w-20 font-mono text-caption"
+                  />
+                </label>
               ))}
-            </SelectContent>
-          </Select>
-          <Select value={addingType} onValueChange={(v) => setAddingType(v as typeof addingType)}>
-            <SelectTrigger size="sm" className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="bonus">Bonus</SelectItem>
-              <SelectItem value="required">Required</SelectItem>
-              <SelectItem value="forbidden">Forbidden</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button aria-label="Add format" size="sm" onClick={addFormat} disabled={!addingFormatId || saving}>
-            {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <PlusIcon className="size-3.5" />}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProfileQualitiesEditor({ profileId, qualities }: { profileId: string; qualities: Quality[] }) {
-  const [allowed, setAllowed] = React.useState<Quality[] | null>(null);
-  const [busyId, setBusyId] = React.useState<string | null>(null);
-
-  function load() {
-    fetch(`/api/profiles/${profileId}/qualities`).then(r => r.json()).then(data => setAllowed(Array.isArray(data) ? data : []));
-  }
-
-  React.useEffect(load, [profileId]);
-
-  if (allowed === null) {
-    return (
-      <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-        <Loader2Icon className="size-4 animate-spin" /> Loading qualities...
-      </div>
-    );
-  }
-
-  const allowedIds = new Set(allowed.map(q => q.id));
-  const sorted = [...qualities].sort((a, b) => b.rank - a.rank);
-
-  async function toggle(qualityId: string) {
-    setBusyId(qualityId);
-    try {
-      if (allowedIds.has(qualityId)) {
-        await fetch(`/api/profiles/${profileId}/qualities`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ qualityId }),
-        });
-      } else {
-        await post(`/api/profiles/${profileId}/qualities`, { qualityId });
-      }
-      load();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function allowEverything() {
-    setBusyId("__all__");
-    try {
-      await Promise.all(allowed!.map(q => fetch(`/api/profiles/${profileId}/qualities`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qualityId: q.id }),
-      })));
-      load();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  return (
-    <div className="space-y-2 pb-3 border-b border-white/5">
-      <div className="flex items-center justify-between">
-        <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Allowed qualities</span>
-        {allowedIds.size > 0 && (
-          <button
-            type="button"
-            onClick={allowEverything}
-            disabled={busyId === "__all__"}
-            className="text-muted-foreground hover:text-foreground font-mono text-[11px] underline decoration-dotted underline-offset-2 transition-colors"
-          >
-            Allow everything
-          </button>
+            </div>
+          </div>
         )}
       </div>
-      <p className="text-muted-foreground text-xs">
-        {allowedIds.size === 0
-          ? "Unrestricted — every known quality is currently acceptable. Tick any below to limit this profile to specific tiers."
-          : "Only the ticked qualities below will ever be grabbed under this profile."}
-      </p>
-      {sorted.length === 0 ? (
-        <p className="text-muted-foreground text-xs">Define at least one quality above before restricting this profile.</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {sorted.map(q => {
-            const checked = allowedIds.has(q.id);
-            return (
-              <button
-                key={q.id}
-                type="button"
-                onClick={() => toggle(q.id)}
-                disabled={busyId === q.id}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-xs transition-colors disabled:opacity-50",
-                  checked
-                    ? "bg-signal/15 border-signal/30 text-signal"
-                    : "bg-white/[0.04] hover:bg-white/[0.08] border-white/5 text-foreground/70",
-                )}
-              >
-                {busyId === q.id ? <Loader2Icon className="size-3 animate-spin" /> : (checked ? <CheckIcon className="size-3" /> : null)}
-                {q.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
-function ProfileRow({ profile, qualities, allFormats, onChange }: {
-  profile: Profile;
-  qualities: Quality[];
-  allFormats: CustomFormat[];
-  onChange: () => void;
-}) {
-  const [expanded, setExpanded] = React.useState(false);
-  const [removing, setRemoving] = React.useState(false);
+// ---- test box --------------------------------------------------------------
 
-  function setCutoff(cutoffId: string) {
-    post("/api/profiles", { id: profile.id, name: profile.name, cutoffId }).then(() => onChange());
-  }
-
-  function remove() {
-    setRemoving(true);
-    fetch(`/api/profiles/${profile.id}`, { method: "DELETE" })
-      .then(r => { if (r.ok) onChange(); })
-      .finally(() => setRemoving(false));
-  }
-
-  return (
-    <div className="rounded-md bg-white/[0.03] overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-1.5">
-        <button aria-label={expanded ? "Collapse profile" : "Expand profile"}
-          type="button"
-          onClick={() => setExpanded(v => !v)}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ChevronDownIcon className={cn("size-4 transition-transform", expanded && "rotate-180")} />
-        </button>
-        <span className="font-mono min-w-0 flex-1 truncate text-sub font-medium tracking-wide">{profile.name}</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground font-mono text-caption uppercase tracking-wider">Cutoff</span>
-          <Select value={profile.cutoff_quality_id ?? ""} onValueChange={setCutoff}>
-            <SelectTrigger size="sm" className="w-40">
-              <SelectValue placeholder="None" />
-            </SelectTrigger>
-            <SelectContent>
-              {qualities.map(q => (
-                <SelectItem key={q.id} value={q.id}>{q.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <button aria-label="Delete profile"
-          type="button"
-          onClick={remove}
-          disabled={removing}
-          className="text-muted-foreground hover:text-red-400 shrink-0 transition-colors"
-        >
-          {removing ? <Loader2Icon className="size-4 animate-spin" /> : <Trash2Icon className="size-4" />}
-        </button>
-      </div>
-      {expanded && (
-        <div className="px-3 pb-3 space-y-3">
-          <ProfileQualitiesEditor profileId={profile.id} qualities={qualities} />
-          <ProfileFormatsEditor profileId={profile.id} allFormats={allFormats} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProfilesPanel({ profiles, qualities, formats, onChange }: {
-  profiles: Profile[];
-  qualities: Quality[];
-  formats: CustomFormat[];
-  onChange: () => void;
-}) {
-  const [adding, setAdding] = React.useState(false);
-  const [name, setName] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-
-  const existingNames = new Set(profiles.map(p => p.name.toLowerCase()));
-  const presetsRemaining = PROFILE_NAME_PRESETS.filter(p => !existingNames.has(p.toLowerCase()));
-
-  function create(profileName: string) {
-    if (!profileName.trim()) return;
-    setSaving(true);
-    post("/api/profiles", { id: slugify(profileName), name: profileName.trim() })
-      .then(r => { if (r.ok) { setName(""); setAdding(false); onChange(); } })
-      .finally(() => setSaving(false));
-  }
-
-  return (
-    <GlassPanel className="p-6 space-y-5">
-      <div>
-        <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Quality Profiles</h3>
-        <p className="text-muted-foreground text-xs mt-0.5">
-          A cutoff, an optional allow-list of acceptable qualities, and a set of custom formats. Assign one to each show from its detail page.
-        </p>
-      </div>
-
-      {profiles.length > 0 && (
-        <div className="space-y-1">
-          {profiles.map(p => (
-            <ProfileRow key={p.id} profile={p} qualities={qualities} allFormats={formats} onChange={onChange} />
-          ))}
-        </div>
-      )}
-
-      {presetsRemaining.length > 0 && (
-        <div className="space-y-2">
-          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-widest">Add common profile</span>
-          <div className="flex flex-wrap gap-1.5">
-            {presetsRemaining.map(preset => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => create(preset)}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 px-3 py-1.5 font-mono text-xs text-foreground/80 transition-colors disabled:opacity-50"
-              >
-                <PlusIcon className="size-3" />
-                {preset}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!adding ? (
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="text-muted-foreground hover:text-foreground font-mono text-xs underline decoration-dotted underline-offset-4 transition-colors"
-        >
-          + Name a custom profile (not in the list above)
-        </button>
-      ) : (
-        <div className="flex items-center gap-2 rounded-lg px-4 py-3 bg-white/[0.04]">
-          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Profile name" className="flex-1" />
-          <Button aria-label="Create profile" size="sm" onClick={() => create(name)} disabled={saving || !name.trim()}>
-            {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : <CheckIcon className="size-3.5" />}
-          </Button>
-          <button aria-label="Cancel" type="button" onClick={() => { setAdding(false); setName(""); }} className="text-muted-foreground hover:text-foreground p-1.5 transition-colors">
-            <XIcon className="size-4" />
-          </button>
-        </div>
-      )}
-
-      {profiles.length === 0 && presetsRemaining.length === 0 && (
-        <p className="text-muted-foreground text-sm py-2">No quality profiles yet — shows fall back to a "standard" profile with no custom formats.</p>
-      )}
-    </GlassPanel>
-  );
-}
-
-// ---- Test a release name ----------------------------------------------------
-
-interface TermHit {
-  termId: string;
-  label: string;
-  mode: "prefer" | "strong_prefer" | "avoid" | "strong_avoid" | "must" | "never";
-  weight: number;
-  matched: boolean;
-}
-
+interface TermHit { termId: string; label: string; mode: Mode; weight: number; matched: boolean; invalid?: boolean }
 interface ReleaseTestResult {
   resolution: number | null;
   source: string | null;
@@ -780,167 +348,399 @@ interface ReleaseTestResult {
   totalScore: number;
   allowed: boolean;
   rejectReason: string | null;
-  cutoff: { name: string; rank: number; met: boolean } | null;
+  cutoff: { name: string; rank: number; met: boolean; minTermScore: number | null } | null;
+  upgradesEnabled: boolean;
 }
 
-function signed(n: number) {
-  return n > 0 ? `+${n}` : String(n);
-}
-
-function ReleaseTestPanel({ profiles }: { profiles: Profile[] }) {
+function TestBox({ profileId, dirty }: { profileId: string; dirty: boolean }) {
   const [name, setName] = React.useState("");
-  const [profileId, setProfileId] = React.useState(profiles[0]?.id ?? "");
   const [result, setResult] = React.useState<ReleaseTestResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
-  React.useEffect(() => {
-    if (!profiles.some(p => p.id === profileId)) setProfileId(profiles[0]?.id ?? "");
-  }, [profiles, profileId]);
+  React.useEffect(() => { setResult(null); }, [profileId]);
 
-  function run(e?: React.FormEvent) {
+  async function run(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!name.trim() || !profileId) return;
+    if (!name.trim()) return;
     setBusy(true);
     setError(null);
-    post("/api/quality/test", { name: name.trim(), profileId })
-      .then(async r => {
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) { setResult(null); setError(body?.error ?? `HTTP ${r.status}`); return; }
-        setResult(body as ReleaseTestResult);
-      })
-      .catch(err => setError(String(err)))
-      .finally(() => setBusy(false));
+    try {
+      setResult(await api<ReleaseTestResult>("/api/quality/test", "POST", { name: name.trim(), profileId }));
+    } catch (err) {
+      setResult(null);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const matched = result?.terms.filter(f => f.matched) ?? [];
-
+  const matched = result?.terms.filter(t => t.matched) ?? [];
   return (
-    <GlassPanel className="p-6 space-y-4">
-      <div>
-        <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Test a release name</h3>
-        <p className="text-muted-foreground text-[12px] mt-0.5">
-          Paste a title to see how a profile parses and scores it. Nothing is grabbed.
-        </p>
-      </div>
-
+    <div className="space-y-2.5">
       <form onSubmit={run} className="flex flex-wrap items-center gap-2">
         <Input
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb"
-          aria-label="Release name"
-          className="min-w-64 flex-1 font-mono text-[13px]"
+          aria-label="Release name to test"
+          className="h-8 min-w-56 flex-1 font-mono text-caption"
         />
-        <Select value={profileId} onValueChange={setProfileId} disabled={profiles.length === 0}>
-          <SelectTrigger size="sm" className="w-40" aria-label="Profile">
-            <SelectValue placeholder="Profile" />
-          </SelectTrigger>
-          <SelectContent>
-            {profiles.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Button type="submit" size="sm" disabled={busy || !name.trim() || !profileId}>
+        <Button type="submit" size="sm" disabled={busy || !name.trim()}>
           {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : "Test"}
         </Button>
       </form>
-
-      {error && <p role="alert" className="text-destructive text-[12px]">{error}</p>}
-
+      {dirty && <p className="text-caption text-amber-200">Tests the saved profile. Save to test your changes.</p>}
+      {error && <p role="alert" className="text-caption text-red-300">{error}</p>}
       {result && (
-        <div className="space-y-2.5 rounded-lg bg-white/[0.03] px-4 py-3" aria-live="polite">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
+        <div className="space-y-2 rounded-lg bg-white/[0.03] px-3 py-2.5" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sub">
             <span className={cn("font-mono font-semibold", result.allowed ? "text-emerald-300" : "text-red-300")}>
-              {result.allowed ? "Allowed" : "Rejected"}
+              {result.allowed ? "Accepted" : "Rejected"}
             </span>
-            <span className="font-mono text-foreground/90">score {result.totalScore}</span>
+            <span className="font-mono">score {result.totalScore}</span>
             <span className="text-muted-foreground">
-              quality <span className="font-mono text-foreground/90">{result.quality?.name ?? "unknown"}</span>
-              {result.quality && <span className="font-mono"> (rank {result.quality.rank})</span>}
+              {result.quality?.name ?? "unknown quality"}
+              {result.quality && <span className="font-mono"> · rank {result.quality.rank}</span>}
             </span>
             {result.cutoff ? (
-              <span className={cn("font-mono text-[12px]", result.cutoff.met ? "text-emerald-300" : "text-amber-300")}>
-                cutoff {result.cutoff.name}: {result.cutoff.met ? "met" : "not met"}
+              <span className={cn("font-mono text-caption", result.cutoff.met ? "text-emerald-300" : "text-amber-200")}>
+                upgrade until {result.cutoff.name}: {result.cutoff.met ? "reached" : "not yet"}
               </span>
             ) : (
-              <span className="text-muted-foreground font-mono text-[12px]">upgrades off</span>
+              <span className="font-mono text-caption text-muted-foreground">upgrades off</span>
             )}
           </div>
-
-          {!result.allowed && result.rejectReason && (
-            <p className="text-red-300 text-[12px]">{result.rejectReason}</p>
-          )}
-
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
-            <span>resolution <span className="font-mono text-foreground/90">{result.resolution ? `${result.resolution}p` : "?"}</span></span>
-            <span>source <span className="font-mono text-foreground/90">{result.source ?? "?"}</span></span>
-            <span>terms <span className="font-mono text-foreground/90">{signed(result.termScore)}</span></span>
+          {!result.allowed && result.rejectReason && <p className="text-caption text-red-300">{result.rejectReason}</p>}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-caption text-muted-foreground">
+            <span>resolution <span className="font-mono text-foreground">{result.resolution ? `${result.resolution}p` : "?"}</span></span>
+            <span>source <span className="font-mono text-foreground">{result.source ?? "?"}</span></span>
+            <span>terms <span className="font-mono text-foreground">{signed(result.termScore)}</span></span>
           </div>
-
           {matched.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {matched.map(f => (
-                <Badge
-                  key={f.termId}
-                  variant="outline"
-                  className={cn(
-                    "font-mono text-[11px]",
-                    f.mode === "never" && "border-red-400/50 text-red-300",
-                    f.mode === "must" && "border-emerald-400/50 text-emerald-300",
-                  )}
-                >
-                  {f.label}
-                  {f.mode === "must" || f.mode === "never" ? ` (${f.mode})` : ` ${signed(f.weight)}`}
-                </Badge>
+              {matched.map(t => (
+                <span key={t.termId} className={cn(chipBase, MODE_CHIP[t.mode], "cursor-default")}>
+                  {t.label}
+                  <span className="font-mono text-[11px]">{t.mode === "must" || t.mode === "never" ? MODE_LABEL[t.mode].toLowerCase() : signed(t.weight)}</span>
+                </span>
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground text-[12px]">No terms on this profile matched.</p>
+            <p className="text-caption text-muted-foreground">No terms on this profile matched.</p>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- profile editor -----------------------------------------------------------
+
+function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange }: {
+  profile: Profile;
+  lib: TermLib;
+  profiles: Profile[];
+  onSaved: (p: Profile) => void;
+  onDeleted: (id: string) => void;
+  onLibChange: () => void;
+}) {
+  const [draft, setDraft] = React.useState<Profile>(profile);
+  const [paint, setPaint] = React.useState<Mode>("prefer");
+  const [saving, setSaving] = React.useState(false);
+  // Reset the draft only when the saved profile itself changes (save, reload),
+  // not when e.g. the migration note is dismissed, so unsaved edits survive.
+  const savedKey = JSON.stringify(toSave(profile));
+  React.useEffect(() => { setDraft(profile); }, [savedKey]);
+
+  const dirty = JSON.stringify(toSave(draft)) !== JSON.stringify(toSave(profile));
+  const set = <K extends keyof Profile>(k: K, v: Profile[K]) => setDraft(d => ({ ...d, [k]: v }));
+  const minBad = draft.minResolution != null && draft.targetResolution != null && draft.minResolution > draft.targetResolution;
+
+  async function save() {
+    setSaving(true);
+    try {
+      const saved = await api<Profile>("/api/profiles", "POST", toSave(draft));
+      onSaved(saved);
+      toast.success(`Saved "${saved.name}"`);
+    } catch (err) {
+      toast.error("Couldn't save profile", { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove() {
+    if (profiles.length <= 1) return;
+    if (!(await confirmDialog({ title: `Delete "${profile.name}"?`, destructive: true, confirmLabel: "Delete" }))) return;
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}`, "DELETE");
+      onDeleted(profile.id);
+    } catch (err) {
+      toast.error("Couldn't delete profile", { description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  async function dismissNote() {
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}/migration-note`, "DELETE");
+      onSaved({ ...profile, migrationNote: null });
+    } catch { /* non-critical */ }
+  }
+
+  const skip = new Set(draft.skipSources);
+  const toggleSource = (s: Source) => set("skipSources", skip.has(s) ? draft.skipSources.filter(x => x !== s) : [...draft.skipSources, s]);
+  const usedBy = profile.usedBy;
+
+  return (
+    <GlassPanel className="space-y-5 p-5 sm:p-6">
+      {profile.migrationNote && (
+        <div role="status" className="flex gap-3 rounded-lg border border-sky-400/40 bg-sky-400/[0.07] px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-sub font-medium text-sky-100">Converted from your old quality setup</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-caption text-sky-100/90">
+              {profile.migrationNote.split("\n").map((l, i) => <li key={i}>{l}</li>)}
+            </ul>
+          </div>
+          <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="Dismiss conversion notice" onClick={dismissNote}>
+            <XIcon className="size-3.5" />
+          </Button>
+        </div>
+      )}
+
+      <Section title="Profile">
+        <FieldRow label="Name" description="Shown wherever you pick a profile.">
+          <Input value={draft.name} onChange={e => set("name", e.target.value)} aria-label="Profile name" className="h-8 text-sub" />
+        </FieldRow>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className={SETTINGS_TEXT.desc}>
+            {usedBy.length
+              ? <>Used by {usedBy.map((u, i) => <React.Fragment key={u.libraryTypeId}>{i > 0 && ", "}<span className="text-foreground">{u.name}</span> ({u.shows} {u.shows === 1 ? "show" : "shows"})</React.Fragment>)}. </>
+              : "Not used by any library type yet. "}
+            <button type="button" className="text-signal underline-offset-2 hover:underline outline-none focus-visible:ring-2 focus-visible:ring-signal/70 rounded" onClick={() => navigate(pageHash("settings", "general", "libraries"))}>
+              Library types
+            </button>
+          </p>
+          <Button type="button" variant="ghost" size="sm" className="text-red-300 hover:text-red-200" disabled={profiles.length <= 1 || usedBy.length > 0} onClick={remove}
+            title={usedBy.length ? "Pick another profile on those library types first" : undefined}>
+            <Trash2Icon className="size-3.5" /> Delete
+          </Button>
+        </div>
+      </Section>
+
+      <Section title="Resolution" description="Aim for the target; anything above it is skipped, anything below the minimum too.">
+        <FieldRow label="Target" description="Best resolution to grab.">
+          <ResSelect label="Target resolution" value={draft.targetResolution} onChange={v => set("targetResolution", v)} allowAny options={lib.resolutions} />
+        </FieldRow>
+        <FieldRow label="Minimum" description="Lowest resolution you'll accept.">
+          <ResSelect label="Minimum resolution" value={draft.minResolution} onChange={v => set("minResolution", v)} allowAny options={lib.resolutions} />
+        </FieldRow>
+        {minBad && <p role="alert" className="text-caption text-red-300">Minimum is above the target.</p>}
+        <FieldRow label="Unknown resolution" description="Accept names with no resolution tag (common on anime). They rank below any known resolution.">
+          <Switch checked={draft.allowUnknownResolution} onCheckedChange={v => set("allowUnknownResolution", v)} aria-label="Accept unknown resolution" />
+        </FieldRow>
+      </Section>
+
+      <Section title="Sources" description="Fixed order, best first. Turn off any you never want.">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {lib.sources.map((s, i) => {
+            const off = skip.has(s.id);
+            return (
+              <React.Fragment key={s.id}>
+                {i > 0 && <span aria-hidden className="text-caption text-muted-foreground">›</span>}
+                <button
+                  type="button"
+                  aria-pressed={!off}
+                  aria-label={`${s.label}: ${off ? "skipped" : "allowed"}`}
+                  onClick={() => toggleSource(s.id)}
+                  className={cn(chipBase, off ? "border-white/15 bg-transparent text-muted-foreground line-through" : "border-white/25 bg-white/[0.06] text-foreground")}
+                >
+                  {s.label}
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </Section>
+
+      <Section title="Terms" description="Each term counts once. Strong avoid beats a codec bonus, Never rejects outright.">
+        <PaintBar paint={paint} setPaint={setPaint} weights={lib.modeWeights} />
+        <TermChips draft={draft} lib={lib} paint={paint} onChange={t => set("terms", t)} />
+        <AdvancedSection draft={draft} lib={lib} onChange={t => set("terms", t)} onLibChange={onLibChange} />
+      </Section>
+
+      <Section title="Upgrades" description="Off means off: no upgrade searches, and imports never replace a file you already have.">
+        <FieldRow label="Keep upgrading" description="Look for better releases after the first grab.">
+          <Switch
+            checked={draft.upgradesEnabled}
+            onCheckedChange={v => setDraft(d => ({
+              ...d,
+              upgradesEnabled: v,
+              upgradeUntilResolution: v && d.upgradeUntilResolution == null ? (d.targetResolution ?? 1080) : d.upgradeUntilResolution,
+            }))}
+            aria-label="Keep upgrading"
+          />
+        </FieldRow>
+        {draft.upgradesEnabled && (
+          <FieldRow label="Until" description="Stop once the file reaches this. Optional term score keeps going until terms catch up too.">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <ResSelect label="Upgrade until resolution" value={draft.upgradeUntilResolution} onChange={v => set("upgradeUntilResolution", v)} allowAny={false} options={lib.resolutions} />
+              <Select value={draft.upgradeUntilSource ?? "any"} onValueChange={v => set("upgradeUntilSource", v === "any" ? null : (v as Source))}>
+                <SelectTrigger size="sm" className="w-28 text-sub" aria-label="Upgrade until source">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any source</SelectItem>
+                  {lib.sources.filter(s => s.id !== "sdtv" && s.id !== "dvd").map(s => <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input
+                type="number"
+                inputMode="numeric"
+                value={draft.upgradeUntilScore ?? ""}
+                placeholder="score ≥"
+                onChange={e => set("upgradeUntilScore", e.target.value.trim() === "" ? null : Number(e.target.value))}
+                aria-label="Upgrade until term score"
+                className="h-8 w-24 font-mono text-caption"
+              />
+            </div>
+          </FieldRow>
+        )}
+      </Section>
+
+      <Section title="Test a release" description="Paste a title to see how this profile parses and scores it. Nothing is grabbed.">
+        <TestBox profileId={profile.id} dirty={dirty} />
+      </Section>
+
+      <div className="sticky bottom-0 -mx-5 -mb-5 flex items-center justify-end gap-2 rounded-b-xl border-t border-white/[0.08] bg-background/95 px-5 py-3 backdrop-blur-md sm:-mx-6 sm:-mb-6 sm:px-6">
+        {dirty && <span className="mr-auto text-caption text-amber-200">Unsaved changes</span>}
+        <Button type="button" variant="ghost" size="sm" disabled={!dirty || saving} onClick={() => setDraft(profile)}>Reset</Button>
+        <Button type="button" size="sm" disabled={!dirty || saving || minBad || !draft.name.trim()} onClick={save}>
+          {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : "Save profile"}
+        </Button>
+      </div>
     </GlassPanel>
   );
 }
 
-// ---- Root -------------------------------------------------------------------
+// ---- root ----------------------------------------------------------------------
 
 function QualityProfilesTab() {
-  const [qualities, setQualities] = React.useState<Quality[]>([]);
-  const [formats, setFormats] = React.useState<CustomFormat[]>([]);
   const [profiles, setProfiles] = React.useState<Profile[]>([]);
+  const [lib, setLib] = React.useState<TermLib | null>(null);
+  const [selected, setSelected] = React.useState<string>("");
   const [loading, setLoading] = React.useState(true);
+  const [creating, setCreating] = React.useState(false);
 
-  function load() {
-    Promise.all([
-      fetch("/api/qualities").then(r => r.json()),
-      fetch("/api/custom-formats").then(r => r.json()),
-      fetch("/api/profiles").then(r => r.json()),
-    ]).then(([q, f, p]) => {
-      setQualities(Array.isArray(q) ? q : []);
-      setFormats(Array.isArray(f) ? f : []);
-      setProfiles(Array.isArray(p) ? p : []);
-      setLoading(false);
-    });
+  const loadLib = React.useCallback(() => api<TermLib>("/api/quality/terms").then(setLib).catch(() => {}), []);
+  React.useEffect(() => {
+    Promise.all([api<Profile[]>("/api/profiles"), api<TermLib>("/api/quality/terms")])
+      .then(([p, l]) => {
+        setProfiles(Array.isArray(p) ? p : []);
+        setLib(l);
+        setSelected(s => s || p[0]?.id || "");
+      })
+      .catch(err => toast.error("Couldn't load quality profiles", { description: String(err) }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function createFrom(presetId: string | null) {
+    if (!lib) return;
+    setCreating(true);
+    try {
+      const preset = presetId ? lib.presets.find(p => p.id === presetId) : null;
+      const baseName = preset?.name ?? "New profile";
+      let name = baseName;
+      for (let n = 2; profiles.some(p => p.name.toLowerCase() === name.toLowerCase()); n++) name = `${baseName} ${n}`;
+      let id = slugify(name);
+      while (profiles.some(p => p.id === id)) id = `${id}-${crypto.randomUUID().slice(0, 4)}`;
+      const body = preset
+        ? {
+            id, name,
+            minResolution: preset.minResolution, targetResolution: preset.targetResolution,
+            allowUnknownResolution: preset.allowUnknownResolution, skipSources: preset.skipSources,
+            upgradesEnabled: preset.upgradesEnabled,
+            upgradeUntilResolution: preset.upgradeUntil?.resolution ?? null, upgradeUntilSource: preset.upgradeUntil?.source ?? null,
+            terms: preset.terms,
+          }
+        : { id, name, minResolution: 720, targetResolution: 1080, allowUnknownResolution: true, skipSources: [], upgradesEnabled: false, terms: [] };
+      const saved = await api<Profile>("/api/profiles", "POST", body);
+      setProfiles(ps => [...ps, saved]);
+      setSelected(saved.id);
+    } catch (err) {
+      toast.error("Couldn't create profile", { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setCreating(false);
+    }
   }
 
-  React.useEffect(load, []);
-
-  if (loading) {
+  if (loading || !lib) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" aria-label="Loading" />
       </div>
     );
   }
 
+  const current = profiles.find(p => p.id === selected) ?? profiles[0];
   return (
-    <>
-      <ProfilesPanel profiles={profiles} qualities={qualities} formats={formats} onChange={load} />
-      <ReleaseTestPanel profiles={profiles} />
-      <QualitiesPanel qualities={qualities} onChange={load} onQualitiesChange={setQualities} />
-      <CustomFormatsPanel formats={formats} onChange={load} />
-    </>
+    <div className="space-y-4">
+      <GlassPanel className="space-y-3 p-5 sm:p-6">
+        <div>
+          <h3 className="font-display text-base font-semibold tracking-wide text-foreground">Quality profiles</h3>
+          <p className={cn("mt-0.5", SETTINGS_TEXT.desc)}>
+            What to grab and when to stop upgrading. Library types pick which profile their shows use.{" "}
+            Coming from Sonarr?{" "}
+            <button type="button" className="rounded text-signal underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-signal/70" onClick={() => navigate(pageHash("settings", "integrations"))}>
+              Sonarr import
+            </button>{" "}
+            picks one of these per series type.
+          </p>
+        </div>
+        <div role="tablist" aria-label="Profiles" className="flex flex-wrap gap-1.5">
+          {profiles.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              role="tab"
+              aria-selected={p.id === current?.id}
+              onClick={() => setSelected(p.id)}
+              className={cn(
+                "rounded-lg border px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-signal/70",
+                p.id === current?.id ? "border-signal/60 bg-signal/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]",
+              )}
+            >
+              <span className="block text-sub font-medium">{p.name}</span>
+              <span className="block text-[11px] text-muted-foreground">
+                {(() => { const n = p.usedBy.reduce((a, u) => a + u.shows, 0); return p.usedBy.length ? `${n} ${n === 1 ? "show" : "shows"}` : "unused"; })()}
+                {p.migrationNote ? " · converted" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-caption text-muted-foreground">New from preset</span>
+          {lib.presets.map(p => (
+            <Button key={p.id} type="button" variant="secondary" size="sm" disabled={creating} title={p.description} onClick={() => createFrom(p.id)}>
+              <PlusIcon className="size-3.5" /> {p.name}
+            </Button>
+          ))}
+          <Button type="button" variant="ghost" size="sm" disabled={creating} onClick={() => createFrom(null)}>
+            <PlusIcon className="size-3.5" /> Blank
+          </Button>
+        </div>
+      </GlassPanel>
+
+      {current && (
+        <ProfileEditor
+          key={current.id}
+          profile={current}
+          lib={lib}
+          profiles={profiles}
+          onSaved={p => setProfiles(ps => ps.map(x => (x.id === p.id ? p : x)))}
+          onDeleted={id => { setProfiles(ps => ps.filter(x => x.id !== id)); setSelected(""); }}
+          onLibChange={loadLib}
+        />
+      )}
+    </div>
   );
 }
 
