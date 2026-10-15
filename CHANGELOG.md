@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.84] - 2026-10-15
 - **Quality, reworked**: one Quality screen per profile instead of the qualities list + custom formats + per-profile formats juggle. Pick a target/min resolution (plus accept-unknown for anime), skip sources you don't want, and click grouped terms (HEVC, HDR/DV, 10-bit, audio, dual audio, languages like VOSTFR, release groups) as Prefer / Strong prefer / Avoid / Strong avoid / Must have / Never. Custom regex + numeric weights live under Advanced. Presets: 1080p web, 4K HDR, Anime (SubsPlease). "Keep upgrading until" replaces cutoff, and off really means off (no upgrade searches and imports won't replace files).
 - **Test a release name**: paste a title on the Quality screen to see the parsed resolution/source, every term hit, the score and why it'd be accepted or rejected.
 - **Fix**: source tiers now actually match real names (`1080p.WEB-DL`, `BluRay.REMUX`, 4K/UHD), so Remux > BluRay > WEB-DL > WEBRip > HDTV rank properly instead of most tiers never firing. Duplicate formats (x265/HEVC/H265/265/H.265) count once instead of stacking.
