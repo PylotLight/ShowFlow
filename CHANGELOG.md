@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.82] - 2026-10-15
 - **Fix**: v0.1.81 shipped stamped as version `main`, so the app listed every release as an update and tried to reinstall the running build (`ETXTBSY`). Builds now get the tag/commit explicitly and fail if the stamp is wrong. The app never re-installs the active release (supervisor installs via temp dir + rename), falls back to the active release's manifest if the version stamp is bad, only offers newer releases (older ones show as previous), and the post-update refresh matches on the active release sha with a 60 attempt cap. Coming from v0.1.81 you'll need to hit Update + Activate once by hand.
 - **Settings**: General now starts with Updates and Grabbing, Defaults moved down.
 
