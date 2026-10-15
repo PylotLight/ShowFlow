@@ -20,6 +20,7 @@ import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearch
 import { TraceDialog } from "@frontend/components/showflow/TraceDialog";
 import { DiagnoseDialog } from "@frontend/components/showflow/DiagnoseDialog";
 import { cn } from "@frontend/lib/utils";
+import { usePolling } from "@frontend/lib/usePolling";
 import { groupByShow } from "@frontend/lib/pipelineGrouping";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 
@@ -42,6 +43,8 @@ interface KanbanEpisode {
   releaseTitle: string | null;
   eventCreatedAt: string | null;
   searchMode: string;
+  /** explain() state behind the lane (see lib/pipelineStatus). */
+  state?: string;
 }
 
 interface KanbanLane {
@@ -213,7 +216,7 @@ function KanbanCard({
 
       {/* Message */}
       {ep.message && ep.currentStage !== "AVAILABLE" && (
-        <p className="text-[11px] text-muted-foreground/80 truncate leading-relaxed" title={ep.message}>
+        <p className="text-[11px] text-foreground/80 line-clamp-2 leading-relaxed" title={ep.message}>
           {ep.message}
         </p>
       )}
@@ -375,7 +378,12 @@ function KanbanLaneColumn({ lane, shows, onShowSelect, grabbing, grabbedKeys, on
 
 // ── Main component ────────────────────────────────────────────────────────
 
-function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | null) => void }) {
+/**
+ * Lanes view of what's in flight (secondary tab of PipelinePage). The
+ * server drops the AVAILABLE lane by default; stages come from the same
+ * explain() as the Needs attention list.
+ */
+function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (show: ShowSummary | null) => void; embedded?: boolean }) {
   const [data, setData] = React.useState<KanbanResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [shows, setShows] = React.useState<ShowSummary[]>([]);
@@ -397,11 +405,7 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
     ]);
   }, []);
 
-  React.useEffect(() => {
-    load();
-    const interval = setInterval(load, 10_000);
-    return () => clearInterval(interval);
-  }, [load]);
+  usePolling(load, 15_000);
 
   React.useEffect(() => {
     if (!grabMsg) return;
@@ -453,13 +457,13 @@ function PipelineKanban({ onSelectShow }: { onSelectShow?: (show: ShowSummary | 
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Header summary */}
-      <GlassPanel className="flex items-center justify-between p-4 shrink-0">
+      <GlassPanel className={cn("flex items-center justify-between p-4 shrink-0", embedded && "py-3")}>
         <div className="flex items-center gap-3">
           <LayersIcon className="size-5 text-signal" />
           <div>
-            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Pipeline</span>
-            <h2 className="font-display text-2xl font-bold text-white mt-0.5">
-              {data === null ? "—" : total} tracked episode{total !== 1 ? "s" : ""}
+            {!embedded && <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Pipeline</span>}
+            <h2 className={cn("font-display font-bold text-white mt-0.5", embedded ? "text-base" : "text-2xl")}>
+              {data === null ? "—" : total} episode{total !== 1 ? "s" : ""} in the pipeline
             </h2>
           </div>
         </div>

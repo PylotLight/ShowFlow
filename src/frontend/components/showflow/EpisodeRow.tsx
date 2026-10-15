@@ -1,8 +1,15 @@
 import { Check, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchIcon, Info, Clock } from "lucide-react";
 import * as React from "react";
+import { createPortal } from "react-dom";
 
 import { EpisodeChip } from "@frontend/components/showflow/EpisodeChip";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
+import {
+  STATE_CHIP,
+  STATE_LABEL,
+  episodeExplainId,
+  type ExplainedEpisode,
+} from "@frontend/lib/pipelineStatus";
 import {
   expectedReleaseTime,
   formatFileSize,
@@ -63,6 +70,81 @@ export interface ColumnDef {
   id: string;
   label: string;
   visible: boolean;
+}
+
+/** Show id for the episode rows below (ShowDetail provides it); enables the "why not pulled" badge. */
+export const EpisodeShowContext = React.createContext<string | null>(null);
+
+/**
+ * "Why hasn't this been pulled?" for a missing tracked episode: fetches
+ * /api/episodes/:id/explain on open (no extra load on the list itself) and
+ * shows the same reason line as the Pipeline's Needs attention list.
+ */
+function WhyPopover({ showId, episode }: { showId: string; episode: EpisodeData }) {
+  const [open, setOpen] = React.useState(false);
+  const [data, setData] = React.useState<ExplainedEpisode | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const popRef = React.useRef<HTMLDivElement>(null);
+  const [pos, setPos] = React.useState<{ top?: number; bottom?: number; right: number } | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    // Portal + fixed position: the season card clips overflow, so an
+    // absolutely positioned popover on the last rows would be cut off.
+    const r = ref.current?.getBoundingClientRect();
+    if (r) {
+      const below = window.innerHeight - r.bottom > 140;
+      const right = Math.max(8, window.innerWidth - r.right);
+      setPos(below ? { top: r.bottom + 6, right } : { bottom: window.innerHeight - r.top + 6, right });
+    }
+    setFailed(false);
+    fetch(`/api/episodes/${episodeExplainId(showId, episode.season, episode.episode)}/explain`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => { cancelled = true; document.removeEventListener("mousedown", handler); };
+  }, [open, showId, episode.season, episode.episode, episode.tracked, episode.searchMode]);
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        aria-label="Why hasn't this been downloaded?"
+        aria-expanded={open}
+        title="Why not downloaded yet?"
+        className="rounded px-1 font-mono text-[11px] text-muted-foreground hover:text-white/90 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal transition-colors"
+      >
+        why?
+      </button>
+      {open && pos && createPortal(
+        <div ref={popRef} role="dialog" aria-label="Pipeline status" style={{ position: "fixed", top: pos.top, bottom: pos.bottom, right: pos.right }} className="z-[100] w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-[#15181f] shadow-2xl shadow-black/50 p-3 text-left animate-fade-in">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal mb-2">// Pipeline status</div>
+          {data ? (
+            <div className="space-y-1.5">
+              <span className={`inline-block rounded border px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide ${STATE_CHIP[data.state]}`}>
+                {STATE_LABEL[data.state]}
+              </span>
+              <p className="text-xs leading-snug text-white/85">{data.detail}</p>
+            </div>
+          ) : failed ? (
+            <p className="text-xs text-red-300">Couldn't load the status.</p>
+          ) : (
+            <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" aria-label="Loading" />
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 function formatAirTime(airDate: string) {
@@ -166,6 +248,7 @@ function EpisodeRow({
   onOpenSearch?: () => void;
 }) {
   const available = !!episode.filePath;
+  const showId = React.useContext(EpisodeShowContext);
   const showAirDate = columns.find(c => c.id === 'airDate')?.visible;
   const showStatus = columns.find(c => c.id === 'status')?.visible;
   const showSearch = columns.find(c => c.id === 'search')?.visible;
@@ -239,6 +322,7 @@ function EpisodeRow({
           }`}>
             {available ? "Available" : "Missing"}
           </span>
+          {!available && showId && <WhyPopover showId={showId} episode={episode} />}
           <InfoPopover episode={episode} />
         </span>
       )}

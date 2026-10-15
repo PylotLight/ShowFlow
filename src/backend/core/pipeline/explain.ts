@@ -226,7 +226,8 @@ export function explainEpisode(i: ExplainInput, opts: ExplainOptions): Explanati
       return out('stuck', 'no_progress', `Stuck: grabbed ${fmtIn(age)} ago, no download progress${autoRetry && retryAt ? ` — auto-retry ${fmtWhen(retryAt, now)}` : ''}`, 'retry',
         { waitingSince: since, nextCheckAt: autoRetry ? retryAt : null });
     }
-    return out('grabbed_downloading', null, `Sent to download client ${fmtIn(age)} ago, waiting for it to land`, null,
+    const when = age < 60_000 ? 'just now' : `${fmtIn(age)} ago`;
+    return out('grabbed_downloading', null, `Sent to download client ${when}, waiting for it to land`, null,
       { waitingSince: since, nextCheckAt: autoRetry ? retryAt : null });
   }
 
