@@ -1232,6 +1232,9 @@ export class BlackholeClient implements DownloadClient {
           absoluteNumber: ep.absoluteNumber,
           title: ep.title,
           filePath: movedTo,
+          // First sighting of this episode via an import (not a sync):
+          // follow the show's monitor-new-episodes setting.
+          autoTrackNew: true,
         });
       }
 

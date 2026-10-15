@@ -42,6 +42,14 @@ export const shows = sqliteTable('shows', {
   // profile via libraryTypes.quality_profile_id, NOT via `profile` above.
   library_type_id: text('library_type_id').references(() => libraryTypes.id),
   sort_title: text('sort_title'),
+  /**
+   * Show-level "monitor new episodes": when 1, episode rows that a metadata
+   * sync (or an import) inserts for the first time are created with
+   * is_tracked = 1 so the auto-grabber picks them up. Never touches rows that
+   * already exist. See shouldAutoTrackNewEpisode in db/shows.ts for the
+   * exact rule (recent/upcoming only, specials opt-in).
+   */
+  monitor_new_episodes: integer('monitor_new_episodes').notNull().default(1),
   added_at: text('added_at').default(sql`(datetime('now'))`),
   last_updated: text('last_updated').default(sql`(datetime('now'))`),
 });

@@ -262,6 +262,9 @@ export class SonarrImporter {
       seriesType,
       libraryTypeId: mappedLibraryTypeId,
       config: {},
+      // Carry Sonarr's own "monitor new items" over: unmonitored series or
+      // monitorNewItems = 'none' stay off, everything else is on.
+      monitorNewEpisodes: series.monitored !== false && series.monitorNewItems !== 'none',
     });
 
     // Sync episodes from Sonarr
