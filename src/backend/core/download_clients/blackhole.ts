@@ -13,6 +13,9 @@ import type { Episode } from '../types';
 import { debugLog, DEBUG } from '../debug';
 import { maybeForcedGc } from '../memory_guard';
 import { qualityEngine } from '../quality_engine';
+import { resolveShowProfileId } from '../cutoff';
+
+const UPGRADES_OFF = 'upgrades are off in this quality profile';
 import { probeMediaFile, mediaFromStoredRow, foldProbeToColumns } from '../media_probe';
 import { releaseTitlesMatch } from '../release_meta';
 import type { ProbeMediaForComparison } from '../media_probe';
@@ -670,7 +673,7 @@ export class BlackholeClient implements DownloadClient {
     const existing = db.getMovieFile(showId);
     if (existing) {
       const existingFilename = path.basename(existing.file_path);
-      const profileId = show.profile || 'standard';
+      const profileId = resolveShowProfileId(db, show) || 'standard';
       if (opts?.force) {
         console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
         replacePaths.push(existing.file_path);
@@ -689,7 +692,9 @@ export class BlackholeClient implements DownloadClient {
           db.logEvent({ type: 'skip', entityType: 'file', message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.` });
           db.logPipelineEvent({
             showId, stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
-            message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
+            message: qualityEngine.upgradesAllowed(profileId)
+              ? `"${filename}" is not an upgrade over existing "${existingFilename}"`
+              : `"${filename}" not imported over existing "${existingFilename}": ${UPGRADES_OFF}`,
             releaseTitle: filename,
           });
           if (!opts?.force) this.holdForManual(fullPath);
@@ -1130,7 +1135,9 @@ export class BlackholeClient implements DownloadClient {
           db.logPipelineEvent({
             showId, seasonNumber: ep.season, episodeNumber: ep.episode,
             stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
-            message: ep === blockEp || episodes.length === 1
+            message: via === UPGRADES_OFF
+              ? `"${filename}" not imported over existing "${existingFilename}": ${UPGRADES_OFF}`
+              : ep === blockEp || episodes.length === 1
               ? `"${filename}" is not an upgrade over existing "${existingFilename}"`
               : `"${filename}" is not an upgrade over existing "${existingFilename}" (S${String(blockEp.season).padStart(2, '0')}E${String(blockEp.episode).padStart(2, '0')})`,
             releaseTitle: filename,
@@ -1369,7 +1376,9 @@ export class BlackholeClient implements DownloadClient {
     kept: string[];
     existingNames: string[];
   }> {
-    const profileId = db.getShow(showId)?.profile || 'standard';
+    const showRow = db.getShow(showId);
+    // Same resolution as the grabber + cutoff search: library type's profile first.
+    const profileId = (showRow ? resolveShowProfileId(db, showRow) : '') || 'standard';
     const covered = new Set(episodes.map(e => `${e.season}:${e.episode}`));
     const byPath = new Map<string, { ep: { season: number; episode: number }; row: ReturnType<typeof db.getCurrentEpisodeFile> }>();
     for (const ep of episodes) {
@@ -1398,8 +1407,10 @@ export class BlackholeClient implements DownloadClient {
           ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId, row?.release_title || row?.original_name)
           : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
         if (!isUpgrade) {
+          // Upgrades off in the profile = imports never replace (shouldUpgrade* return false).
+          if (!qualityEngine.upgradesAllowed(profileId)) via = UPGRADES_OFF;
           return {
-            notUpgrade: { ep, existingFilename, via: via ? `${via} ${existingProbe?.video?.height ?? ''}p` : '' },
+            notUpgrade: { ep, existingFilename, via: via === UPGRADES_OFF ? via : via ? `${via} ${existingProbe?.video?.height ?? ''}p` : '' },
             replace: [], kept: [], existingNames: [],
           };
         }

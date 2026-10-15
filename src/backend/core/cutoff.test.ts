@@ -5,16 +5,18 @@ import { isCutoffMet, listCutoffUnmetEpisodes, isOutsideUpgradeBackoff, resoluti
 import { isSeasonPackTitle } from './grabber_service';
 import { shouldTrySeasonPack, runAutoGrabCycle, PACK_SETTLE_DAYS, type AutoGrabber } from './auto_grabber';
 import type { SeasonAirStats } from '../db/grabs';
+import { saveProfileModel } from '../db/quality_model';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-// Name-only scorer: rank from the resolution tag, mirrors the seeded ranks.
+// Name-only scorer: rank from the resolution tag, mirrors the streamlined
+// ranks (resolution step * 10 + source step; unknown source = 4).
 const RANKS: [RegExp, number, string][] = [
-  [/2160p/i, 40, '2160p'],
-  [/web-?dl.?1080p|1080p.?web-?dl/i, 33, 'WEBDL-1080p'],
-  [/1080p/i, 30, '1080p'],
-  [/720p/i, 20, '720p'],
+  [/2160p/i, 44, '2160p'],
+  [/web-?dl.?1080p|1080p.?web-?dl/i, 35, 'WEBDL-1080p'],
+  [/1080p/i, 34, '1080p'],
+  [/720p/i, 24, '720p'],
 ];
 function fakeScore(name: string): ReleaseScore {
   const hit = RANKS.find(([re]) => re.test(name));
@@ -96,8 +98,8 @@ function seedLibrary() {
   db.saveQuality({ id: 'q_720p', name: '720p', rank: 20 });
   db.saveQuality({ id: 'q_1080p', name: '1080p', rank: 30 });
   db.saveQuality({ id: 'q_webdl_1080p', name: 'WEBDL-1080p', rank: 33 });
-  db.saveProfile({ id: 'standard', name: 'Standard', cutoffId: 'q_webdl_1080p' });
-  db.saveProfile({ id: 'nocut', name: 'No cutoff' });
+  saveProfileModel(db, { id: 'standard', name: 'Standard', upgradesEnabled: true, upgradeUntilResolution: 1080, upgradeUntilSource: 'webdl' });
+  saveProfileModel(db, { id: 'nocut', name: 'No cutoff', upgradesEnabled: false });
   db.saveShow({ uuid: 'a', providerId: 'p1', type: 'tmdb', title: 'Alpha', config: {} });
   db.saveShow({ uuid: 'b', providerId: 'p2', type: 'tmdb', title: 'Beta', config: {} });
   db.db.query(`UPDATE shows SET profile = 'nocut' WHERE id = 'b'`).run();
@@ -124,7 +126,7 @@ describe('listCutoffUnmetEpisodes', () => {
     expect(all.map(e => `${e.showId}${e.episode}`).sort()).toEqual(['a1', 'a5']);
     expect(all[0]!.cutoffName).toBe('WEBDL-1080p');
     expect(all.find(e => e.episode === 1)!.currentQuality).toBe('720p');
-    expect(all.find(e => e.episode === 1)!.existingScore).toBe(20_000);
+    expect(all.find(e => e.episode === 1)!.existingScore).toBe(24_000);
 
     // in-flight grab drops E05 from the cycle pool
     const cooldownIso = new Date(Date.now() - 12 * HOUR).toISOString();

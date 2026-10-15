@@ -553,8 +553,50 @@ export const qualityDefinitions = sqliteTable('quality_definitions', {
 export const qualityProfiles = sqliteTable('quality_profiles', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  /** Legacy (model v0): read-only since the streamlined model, kept for one release + the migration preview. */
   cutoff_quality_id: text('cutoff_quality_id').references(() => qualityDefinitions.id),
+  // ---- streamlined model (core/quality_terms.ts) ----
+  /** 0 = legacy profile not yet converted, 2 = streamlined model. */
+  model_version: integer('model_version').notNull().default(0),
+  /** Vertical resolution to aim for; releases above it are rejected. null = no ceiling. */
+  target_resolution: integer('target_resolution'),
+  /** Lowest acceptable resolution. null = no floor. */
+  min_resolution: integer('min_resolution'),
+  allow_unknown_resolution: integer('allow_unknown_resolution').notNull().default(1),
+  /** JSON array of ReleaseSource ids this profile never grabs (e.g. ["hdtv"]). */
+  skip_sources: text('skip_sources').notNull().default('[]'),
+  /** Off really means off: no upgrade searches AND imports never replace a file. */
+  upgrades_enabled: integer('upgrades_enabled').notNull().default(0),
+  upgrade_until_resolution: integer('upgrade_until_resolution'),
+  upgrade_until_source: text('upgrade_until_source'),
+  /** Optional: also keep upgrading until the file's term score reaches this. */
+  upgrade_until_score: integer('upgrade_until_score'),
+  /** One-time notice from the legacy conversion ("merged 5 formats into HEVC"). Cleared when dismissed. */
+  migration_note: text('migration_note'),
 });
+
+// ---- Streamlined terms ----
+
+/** User-defined regex terms (Advanced). Built-in terms live in code, not here. */
+export const customTerms = sqliteTable('custom_terms', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  regex: text('regex').notNull(),
+});
+
+/** A profile's term chips. term_id is a built-in id ("hevc") or "custom:<custom_terms.id>". */
+export const profileTerms = sqliteTable('profile_terms', {
+  profile_id: text('profile_id')
+    .notNull()
+    .references(() => qualityProfiles.id, { onDelete: 'cascade' }),
+  term_id: text('term_id').notNull(),
+  /** prefer | strong_prefer | avoid | strong_avoid | must | never */
+  mode: text('mode').notNull(),
+  /** Numeric override (Advanced). null = the mode's fixed step. */
+  weight: integer('weight'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.profile_id, table.term_id] }),
+}));
 
 // ---- Custom formats ----
 

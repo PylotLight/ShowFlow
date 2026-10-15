@@ -598,7 +598,9 @@ export class GrabberService {
       // library files are renamed without tags, so a filename-only check
       // let anything through as an "upgrade" that the import then rejected.
       const existing = scoreExistingEpisodeFile(db, showId, season, episode, existingEp.file_path, profileId);
-      if (best.score.totalScore <= existing.compareScore || isSampleFile(best.title)) {
+      // Upgrades off really means off: the import wouldn't replace the file, so don't download.
+      const upgradesOff = !qualityEngine.upgradesAllowed(profileId);
+      if (upgradesOff || best.score.totalScore <= existing.compareScore || isSampleFile(best.title)) {
         logDebug({
           type: 'grabber', level: 'info', source: 'GrabberService',
           message: `Skipping grab — "${best.title}" is not an upgrade over "${existingFilename}"`,
@@ -606,12 +608,16 @@ export class GrabberService {
         db.logPipelineEvent({
           showId, seasonNumber: season, episodeNumber: episode,
           stage: 'WANTED', eventType: 'not_upgrade', reasonCode: 'NOT_AN_UPGRADE',
-          message: `"${best.title}" is not an upgrade over the existing file`,
+          message: upgradesOff
+            ? `"${best.title}" not grabbed: upgrades are off in this quality profile`
+            : `"${best.title}" is not an upgrade over the existing file`,
           releaseTitle: best.title,
         });
         return {
           success: false,
-          message: `Best found release (${best.title}) is not an upgrade over existing file.`,
+          message: upgradesOff
+            ? `Upgrades are off in this quality profile, so the existing file is kept.`
+            : `Best found release (${best.title}) is not an upgrade over existing file.`,
           bestRelease: best,
         };
       }
