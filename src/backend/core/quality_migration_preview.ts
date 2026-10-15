@@ -12,6 +12,7 @@ import { legacyQualityEngine, type ReleaseScore as LegacyScore } from './quality
 import { qualityEngine, type ReleaseScore } from './quality_engine';
 import { getProfileCutoff, isCutoffMet, resolveShowProfileId, scoreExistingEpisodeFile, type Scorer } from './cutoff';
 import { listProfileModels } from '../db/quality_model';
+import { parseReleaseGroup, type TermMode } from './quality_terms';
 
 const legacyScorer: Scorer = {
   byName: (name, pid) => legacyQualityEngine.getReleaseScore(name, pid) as unknown as ReleaseScore,
@@ -24,8 +25,12 @@ export interface ReleaseRow {
   episode: string | null;
   title: string;
   profileId: string;
+  /** Parsed release group, null when the title has none. */
+  releaseGroup: string | null;
   old: { decision: Decision; quality: string | null; total: number; reason: string | null };
-  new: { decision: Decision; quality: string | null; total: number; reason: string | null };
+  new: { decision: Decision; quality: string | null; total: number; reason: string | null;
+    /** The profile's release-group term this title hit, if any. */
+    groupHit: { label: string; mode: TermMode; weight: number } | null };
   flipped: boolean;
 }
 
@@ -76,6 +81,11 @@ function sideOf(s: ReleaseScore | LegacyScore) {
   };
 }
 
+function groupHitOf(s: ReleaseScore) {
+  const h = s.termHits?.find(t => t.group === 'group' && t.matched);
+  return h ? { label: h.label, mode: h.mode, weight: h.weight } : null;
+}
+
 function legacyCutoff(dbm: DatabaseManager, profileId: string): { rank: number; name: string } | null {
   const p = profileId ? dbm.getProfile(profileId) : null;
   if (!p?.cutoff_quality_id) return null;
@@ -112,8 +122,9 @@ export function buildMigrationPreview(dbm: DatabaseManager, opts: { limit?: numb
       episode: epLabel(g.season_number, g.episode_number),
       title: g.release_title,
       profileId,
+      releaseGroup: parseReleaseGroup(g.release_title),
       old: sideOf(o),
-      new: sideOf(n),
+      new: { ...sideOf(n), groupHit: groupHitOf(n) },
       flipped: o.rejected !== n.rejected,
     };
     releases.push(row);

@@ -9,7 +9,7 @@ import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema';
 
 import { seedDefaults, migrateQualityIds } from './init';
-import { convertLegacyProfiles } from './quality_model';
+import { convertBuiltinGroupTerms, convertLegacyProfiles } from './quality_model';
 import { backfillShowTitles } from './shows';
 import { extractReleaseMeta } from '../core/release_meta';
 import * as shows from './shows';
@@ -178,6 +178,13 @@ export class DatabaseManager {
       for (const c of converted) console.log(`[quality] Converted profile "${c.name}" to the streamlined model (${c.terms} terms)${c.notes.length ? `: ${c.notes.join('; ')}` : ''}`);
     } catch (err) {
       console.warn('[quality] Profile conversion failed (engine converts in memory until it succeeds):', err);
+    }
+    // One-time: the built-in release-group chips became per-profile groups.
+    try {
+      const n = convertBuiltinGroupTerms(this);
+      if (n) console.log(`[quality] Moved ${n} built-in release group term(s) to per-profile release groups`);
+    } catch (err) {
+      console.warn('[quality] Release group conversion failed:', err);
     }
 
     const titleCount = this.db.query('SELECT count(*) as c FROM show_titles').get() as { c: number } | undefined;

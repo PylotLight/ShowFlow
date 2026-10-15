@@ -4,7 +4,8 @@
  *
  * A profile is: resolution target + minimum (+ allow-unknown), a fixed source
  * order with per-profile skips, and terms (built-in or custom regex) each set
- * to Prefer / Avoid / Must have / Never. Every term counts ONCE per release,
+ * to Prefer / Avoid / Must have / Never, plus per-profile release groups
+ * (`group:<Name>`, exact case-insensitive match on the parsed group). Every term counts ONCE per release,
  * so the five spellings of HEVC can't stack the way the old formats did.
  *
  *   rank  = resolutionStep * 10 + sourceStep
@@ -14,6 +15,7 @@
  * keeps working.
  */
 import { parseResolution, parseSource, type ReleaseSource } from './release_quality';
+import { parseReleaseGroup } from './release_meta';
 
 export type TermMode = 'prefer' | 'strong_prefer' | 'avoid' | 'strong_avoid' | 'must' | 'never';
 export const TERM_MODES: TermMode[] = ['prefer', 'strong_prefer', 'avoid', 'strong_avoid', 'must', 'never'];
@@ -38,7 +40,6 @@ export const TERM_GROUPS: { id: TermGroup; label: string }[] = [
   { id: 'dual', label: 'Dual audio / subs' },
   { id: 'language', label: 'Language' },
   { id: 'release', label: 'Release' },
-  { id: 'group', label: 'Release groups' },
 ];
 
 export interface BuiltinTerm {
@@ -51,8 +52,6 @@ export interface BuiltinTerm {
 const L = '(?<![a-z0-9])';
 const R = '(?![a-z0-9])';
 const w = (src: string) => new RegExp(`${L}(?:${src})${R}`, 'i');
-/** A release group: `[Group]` anywhere or `-Group` at the end (before the extension). */
-const grp = (name: string) => new RegExp(`(?:\\[${name}\\]|-${name}(?:\\.(?:mkv|mp4|avi|ts|m2ts))?\\s*$)`, 'i');
 
 export const BUILTIN_TERMS: BuiltinTerm[] = [
   { id: 'hevc', group: 'codec', label: 'HEVC / x265', match: w('x[.\\-_ ]?265|h[.\\-_ ]?265|hevc|hvc1|hev1') },
@@ -85,14 +84,6 @@ export const BUILTIN_TERMS: BuiltinTerm[] = [
   { id: 'repack', group: 'release', label: 'Repack / Proper', match: w('repack\\d?|proper|rerip') },
   { id: 'hardsub', group: 'release', label: 'Hardsubs', match: w('hardsubs?|hc') },
 
-  { id: 'g_subsplease', group: 'group', label: 'SubsPlease', match: grp('subsplease') },
-  { id: 'g_erai', group: 'group', label: 'Erai-raws', match: grp('erai-raws') },
-  { id: 'g_judas', group: 'group', label: 'Judas', match: grp('judas') },
-  { id: 'g_asw', group: 'group', label: 'ASW', match: grp('asw') },
-  { id: 'g_ember', group: 'group', label: 'EMBER', match: grp('ember') },
-  { id: 'g_ntb', group: 'group', label: 'NTb', match: grp('ntb') },
-  { id: 'g_flux', group: 'group', label: 'FLUX', match: grp('flux') },
-  { id: 'g_framestor', group: 'group', label: 'FraMeSToR', match: grp('framestor') },
 ];
 
 const BY_ID = new Map(BUILTIN_TERMS.map(t => [t.id, t]));
@@ -105,6 +96,41 @@ export const CUSTOM_PREFIX = 'custom:';
 export function isCustomTermId(termId: string): boolean {
   return termId.startsWith(CUSTOM_PREFIX);
 }
+
+/** Release-group terms are stored as `group:<Name>` (name as the user typed it). */
+export const GROUP_PREFIX = 'group:';
+export function isGroupTermId(termId: string): boolean {
+  return termId.startsWith(GROUP_PREFIX);
+}
+/** Trim + validate a typed group name. null when it can't be a group. */
+export function cleanGroupName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const g = raw.trim().replace(/^\[|\]$/g, '').replace(/^-/, '').trim();
+  if (!g || g.length > 40 || /[\u0000-\u001f]/.test(g)) return null;
+  return g;
+}
+export function groupTermId(name: string): string {
+  return `${GROUP_PREFIX}${name}`;
+}
+export function groupNameOf(termId: string): string {
+  return termId.slice(GROUP_PREFIX.length);
+}
+
+/**
+ * The release-group chips that used to be built in (until v0.1.84) and their
+ * display names. Profiles still using them convert to `group:<Name>` terms at
+ * boot, and an old client posting one gets the group term instead of a 400.
+ */
+export const LEGACY_GROUP_TERMS: Record<string, string> = {
+  g_subsplease: 'SubsPlease',
+  g_erai: 'Erai-raws',
+  g_judas: 'Judas',
+  g_asw: 'ASW',
+  g_ember: 'EMBER',
+  g_ntb: 'NTb',
+  g_flux: 'FLUX',
+  g_framestor: 'FraMeSToR',
+};
 
 // ---- resolution + source ----------------------------------------------------
 
@@ -188,7 +214,11 @@ export function effectiveWeight(t: { mode: TermMode; weight: number | null }): n
   return t.weight ?? MODE_WEIGHT[t.mode];
 }
 
-export function termMatches(t: Pick<ResolvedTerm, 'termId' | 'regex'>, name: string): { matched: boolean; invalid?: boolean } {
+export function termMatches(t: Pick<ResolvedTerm, 'termId' | 'regex'>, name: string, group?: string | null): { matched: boolean; invalid?: boolean } {
+  if (isGroupTermId(t.termId)) {
+    const g = group === undefined ? parseReleaseGroup(name) : group;
+    return { matched: !!g && g.toLowerCase() === groupNameOf(t.termId).toLowerCase() };
+  }
   if (t.regex != null) {
     try { return { matched: new RegExp(t.regex, 'i').test(name) }; } catch { return { matched: false, invalid: true }; }
   }
@@ -202,8 +232,9 @@ export function scoreTerms(name: string, terms: ResolvedTerm[]): TermScore {
   let score = 0;
   let neverMatched: string | null = null;
   const missingMust: string[] = [];
+  const group = terms.some(t => isGroupTermId(t.termId)) ? parseReleaseGroup(name) : null;
   for (const t of terms) {
-    const m = termMatches(t, name);
+    const m = termMatches(t, name, group);
     const weight = effectiveWeight(t);
     hits.push({ termId: t.termId, label: t.label, group: t.group, mode: t.mode, weight, matched: m.matched, ...(m.invalid ? { invalid: true } : {}) });
     if (t.mode === 'never' && m.matched && !neverMatched) neverMatched = t.label;
@@ -274,8 +305,8 @@ export const PRESETS: ProfilePreset[] = [
   },
   {
     id: 'anime',
-    name: 'Anime (SubsPlease)',
-    description: '1080p. prefers SubsPlease / Erai-raws, dual audio and HEVC. never VOSTFR. upgrades off.',
+    name: 'Anime',
+    description: '1080p. prefers dual audio and HEVC. never VOSTFR. upgrades off. add your release groups after.',
     minResolution: 720,
     targetResolution: 1080,
     allowUnknownResolution: true,
@@ -283,8 +314,6 @@ export const PRESETS: ProfilePreset[] = [
     upgradesEnabled: false,
     upgradeUntil: null,
     terms: [
-      { termId: 'g_subsplease', mode: 'prefer' },
-      { termId: 'g_erai', mode: 'prefer' },
       { termId: 'dual_audio', mode: 'prefer' },
       { termId: 'hevc', mode: 'prefer' },
       { termId: 'vostfr', mode: 'never' },
@@ -297,5 +326,5 @@ export function isReleaseSource(s: unknown): s is ReleaseSource {
   return typeof s === 'string' && (SOURCE_ORDER as string[]).includes(s);
 }
 
-export { parseResolution, parseSource };
+export { parseResolution, parseSource, parseReleaseGroup };
 export type { ReleaseSource };

@@ -3,7 +3,7 @@ import { json, errorResponse } from "./_shared";
 import { testReleaseName } from "../core/release_test";
 import {
   listProfileModels, getProfileModel, saveProfileModel, resolveProfileTerms, profileUsage, clearMigrationNote,
-  listCustomTerms, saveCustomTerm, removeCustomTerm, termLibrary,
+  listCustomTerms, saveCustomTerm, removeCustomTerm, termLibrary, releaseGroupSuggestions,
 } from "../db/quality_model";
 import { TERM_GROUPS, MODE_WEIGHT, PRESETS, SOURCE_ORDER, RESOLUTIONS } from "../core/quality_terms";
 import { SOURCE_LABELS } from "../core/release_quality";
@@ -114,6 +114,18 @@ export function mediaManagementRoutes() {
             resolutions: RESOLUTIONS,
             presets: PRESETS,
           });
+        } catch (err) {
+          return errorResponse(err, 500);
+        }
+      },
+    },
+
+    // Release groups parsed from the user's own grabs + files, most frequent first.
+    "/api/quality/release-groups": {
+      async GET(req: Request & { params: Record<string, string> }) {
+        try {
+          const limit = Number(new URL(req.url).searchParams.get("limit") ?? 50) || 50;
+          return json(releaseGroupSuggestions(db, limit));
         } catch (err) {
           return errorResponse(err, 500);
         }

@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { loadProfile, scoreWithProfile, sourceLabel } from './quality_engine';
 import { getProfileCutoff, isCutoffMet } from './cutoff';
-import { qualityRank, releaseResolution, parseSource, type TermHit } from './quality_terms';
+import { qualityRank, releaseResolution, parseSource, parseReleaseGroup, type TermHit } from './quality_terms';
 
 /**
  * "Test a release name" breakdown for the Quality settings page: how the
@@ -13,6 +13,8 @@ export interface ReleaseTestResult {
   profileName: string | null;
   resolution: number | null;
   source: string | null;
+  /** Parsed release group (`[SubsPlease]` / `-NTb`), null when none. */
+  releaseGroup: string | null;
   /** Tier-style label ("WEBDL-1080p") and the rank resolution + source give. */
   quality: { name: string; rank: number } | null;
   /** Every profile term, matched or not, with the weight it adds. */
@@ -41,6 +43,7 @@ export function testReleaseName(name: string, profileId: string): ReleaseTestRes
     profileName: p.model?.name ?? null,
     resolution,
     source: sourceLabel(source),
+    releaseGroup: parseReleaseGroup(name),
     quality: score.qualityName ? { name: score.qualityName, rank: qualityRank(resolution, source) } : null,
     terms: score.termHits ?? [],
     termScore,

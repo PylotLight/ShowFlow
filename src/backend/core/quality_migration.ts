@@ -19,10 +19,11 @@
  *    also stops imports replacing files).
  */
 import {
-  builtinTermsIn, getBuiltinTerm, CUSTOM_PREFIX, RESOLUTIONS, SOURCE_ORDER,
+  builtinTermsIn, getBuiltinTerm, cleanGroupName, LEGACY_GROUP_TERMS, groupTermId, groupNameOf, isGroupTermId, CUSTOM_PREFIX, RESOLUTIONS, SOURCE_ORDER,
   type TermMode, type ReleaseSource,
 } from './quality_terms';
 import { parseResolution, parseSource, SOURCE_LABELS } from './release_quality';
+import { parseReleaseGroup } from './release_meta';
 
 export interface LegacyFormat { id: string; name: string; regex: string; score: number | null; type: string | null }
 export interface LegacyQuality { id: string; name: string; rank?: number | null }
@@ -72,7 +73,21 @@ type Classified =
   | { kind: 'source'; source: ReleaseSource }
   | { kind: 'custom' };
 
+/** A format whose regex is just one release group: `\[Group\]`, `-Group$`, `-Group\b`. */
+export function groupFromRegex(regex: string): string | null {
+  const m = /^\^?(?:\\\[([A-Za-z0-9][A-Za-z0-9 _&@!+-]*)\\\]|-([A-Za-z0-9][A-Za-z0-9_&@!+]*)(?:\$|\\b)?)$/.exec(regex.trim());
+  const g = m ? cleanGroupName(m[1] ?? m[2]) : null;
+  // "-x265" / "\[1080p\]" are codec/quality formats, not groups
+  return g && parseReleaseGroup(`[${g}] x`) === g ? g : null;
+}
+
 export function classifyFormat(f: Pick<LegacyFormat, 'name' | 'regex'>): Classified {
+  // Only the groups that used to be built-in chips merge into a group term
+  // (as they did before); any other group regex stays a custom term with its
+  // exact weight, same as before.
+  const group = groupFromRegex(f.regex);
+  const known = group ? Object.values(LEGACY_GROUP_TERMS).find(n => n.toLowerCase() === group.toLowerCase()) : undefined;
+  if (known) return { kind: 'term', termId: groupTermId(known) };
   const fromRegex = builtinTermsIn(regexToText(f.regex));
   if (fromRegex.length === 1) return { kind: 'term', termId: fromRegex[0]! };
   if (fromRegex.length === 0) {
@@ -227,7 +242,7 @@ export function convertLegacyProfile(input: {
   }
 
   for (const [termId, fs] of byTerm) {
-    const label = getBuiltinTerm(termId)!.label;
+    const label = isGroupTermId(termId) ? groupNameOf(termId) : getBuiltinTerm(termId)!.label;
     let mode: TermMode | null;
     if (fs.some(f => f.type === 'forbidden')) mode = 'never';
     else if (fs.some(f => f.type === 'required')) mode = 'must';
