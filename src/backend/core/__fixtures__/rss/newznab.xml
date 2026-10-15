@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <title>NZBGeek</title>
+    <item>
+      <title>Due.Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-GRP</title>
+      <guid isPermaLink="true">https://api.example/details/aaa111</guid>
+      <link>http://prowlarr:9696/5/download?apikey=x&amp;link=aaa111</link>
+      <comments>https://api.example/details/aaa111#comments</comments>
+      <pubDate>Wed, 14 Oct 2026 10:00:00 +0000</pubDate>
+      <category>TV &gt; HD</category>
+      <enclosure url="http://prowlarr:9696/5/download?apikey=x&amp;link=aaa111" length="1500000000" type="application/x-nzb" />
+      <newznab:attr name="category" value="5000" />
+      <newznab:attr name="category" value="5040" />
+      <newznab:attr name="size" value="1500000000" />
+      <newznab:attr name="grabs" value="12" />
+    </item>
+    <item>
+      <title>Due.Show.S01E01.720p.HDTV.x264-LOW</title>
+      <guid isPermaLink="true">https://api.example/details/bbb222</guid>
+      <link>http://prowlarr:9696/5/download?apikey=x&amp;link=bbb222</link>
+      <pubDate>Wed, 14 Oct 2026 09:00:00 +0000</pubDate>
+      <enclosure url="http://prowlarr:9696/5/download?apikey=x&amp;link=bbb222" length="700000000" type="application/x-nzb" />
+      <newznab:attr name="category" value="5030" />
+    </item>
+    <item>
+      <title><![CDATA[Untracked Show S03E07 1080p WEB h264-ETHEL]]></title>
+      <guid>https://api.example/details/ccc333</guid>
+      <pubDate>Wed, 14 Oct 2026 08:00:00 +0000</pubDate>
+      <enclosure url="http://prowlarr:9696/5/download?apikey=x&amp;link=ccc333" length="900000000" type="application/x-nzb" />
+      <newznab:attr name="category" value="5040" />
+    </item>
+  </channel>
+</rss>

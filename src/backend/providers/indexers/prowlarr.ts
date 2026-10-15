@@ -1,10 +1,15 @@
 import type {
   Indexer,
   IndexerInfo,
+  IndexerProtocol,
   IndexerResult,
+  RecentFeed,
+  RecentOptions,
   SearchOptions,
 } from './types';
 import { logDebug } from '../../core/debug';
+import { parseNewznabFeed, NewznabError } from './newznab';
+import { db } from '../../db';
 
 /**
  * Client for a Prowlarr instance's v1 API.
@@ -160,6 +165,89 @@ export class ProwlarrIndexer implements Indexer {
   }
 
   /**
+   * RSS sync: each enabled Prowlarr indexer's latest-releases listing via
+   * Prowlarr's per-indexer newznab/torznab proxy (`/{id}/api?t=tvsearch`
+   * with no `q` - the same call Sonarr's RssSync makes). One feed per
+   * indexer so each keeps its own cursor and a single broken tracker
+   * doesn't hide the rest. Indexers whose caps list no TV category are
+   * skipped. Falls back to `t=search` when an indexer rejects tvsearch.
+   */
+  async fetchRecent(options?: RecentOptions): Promise<RecentFeed[]> {
+    const cats = options?.categories?.length ? options.categories : [5000, 5070];
+    const indexers = (await this.listIndexers()).filter(ix =>
+      ix.enabled && (ix.categories.length === 0 || ix.categories.some(c => c.id >= 5000 && c.id < 6000)),
+    );
+    const feeds: RecentFeed[] = [];
+    for (const ix of indexers) {
+      const key = `prowlarr:${ix.id}`;
+      const protocol: IndexerProtocol = ix.protocol === 'usenet' || ix.protocol === 'torrent' ? ix.protocol : 'unknown';
+      try {
+        const parse = (xml: string) => parseNewznabFeed(xml, { indexerId: ix.id, indexerName: ix.name, protocol });
+        let results: IndexerResult[];
+        try {
+          results = parse(await this.fetchNewznab(ix.id, 'tvsearch', cats, options?.limit));
+        } catch (e) {
+          // tvsearch unsupported -> newznab error (e.g. 202/203); retry plain search.
+          if (!(e instanceof NewznabError)) throw e;
+          results = parse(await this.fetchNewznab(ix.id, 'search', cats, options?.limit));
+        }
+        feeds.push({ key, name: ix.name, results });
+      } catch (e) {
+        feeds.push({ key, name: ix.name, results: [], error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return feeds;
+  }
+
+  private async fetchNewznab(indexerId: number, t: 'tvsearch' | 'search', cats: number[], limit?: number): Promise<string> {
+    const url = new URL(`${this.baseUrl}/${indexerId}/api`);
+    url.searchParams.set('t', t);
+    url.searchParams.set('cat', cats.join(','));
+    url.searchParams.set('extended', '1');
+    if (limit != null) url.searchParams.set('limit', String(limit));
+    logDebug({ type: 'provider', level: 'debug', source: 'Prowlarr', message: `RSS ${t} indexer=${indexerId}`, url: url.toString() });
+    url.searchParams.set('apikey', this.apiKey);
+    const res = await fetch(url.toString(), {
+      headers: { 'X-Api-Key': this.apiKey, Accept: 'application/rss+xml, application/xml, text/xml' },
+      signal: AbortSignal.timeout(30_000),
+    }).catch(err => {
+      throw new Error(`Could not reach Prowlarr at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    if (res.status === 401) throw new Error('Prowlarr rejected the API key (401 Unauthorized).');
+    if (!res.ok) throw new Error(`Prowlarr RSS ${t} failed for indexer ${indexerId}: ${res.status} ${res.statusText}`);
+    return res.text();
+  }
+
+  /**
+   * Grab for a release that didn't come from `/api/v1/search` (RSS feed
+   * items have no ReleaseResource to POST back): hand the magnet or the
+   * Prowlarr-proxied .torrent/.nzb straight to the blackhole folder, the
+   * same way the native indexers do.
+   */
+  private async grabToBlackhole(release: IndexerResult): Promise<boolean> {
+    let folder: string | null = null;
+    try {
+      const raw = db.getSetting('downloadClient');
+      folder = raw ? JSON.parse(raw)?.blackhole?.outputFolder ?? null : null;
+    } catch { folder = null; }
+    if (!folder) {
+      logDebug({ type: 'provider', level: 'warn', source: 'Prowlarr', message: `No blackhole output folder for feed release "${release.title}"` });
+      return false;
+    }
+    const safe = release.title.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+    if (release.magnetUrl?.startsWith('magnet:')) {
+      await Bun.file(`${folder}/${release.infoHash || safe}.magnet`).write(release.magnetUrl);
+      return true;
+    }
+    if (!release.downloadUrl) return false;
+    const res = await fetch(release.downloadUrl, { headers: { 'X-Api-Key': this.apiKey }, signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) return false;
+    const ext = release.protocol === 'usenet' || (res.headers.get('Content-Type') ?? '').includes('nzb') ? '.nzb' : '.torrent';
+    await Bun.file(`${folder}/${safe}${ext}`).write(Buffer.from(await res.arrayBuffer()));
+    return true;
+  }
+
+  /**
    * Grabs a release. Prowlarr's search endpoint doubles as the grab
    * endpoint: POSTing the exact ReleaseResource back triggers Prowlarr to
    * send it to whichever download client is configured for the release's
@@ -171,6 +259,7 @@ export class ProwlarrIndexer implements Indexer {
    */
   async grab(release: IndexerResult): Promise<boolean> {
     try {
+      if (!release.raw) return await this.grabToBlackhole(release);
       logDebug({
         type: 'provider',
         level: 'info',

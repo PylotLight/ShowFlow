@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Some Tracker</title>
+    <item>
+      <title>Due Show S01E06 2160p WEB-DL DV HEVC-TOR</title>
+      <guid>https://tracker.example/t/777</guid>
+      <jackettindexer id="sometracker">Some Tracker</jackettindexer>
+      <pubDate>Thu, 15 Oct 2026 01:00:00 +0000</pubDate>
+      <size>4200000000</size>
+      <link>http://prowlarr:9696/7/download?apikey=x&amp;link=777</link>
+      <enclosure url="http://prowlarr:9696/7/download?apikey=x&amp;link=777" length="4200000000" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="category" value="5045" />
+      <torznab:attr name="seeders" value="120" />
+      <torznab:attr name="peers" value="150" />
+      <torznab:attr name="infohash" value="ABCDEF0123456789ABCDEF0123456789ABCDEF01" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01&amp;dn=Due+Show" />
+    </item>
+    <item>
+      <title>Due Show S01E05 1080p WEB-DL-TOR</title>
+      <guid>https://tracker.example/t/778</guid>
+      <pubDate>Thu, 15 Oct 2026 00:30:00 +0000</pubDate>
+      <size>1400000000</size>
+      <enclosure url="http://prowlarr:9696/7/download?apikey=x&amp;link=778" length="1400000000" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="seeders" value="40" />
+    </item>
+    <item>
+      <title>Due Show S01E02 1080p WEB-DL-TOR</title>
+      <guid>https://tracker.example/t/779</guid>
+      <pubDate>Thu, 15 Oct 2026 00:20:00 +0000</pubDate>
+      <size>1400000000</size>
+      <enclosure url="http://prowlarr:9696/7/download?apikey=x&amp;link=779" length="1400000000" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+    </item>
+    <item>
+      <title>Some Movie 2026 1080p BluRay x264</title>
+      <guid>https://tracker.example/t/780</guid>
+      <pubDate>Thu, 15 Oct 2026 00:10:00 +0000</pubDate>
+      <enclosure url="http://prowlarr:9696/7/download?apikey=x&amp;link=780" length="8000000000" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2040" />
+    </item>
+  </channel>
+</rss>

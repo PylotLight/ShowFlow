@@ -5,6 +5,7 @@ import { debugLog } from './debug';
 import { maybeForcedGc } from './memory_guard';
 import { runBackup, normalizeKeepCount, BACKUP_KEEP_COUNT_SETTING, DEFAULT_BACKUP_KEEP_COUNT } from "./backup";
 import { runAutoGrabCycle } from './auto_grabber';
+import { runRssSyncCycle } from './rss_sync';
 import { JellyfinSync } from '../providers/jellyfin/sync';
 import { pollSystemHealth } from './pipeline/health_poller';
 import type { DownloadManager } from './download_manager';
@@ -13,6 +14,7 @@ export type TaskName =
   | 'sync-shows' 
   | 'scan-library' 
   | 'backup' 
+  | 'rss-sync'
   | 'auto-grab'
   | 'housekeeping'
   | 'pipeline-cleanup'
@@ -81,6 +83,17 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       } catch {}
       const result = await runBackup('backups', keep);
       debugLog(`Task backup complete: ${(result.dbSize / 1024 / 1024).toFixed(1)} MB DB, ${(result.sqlSize / 1024).toFixed(1)} KB seed`);
+    },
+  },
+  'rss-sync': {
+    name: 'rss-sync',
+    displayName: 'RSS Sync',
+    description: 'Pull each indexer\'s latest-releases feed and grab new releases for tracked, missing, aired episodes (cheap: one request per feed; Auto-Grab stays the per-episode search backfill)',
+    category: 'downloading',
+    intervalMinutes: 15, // Sonarr's default RssSync interval
+    defaultEnabled: true,
+    action: async (config, ctx) => {
+      await runRssSyncCycle(config, ctx.getDownloadManager?.() ?? null);
     },
   },
   'auto-grab': {
