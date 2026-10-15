@@ -2,14 +2,50 @@ name: Build & Push Docker Image
 
 on:
   # Push builds disabled: nothing consumes per-merge images (updates ship
-  # via the release tarball), so every main push was a wasted ~1.5min run.
-  # Releases are the sole build trigger.
+  # via the release tarball). Releases are the sole build trigger:
+  #  - `release: published` for releases made with a PAT (`bun run release`
+  #    locally, or the GitHub UI)
+  #  - `workflow_call` from release.yml — a release created with GITHUB_TOKEN
+  #    does NOT fire `release` events, so that workflow calls this one directly
+  #  - `workflow_dispatch` to rebuild/re-upload an existing tag by hand
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build (e.g. v0.1.81)
+        required: true
+        type: string
+      prerelease:
+        description: Skip the `latest` image tag
+        required: false
+        type: boolean
+        default: false
+      github_hosted:
+        description: Run on ubuntu-latest instead of the self-hosted runners
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)build (e.g. v0.1.81)
+        required: true
+        type: string
+      prerelease:
+        description: Skip the `latest` image tag
+        required: false
+        type: boolean
+        default: false
+      github_hosted:
+        description: Run on ubuntu-latest instead of the self-hosted runners
+        required: false
+        type: boolean
+        default: false
 
-# One release build at a time per tag; never cancel a release mid-publish.
+# One build at a time per tag; never cancel a release mid-publish.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-build-${{ inputs.tag || github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -17,20 +53,106 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  # Single job, compile ONCE: the binary + manifest + supervisor are built on
+  # the runner, the tarball is uploaded first (it's what in-place updates
+  # download), then Dockerfile.release just COPYs the same artifacts onto
+  # distroless and pushes.
+  #
+  # Measured before (v0.1.78-v0.1.80): the old multi-stage docker build was
+  # ~1.2s install + ~1.4s compile, but `cache-to: type=gha,mode=max` spent
+  # ~39s exporting a cache that every release invalidates anyway (`COPY . .`),
+  # plus ~8s buildx setup/boot. None of that is needed now.
+  #
+  # Runner: self-hosted ARC scale set on the NAS k3s (docker-in-docker) by
+  # default. Override with the repo variable RUNNER_LABELS (a label like
+  # `ubuntu-latest`, or a JSON array like ["self-hosted","linux"]), or tick
+  # github_hosted on a manual run. Arch doesn't matter: the binaries are
+  # cross-compiled with --target=bun-linux-x64 and Dockerfile.release has no
+  # RUN steps, so an arm64 runner builds the amd64 image without QEMU.
+  release:
+    runs-on: ${{ inputs.github_hosted && 'ubuntu-latest' || (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'k3s-runners-showflow' }}
+    timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       packages: write
     outputs:
       digest: ${{ steps.docker_build.outputs.digest }}
 
     steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Resolve commit
+        id: sha
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha::7}" >> "$GITHUB_OUTPUT"
+
+      # ARC runner pods are ephemeral: nothing survives between jobs unless the
+      # runner mounts a volume. If SHOWFLOW_CI_CACHE is set (or a writable /cache
+      # is mounted) keep bun's install cache there; otherwise install cold (~1s).
+      - name: Persistent bun cache (only if the runner mounts one)
+        run: |
+          dir="${SHOWFLOW_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/showflow; fi
+          if [ -n "$dir" ] && mkdir -p "$dir/bun-install-cache" 2>/dev/null && [ -w "$dir" ]; then
+            echo "using persistent cache at $dir"
+            echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache" >> "$GITHUB_ENV"
+            echo "PERSISTENT_CACHE=1" >> "$GITHUB_ENV"
+          else
+            echo "no persistent cache mounted"
+          fi
+          echo "runner arch: $(uname -m)"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # No actions/cache here: a cold `bun install` is ~1s on GitHub-hosted,
+      # while saving the ~178MB cache cost ~4s per run.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build release binary + manifest + supervisor
+        env:
+          GITHUB_SHA: ${{ steps.sha.outputs.sha }}
+          GITHUB_REF_NAME: ${{ steps.tag.outputs.tag }}
+          BUILD_TARGET: bun-linux-x64
+        run: |
+          bun run build.ts
+          bun build --compile --minify --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor
+
+      - name: Package release assets
+        run: tar -czf showflow-${{ steps.sha.outputs.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations
+
+      # The ARC runner image may not ship the gh CLI (GitHub-hosted does).
+      - name: Ensure gh CLI
+        run: |
+          command -v gh >/dev/null && { gh --version | head -1; exit 0; }
+          case "$(uname -m)" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch $(uname -m)"; exit 1;; esac
+          v=2.62.0
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${v}/gh_${v}_linux_${a}.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_${v}_linux_${a}/bin" >> "$GITHUB_PATH"
+
+      - name: Upload release asset
+        run: gh release upload "${{ steps.tag.outputs.tag }}" "showflow-${{ steps.sha.outputs.sha }}.tar.gz" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stage image context
+        run: |
+          mkdir -p image-ctx
+          cp dist/supervisor showflow manifest.json image-ctx/
+          cp -R src/backend/db/migrations image-ctx/migrations
+          ls -la image-ctx image-ctx/migrations | head -20
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -39,73 +161,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Explicit values: under workflow_call/dispatch github.ref/sha are the
+      # caller's (main, pre-bump), so the default semver/sha sources are wrong.
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
+            type=raw,value=latest,enable=${{ !(github.event.release.prerelease || inputs.prerelease) }}
+            type=semver,pattern={{version}},value=${{ steps.tag.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag.outputs.tag }}
+            type=raw,value=sha-${{ steps.sha.outputs.short }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.tag.outputs.tag }}
+            org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
 
+      # Default docker driver (no setup-buildx container to boot) and no
+      # layer cache: the image is 4 COPYs of prebuilt files, and the only big
+      # layer (the new binary) changes every release, so a registry/gha cache
+      # would cost an export per run and save nothing (the old gha cache
+      # export alone was ~39s). The distroless base pull is ~1.5s.
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: image-ctx
+          file: Dockerfile.release
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            GITHUB_SHA=${{ github.sha }}
-            GITHUB_REF_NAME=${{ github.ref_name }}
-            SUPERVISOR_VERSION=${{ github.ref_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # On every published GitHub Release, compile the release files (binary +
-  # manifest + migrations) and package them into the standalone tarball
-  # (showflow-<sha>.tar.gz), then upload it. This is a plain checkout + bun
-  # install + build on a fresh runner. (The v0.1.59 "faster releases" variant
-  # that extracted the tarball from the just-built image was reverted: it
-  # dropped this job's checkout, which broke `gh release upload`, and coupled
-  # the update artifact to the heavyweight Docker build for ~1-2min saved.)
-  #
-  # Runs in PARALLEL with build-and-push (no `needs:`): the tarball doesn't
-  # use anything from the image, and it's what in-place updates download, so
-  # it shouldn't wait on the docker push. Bun's install cache is restored so
-  # the reinstall is mostly a cache hit.
-  publish-release-assets:
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Cache bun install
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build release binary + manifest
-        run: GITHUB_SHA=${{ github.sha }} GITHUB_REF_NAME=${{ github.ref_name }} BUILD_TARGET=bun-linux-x64 bun run build.ts
-
-      - name: Package release assets
-        run: tar -czf showflow-${{ github.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations
-
-      - name: Upload release asset
-        run: gh release upload ${{ github.ref_name }} showflow-${{ github.sha }}.tar.gz
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            SUPERVISOR_VERSION=${{ steps.tag.outputs.tag }}

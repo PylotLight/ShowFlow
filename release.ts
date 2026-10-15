@@ -8,6 +8,13 @@ import pkg from "./package.json" with { type: "json" };
  *   bun run release -- minor     # minor bump (0.1.12 -> 0.2.0)
  *   bun run release -- major     # major bump (0.1.12 -> 1.0.0)
  *   bun run release -- 1.2.3     # explicit version
+ *   bun run release -- minor --remote   # cut it in GitHub Actions instead
+ *
+ * The same script runs in CI via .github/workflows/release.yml
+ * (workflow_dispatch, input: patch/minor/major/X.Y.Z), so releases can also be
+ * cut from the GitHub UI / mobile app with no local `gh`. That workflow builds
+ * the image + tarball itself; a local release here triggers the build through
+ * the `release: published` event instead.
  *
  * Uses the `gh` CLI (GitHub's official tool) for tagging + release creation.
  * `gh` must be logged in with an account that has write access to the repo
@@ -15,8 +22,20 @@ import pkg from "./package.json" with { type: "json" };
  * a laptop-only convenience and was dropped in favor of standard `gh`.
  */
 
-const bumpArg = process.argv[2];
-const dryRun = process.argv.includes("--dry-run");
+const args = process.argv.slice(2);
+const dryRun = args.includes("--dry-run");
+const remote = args.includes("--remote");
+const bumpArg = args.find((a) => !a.startsWith("--"));
+
+if (remote) {
+  // Hand off to the release workflow (bump + tag + release + build all run in
+  // Actions). Still needs `gh`, but no clean local checkout or push rights.
+  const bump = bumpArg ?? "patch";
+  console.log(`Dispatching release.yml (bump=${bump}, dry_run=${dryRun})`);
+  await Bun.$`gh workflow run release.yml -f bump=${bump} -f dry_run=${String(dryRun)}`;
+  console.log("✓ dispatched — follow it with: gh run watch");
+  process.exit(0);
+}
 
 const versionMatch = /^(\d+)\.(\d+)\.(\d+)/.exec(pkg.version as string);
 if (!versionMatch) {

@@ -1,0 +1,32 @@
+# CI-only image: packages artifacts the release workflow ALREADY compiled
+# (.github/workflows/docker-image.yml), so the image build is just a few COPYs
+# onto distroless — no bun install, no compile, no build cache needed. The
+# exact same showflow binary + manifest.json go into the release tarball, so
+# the image's bootstrap release and the in-place update artifact are one build.
+#
+# Build context is a staging dir (NOT the repo root, whose .dockerignore drops
+# /showflow and /manifest.json) laid out as:
+#   supervisor  showflow  manifest.json  migrations/
+#
+# Runtime layout MUST stay identical to the final stage of ./Dockerfile
+# (/supervisor, /bootstrap/showflow, /bootstrap/manifest.json,
+# /bootstrap/migrations) — the supervisor's cold-start bootstrap reads these
+# paths. Local `docker build .` keeps using ./Dockerfile.
+FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot
+WORKDIR /data
+
+COPY supervisor /supervisor
+COPY showflow /bootstrap/showflow
+COPY manifest.json /bootstrap/manifest.json
+COPY migrations /bootstrap/migrations
+
+ARG SUPERVISOR_VERSION=development
+ENV NODE_ENV=production \
+    PORT=3000 \
+    SUPERVISOR_VERSION=${SUPERVISOR_VERSION}
+
+EXPOSE 3000
+
+VOLUME ["/data"]
+
+CMD ["/supervisor"]
