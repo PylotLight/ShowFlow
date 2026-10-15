@@ -25,8 +25,11 @@ ENV SUPERVISOR_VERSION=${SUPERVISOR_VERSION}
 # a separate, slow-moving activation-protocol floor (build.ts), so pods can
 # update in place without rebuilding the image every release.
 
+# Local builds only now (CI packages prebuilt artifacts via Dockerfile.release).
+# The cache mount keeps bun's download cache across local rebuilds.
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
 
 COPY . .
 
@@ -39,7 +42,7 @@ COPY . .
 # *source* directory (supervisor/index.ts) and Bun refuses to overwrite a
 # directory with a file.
 RUN bun run build.ts && \
-    bun build --compile --minify --linux-x64 supervisor/index.ts --outfile=dist/supervisor
+    bun build --compile --minify --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor
 
 
 FROM --platform=linux/amd64 gcr.io/distroless/base-debian12:nonroot

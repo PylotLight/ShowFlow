@@ -1,12 +1,18 @@
 name: CI
 
-# Lightweight PR check: install, test, build. Runs on GitHub-hosted runners
-# (no self-hosted runner is registered for this repo as far as we can tell);
-# swap `runs-on` to `[self-hosted, linux]` once one is — nothing here needs
+# Lightweight PR check: install, test, build. Runs on the self-hosted ARC
+# scale set on the NAS k3s by default; set the repo variable RUNNER_LABELS to
+# `ubuntu-latest` (or a JSON array of labels) to move it. Nothing here needs
 # docker.
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      github_hosted:
+        description: Run on ubuntu-latest instead of the self-hosted runners
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,12 +22,30 @@ permissions:
   contents: read
 
 jobs:
+  # Fork PRs always go to ubuntu-latest: this repo is public, and the NAS
+  # runners have docker-in-docker, so untrusted PR code never lands there.
   test-and-build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (inputs.github_hosted || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || (startsWith(vars.RUNNER_LABELS, '[') && fromJSON(vars.RUNNER_LABELS)) || vars.RUNNER_LABELS || 'k3s-runners-showflow' }}
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # ARC runner pods are ephemeral: nothing survives between jobs unless the
+      # runner mounts a volume. If SHOWFLOW_CI_CACHE is set (or a writable /cache
+      # is mounted) keep bun's install cache there; otherwise install cold.
+      - name: Persistent bun cache (only if the runner mounts one)
+        run: |
+          dir="${SHOWFLOW_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/showflow; fi
+          if [ -n "$dir" ] && mkdir -p "$dir/bun-install-cache" 2>/dev/null && [ -w "$dir" ]; then
+            echo "using persistent cache at $dir"
+            echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache" >> "$GITHUB_ENV"
+            echo "PERSISTENT_CACHE=1" >> "$GITHUB_ENV"
+          else
+            echo "no persistent cache mounted"
+          fi
+          echo "runner arch: $(uname -m)"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -29,6 +53,7 @@ jobs:
           bun-version: latest
 
       - name: Cache bun install
+        if: env.PERSISTENT_CACHE != '1'
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
