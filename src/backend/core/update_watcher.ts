@@ -17,6 +17,7 @@ import { db } from "../db";
 import { backgroundJobs } from "./background_jobs";
 import { downloadAndInstallByTag } from "./updates_manager";
 import { emitConnectSignal } from "./connect/bus";
+import { retryDelayMs } from "./update_policy";
 
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
 
@@ -41,11 +42,13 @@ export interface PendingUpdate {
 }
 
 export interface WatchResult {
-  status: "up-to-date" | "unchanged" | "staged" | "downloaded-not-verified" | "skipped" | "not-configured";
+  status: "up-to-date" | "unchanged" | "staged" | "downloaded-not-verified" | "skipped" | "not-configured" | "retry-scheduled";
   currentVersion: string;
   latestTag: string | null;
   pending: PendingUpdate | null;
   error?: string;
+  /** When status is retry-scheduled / downloaded-not-verified: next automatic retry. */
+  nextRetryAt?: string | null;
 }
 
 // In-memory feed cache: the ETag + the parsed entries, refreshed only when the
@@ -55,6 +58,31 @@ let etag: string | null = null;
 let entries: FeedEntry[] = [];
 let lastFetchAt = 0;
 let inFlight: Promise<WatchResult> | null = null;
+
+// Per-tag failure backoff. Without it a release whose tarball CI hasn't
+// uploaded yet (the atom feed shows the tag the moment it's published) was
+// retried on every 20s panel poll — one rate-limited API call each — or not
+// for another 15 min with the panel closed. Now: short follow-up retries
+// (1, 2, 5, 10 min…) driven by a timer, independent of the panel.
+let failure: { tag: string; count: number; nextAt: number; message: string } | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function getDownloadFailure(): { tag: string; count: number; nextRetryAt: string; message: string } | null {
+  return failure ? { tag: failure.tag, count: failure.count, nextRetryAt: new Date(failure.nextAt).toISOString(), message: failure.message } : null;
+}
+
+function scheduleRetry(tag: string, message: string): number {
+  const count = failure && failure.tag === tag ? failure.count + 1 : 1;
+  const delay = retryDelayMs(count);
+  failure = { tag, count, nextAt: Date.now() + delay, message };
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    runWatchCycle({ force: true }).catch(() => {});
+  }, delay);
+  (retryTimer as any).unref?.();
+  return failure.nextAt;
+}
 
 function atomUrl(): string | null {
   const repo = process.env.GITHUB_REPO;
@@ -236,18 +264,35 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       return { ...base, status: "skipped", latestTag: latest.tag, pending };
     }
 
+    // A recent attempt at this tag failed: wait out the backoff (a timer
+    // re-runs the cycle when it's due) instead of re-spending API quota.
+    if (failure && failure.tag === latest.tag && Date.now() < failure.nextAt) {
+      return { ...base, status: "retry-scheduled", latestTag: latest.tag, pending, error: failure.message, nextRetryAt: new Date(failure.nextAt).toISOString() };
+    }
+
     // Genuinely newer release + auto-download on: spend our one API call.
     const jobId = `update-download:${latest.tag}`;
-    backgroundJobs.register({ id: jobId, type: 'update-download', label: `Downloading ShowFlow ${latest.title || latest.tag}`, link: '/settings?tab=general' });
+    backgroundJobs.register({ id: jobId, type: 'update-download', label: `Downloading ShowFlow ${latest.title || latest.tag}`, total: 100, link: '/settings?tab=general' });
     db.logEvent({ type: "update", entityType: "system", entityId: latest.tag, message: `New release ${latest.tag} detected — auto-downloading` });
     console.log(`[updates] new release ${latest.tag} (current ${BUILD_VERSION}) — auto-downloading`);
 
-    const result = await downloadAndInstallByTag(latest.tag);
-    if (!result.ok || !result.releaseId) {
-      backgroundJobs.fail(jobId, result.message);
-      db.logEvent({ type: "error", entityType: "system", entityId: latest.tag, message: `Auto-download of ${latest.tag} failed: ${result.message}` });
-      return { ...base, status: "downloaded-not-verified", latestTag: latest.tag, pending, error: result.message };
+    let result: { ok: boolean; message: string; releaseId?: string };
+    try {
+      result = await downloadAndInstallByTag(latest.tag, (received, total) => {
+        if (total) backgroundJobs.update(jobId, { completed: Math.floor((received / total) * 100), detail: `${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB` });
+      });
+    } catch (err) {
+      // Previously a throw here (404 on the tag, network) escaped the cycle
+      // and left the background job spinning as "running" forever.
+      result = { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+    if (!result.ok || !result.releaseId) {
+      const nextAt = scheduleRetry(latest.tag, result.message);
+      backgroundJobs.fail(jobId, result.message);
+      db.logEvent({ type: "error", entityType: "system", entityId: latest.tag, message: `Auto-download of ${latest.tag} failed: ${result.message} — retrying at ${new Date(nextAt).toISOString()}` });
+      return { ...base, status: "downloaded-not-verified", latestTag: latest.tag, pending, error: result.message, nextRetryAt: new Date(nextAt).toISOString() };
+    }
+    if (failure?.tag === latest.tag) failure = null;
 
     backgroundJobs.complete(jobId, `Release ${latest.tag} staged — ready to activate`);
 
@@ -263,6 +308,15 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
     emitConnectSignal({ source: 'update', tag: record.tag, title: record.title, releaseId: record.releaseId });
     db.logEvent({ type: "update", entityType: "system", entityId: latest.tag, message: `Release ${latest.tag} downloaded & verified — ready to activate` });
     console.log(`[updates] release ${latest.tag} staged (releaseId ${result.releaseId}) — awaiting activation`);
+
+    // Optional auto-activate (off by default). Lazy import: update_activation
+    // pulls in backup + db, and the watcher is imported by routes at boot.
+    try {
+      const { maybeAutoActivate } = await import("./update_activation");
+      maybeAutoActivate(record);
+    } catch (err) {
+      console.warn("[updates] auto-activate check failed:", err instanceof Error ? err.message : err);
+    }
 
     return { ...base, status: "staged", latestTag: latest.tag, pending: record };
   })().finally(() => {

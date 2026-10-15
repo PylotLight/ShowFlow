@@ -1,6 +1,16 @@
 import { db } from "../db";
-import { listReleases, downloadAndInstall, triggerActivate, getSupervisorStatus } from "../core/updates_manager";
-import { runWatchCycle, getPendingUpdate, isAutoDownloadEnabled, setAutoDownload } from "../core/update_watcher";
+import { listReleases, downloadAndInstall, getSupervisorStatus, getDownloadProgress } from "../core/updates_manager";
+import { runWatchCycle, getPendingUpdate, isAutoDownloadEnabled, setAutoDownload, getDownloadFailure } from "../core/update_watcher";
+import {
+  startActivation,
+  getActivationProgress,
+  getLastActivation,
+  getAutoActivate,
+  setAutoActivate,
+  pendingMigrationsFor,
+  currentBusy,
+} from "../core/update_activation";
+import { normalizeAutoActivate } from "../core/update_policy";
 import { json, errorResponse, checkAdminAuth, unauthorized } from "./_shared";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
@@ -53,19 +63,18 @@ export function updateRoutes(adminToken: string) {
       async POST(req: Request & { params: Record<string, string> }) {
         if (!checkAdminAuth(req)) return unauthorized();
         try {
-          const { releaseId } = (await req.json()) as { releaseId?: string };
+          const { releaseId, tag, force } = (await req.json()) as { releaseId?: string; tag?: string; force?: boolean };
           if (!releaseId) return errorResponse("releaseId is required");
-          db.logEvent({ type: "update", entityType: "system", message: `Activation triggered for release "${releaseId}"` });
-          const result = await triggerActivate(releaseId);
-          // Only forget the pending marker if activation actually failed
-          // pre-flight (we're still alive to clear it). On success/timeout this
-          // process is being replaced; the new boot's reconcilePendingOnBoot()
-          // clears it once the running release matches.
-          if (!result.ok) {
-            const { clearPendingUpdate } = await import("../core/update_watcher");
-            clearPendingUpdate();
-          }
-          return json(result, { status: result.ok ? 200 : 400 });
+          db.logEvent({ type: "update", entityType: "system", message: `Activation requested for release "${releaseId}"${force ? " (skip drain)" : ""}` });
+          // Drain → backup-if-migrating → handoff runs in the background (a
+          // drain can take minutes, far past Bun's request idle timeout).
+          // Progress is polled via /pending; once the handoff kills this
+          // process the frontend's /internal/ready reconnect poll takes over.
+          // The pending marker is NOT cleared on failure any more: clearing
+          // it made the watcher re-download the same release next cycle.
+          const pending = getPendingUpdate();
+          const result = startActivation(releaseId, { tag: tag ?? (pending?.releaseId === releaseId ? pending.tag : null), force: !!force });
+          return json({ ...result, accepted: result.ok }, { status: result.ok ? 202 : 409 });
         } catch (err) {
           return errorResponse(err, 502);
         }
@@ -75,7 +84,21 @@ export function updateRoutes(adminToken: string) {
     "/api/admin/updates/pending": {
       async GET(req: Request & { params: Record<string, string> }) {
         if (!checkAdminAuth(req)) return unauthorized();
-        return json({ pending: getPendingUpdate(), autoDownload: isAutoDownloadEnabled() });
+        const pending = getPendingUpdate();
+        // Only look up migrations when something is staged (one small file read).
+        const migrations = pending ? await pendingMigrationsFor(pending.releaseId).catch(() => null) : null;
+        return json({
+          pending,
+          autoDownload: isAutoDownloadEnabled(),
+          autoActivate: getAutoActivate(),
+          serverTime: new Date().toString(),
+          download: getDownloadProgress(),
+          downloadFailure: getDownloadFailure(),
+          activation: getActivationProgress(),
+          lastActivation: getLastActivation(),
+          pendingMigrations: migrations ? migrations.map((m) => m.tag) : null,
+          busy: currentBusy().map((b) => b.label),
+        });
       },
     },
 
@@ -98,16 +121,28 @@ export function updateRoutes(adminToken: string) {
     "/api/admin/updates/settings": {
       async GET(req: Request & { params: Record<string, string> }) {
         if (!checkAdminAuth(req)) return unauthorized();
-        return json({ autoDownload: isAutoDownloadEnabled() });
+        return json({ autoDownload: isAutoDownloadEnabled(), autoActivate: getAutoActivate() });
       },
       async POST(req: Request & { params: Record<string, string> }) {
         if (!checkAdminAuth(req)) return unauthorized();
         try {
-          const { autoDownload } = (await req.json()) as { autoDownload?: boolean };
-          if (typeof autoDownload !== "boolean") return errorResponse("autoDownload (boolean) is required");
-          setAutoDownload(autoDownload);
-          db.logEvent({ type: "update", entityType: "system", message: `Auto-download ${autoDownload ? "enabled" : "disabled"}` });
-          return json({ ok: true, autoDownload: isAutoDownloadEnabled() });
+          const { autoDownload, autoActivate } = (await req.json()) as { autoDownload?: boolean; autoActivate?: unknown };
+          if (typeof autoDownload !== "boolean" && autoActivate === undefined) {
+            return errorResponse("autoDownload (boolean) or autoActivate ({ mode, hour }) is required");
+          }
+          if (typeof autoDownload === "boolean") {
+            setAutoDownload(autoDownload);
+            db.logEvent({ type: "update", entityType: "system", message: `Auto-download ${autoDownload ? "enabled" : "disabled"}` });
+          }
+          if (autoActivate !== undefined) {
+            const next = setAutoActivate(normalizeAutoActivate(autoActivate));
+            db.logEvent({
+              type: "update",
+              entityType: "system",
+              message: next.mode === "off" ? "Auto-activate disabled" : next.mode === "idle" ? "Auto-activate when idle enabled" : `Auto-activate at ${String(next.hour).padStart(2, "0")}:00 (when idle) enabled`,
+            });
+          }
+          return json({ ok: true, autoDownload: isAutoDownloadEnabled(), autoActivate: getAutoActivate() });
         } catch (err) {
           return errorResponse(err, 500);
         }

@@ -4,6 +4,7 @@ import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, PlayIcon, A
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
+import { usePolling } from "@frontend/lib/usePolling";
 
 interface PendingUpdate {
   tag: string;
@@ -12,6 +13,35 @@ interface PendingUpdate {
   notes: string | null;
   publishedAt: string | null;
   stagedAt: string;
+}
+
+interface UpdateInfo {
+  autoActivate?: { mode: "off" | "idle" | "window"; hour: number };
+  serverTime?: string;
+  download?: {
+    tag: string | null;
+    phase: "resolving" | "downloading" | "verifying" | "staged" | "error";
+    receivedBytes: number;
+    totalBytes: number | null;
+    attempt: number;
+    message: string | null;
+  } | null;
+  downloadFailure?: { tag: string; count: number; nextRetryAt: string; message: string } | null;
+  activation?: { releaseId: string; tag: string | null; phase: "draining" | "backing-up" | "handing-off" | "failed"; detail: string; busy: string[]; auto: boolean } | null;
+  lastActivation?: { releaseId: string; tag: string | null; outcome?: "activated" | "rolled-back" | "failed"; message?: string; backupFile: string | null; finishedAt?: string } | null;
+  pendingMigrations?: string[] | null;
+  busy?: string[];
+}
+
+const ACTIVATION_PHASE_LABEL: Record<string, string> = {
+  draining: "Waiting for jobs",
+  "backing-up": "Backing up DB",
+  "handing-off": "Handing off",
+  failed: "Failed",
+};
+
+function formatMb(bytes: number): string {
+  return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
 interface ReleaseItem {
@@ -69,6 +99,14 @@ export function UpdatesPanel() {
   const [autoDownload, setAutoDownload] = React.useState(true);
   const [checking, setChecking] = React.useState(false);
   const [checkNote, setCheckNote] = React.useState<string | null>(null);
+  const [info, setInfo] = React.useState<UpdateInfo>({});
+  /** releaseId we asked the backend to activate and are waiting to hand off. */
+  const [awaitingHandoff, setAwaitingHandoffState] = React.useState<string | null>(null);
+  const awaitingRef = React.useRef<string | null>(null);
+  function setAwaitingHandoff(id: string | null) {
+    awaitingRef.current = id;
+    setAwaitingHandoffState(id);
+  }
   const watchTimerRef = React.useRef<any>(null);
 
   function headers(): Record<string, string> {
@@ -167,8 +205,71 @@ export function UpdatesPanel() {
   function fetchPending() {
     return fetch("/api/admin/updates/pending", { headers: headers() })
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d) { setPending(d.pending ?? null); if (typeof d.autoDownload === "boolean") setAutoDownload(d.autoDownload); } })
-      .catch(() => {});
+      .then(d => {
+        if (!d) return;
+        setPending(d.pending ?? null);
+        if (typeof d.autoDownload === "boolean") setAutoDownload(d.autoDownload);
+        setInfo(d as UpdateInfo);
+      })
+      // A failed fetch while we're waiting on a handoff means the supervisor
+      // is stopping this process — switch to the /internal/ready reconnect poll.
+      .catch(() => {
+        const target = awaitingRef.current;
+        if (target) { setAwaitingHandoff(null); startReconnectPoll(target); }
+      });
+  }
+
+  // Live progress: poll /pending every 1.5s while something is moving
+  // (download, verify, drain, backup, handoff). Idle otherwise.
+  const busyDownload = !!info.download && ["resolving", "downloading", "verifying"].includes(info.download.phase);
+  const busyActivation = !!info.activation && info.activation.phase !== "failed";
+  usePolling(() => { fetchPending(); }, 1500, !!token && (busyDownload || busyActivation || !!awaitingHandoff || (actionLoading?.startsWith("install-") ?? false)));
+
+  // Drive the stepper from the backend's activation progress.
+  React.useEffect(() => {
+    if (!awaitingHandoff) return;
+    const a = info.activation;
+    if (a && a.releaseId === awaitingHandoff) {
+      if (a.phase === "failed") {
+        setStepStatus("error");
+        setStepMessage(a.detail);
+        setErr(a.detail);
+        setAwaitingHandoff(null);
+        import("@frontend/register-sw").then(m => m.clearPendingRelease()).catch(() => {});
+        return;
+      }
+      setStepMessage(`${ACTIVATION_PHASE_LABEL[a.phase] ?? a.phase}: ${a.detail}`);
+      if (a.phase === "handing-off") {
+        setAwaitingHandoff(null);
+        startReconnectPoll(awaitingHandoff);
+      }
+    }
+  }, [info, awaitingHandoff]);
+
+  // Real download progress for the stepper (replaces the old fake ticker).
+  React.useEffect(() => {
+    const d = info.download;
+    if (!d || currentStep !== 2) return;
+    if (d.phase === "downloading" && d.totalBytes) {
+      setDownloadProgress(Math.min(99, Math.round((d.receivedBytes / d.totalBytes) * 100)));
+      setStepMessage(`Downloading ${formatMb(d.receivedBytes)} / ${formatMb(d.totalBytes)}${d.attempt > 1 ? ` (attempt ${d.attempt})` : ""}…`);
+    } else if (d.phase === "verifying") {
+      setDownloadProgress(100);
+      setStepMessage("Supervisor is extracting and verifying the checksum…");
+    }
+  }, [info.download, currentStep]);
+
+  function saveAutoActivate(next: { mode: "off" | "idle" | "window"; hour: number }) {
+    const prev = info.autoActivate;
+    setInfo(i => ({ ...i, autoActivate: next }));
+    fetch("/api/admin/updates/settings", {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify({ autoActivate: next }),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => { if (d?.autoActivate) setInfo(i => ({ ...i, autoActivate: d.autoActivate })); })
+      .catch(() => setInfo(i => ({ ...i, autoActivate: prev })));
   }
 
   // Runs one watcher cycle. `force` bypasses the 15s feed-TTL on the server
@@ -189,9 +290,11 @@ export function UpdatesPanel() {
           else if (res.status === "up-to-date") setCheckNote(`Checked — you're on the latest release (${res.currentVersion}).`);
           else if (res.status === "downloaded-not-verified") setCheckNote(`Checked — ${res.latestTag} downloaded but failed verification: ${res.error ?? "unknown"}`);
           else if (res.status === "skipped") setCheckNote(`Checked — ${res.latestTag} is newer, but auto-download is off.`);
+          else if (res.status === "retry-scheduled") setCheckNote(`Checked — ${res.latestTag} isn't downloadable yet (${res.error ?? "unknown"}); retrying automatically at ${res.nextRetryAt ? new Date(res.nextRetryAt).toLocaleTimeString() : "soon"}.`);
           else setCheckNote(null);
         }
         if (res.status === "staged") fetchAll(true);
+        fetchPending();
       })
       .catch(e => { if (opts.note) setCheckNote(`Check failed: ${e instanceof Error ? e.message : String(e)}`); })
       .finally(() => setChecking(false));
@@ -282,9 +385,31 @@ export function UpdatesPanel() {
             setTimeout(() => window.location.reload(), 400);
             return;
           }
-          // Server responded but it's still the old (or rolled-back) release
-          setStepMessage(`Server is up but still switching release… (attempt ${attempt})`);
-          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+          // Server responded but it's still the old (or rolled-back) release.
+          // Ask it what happened to the attempt — after a failed readiness
+          // gate the supervisor relaunches lastKnownGood, whose boot records
+          // the rollback. Without this the panel polled forever.
+          fetch("/api/admin/updates/pending", { headers: headers() })
+            .then(r => (r.ok ? r.json() : null))
+            .then((d: UpdateInfo | null) => {
+              const last = d?.lastActivation;
+              if (last && last.releaseId === pendingReleaseId && (last.outcome === "rolled-back" || last.outcome === "failed")) {
+                setStepStatus("error");
+                setStepMessage(last.message ?? "Activation failed — rolled back to the previous release.");
+                setErr(last.message ?? "Activation failed — rolled back to the previous release.");
+                if (d) setInfo(d);
+                try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+                return;
+              }
+              if (attempt >= 60) {
+                setStepStatus("error");
+                setStepMessage("Still on the previous release after several minutes — check the supervisor status below.");
+                return;
+              }
+              setStepMessage(`Server is up but still switching release… (attempt ${attempt})`);
+              reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
+            })
+            .catch(() => { reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt)); });
         })
         .catch(() => {
           // Server not ready yet
@@ -310,16 +435,15 @@ export function UpdatesPanel() {
     setCurrentStep(2);
     setStepStatus("running");
     setStepMessage("Downloading release asset & handing off to supervisor verification...");
-    setDownloadProgress(25);
+    setDownloadProgress(0);
 
     setActionLoading(`install-${githubReleaseId}`);
     setErr(null);
     setInstalledReleaseId(null);
     setInstalledTag(null);
     
-    const interval = setInterval(() => {
-      setDownloadProgress((prev) => (prev < 85 ? prev + 15 : prev));
-    }, 400);
+    // Real progress comes from the /pending poll (info.download) while this
+    // request is in flight.
 
     try {
       const res = await fetch("/api/admin/updates/install", {
@@ -327,7 +451,6 @@ export function UpdatesPanel() {
         headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ githubReleaseId }),
       });
-      clearInterval(interval);
       setDownloadProgress(100);
 
       const data = await res.json();
@@ -346,7 +469,6 @@ export function UpdatesPanel() {
       }
       fetchAll(true);
     } catch (e) { 
-      clearInterval(interval);
       setStepStatus("error");
       setStepMessage(String(e));
       setErr(String(e)); 
@@ -368,20 +490,28 @@ export function UpdatesPanel() {
       const res = await fetch("/api/admin/updates/activate", {
         method: "POST",
         headers: { ...headers(), "content-type": "application/json" },
-        body: JSON.stringify({ releaseId }),
+        body: JSON.stringify({ releaseId, tag: tagName }),
       });
       const data = await res.json();
+      if (data.accepted) {
+        // Backend now drains running jobs, backs up if the release migrates
+        // the DB, then hands off. Follow it via the /pending poll; the
+        // reconnect poll starts once the handoff begins.
+        setStepMessage("Preparing activation…");
+        setAwaitingHandoff(releaseId);
+        fetchPending();
+        return;
+      }
       if (data.timedOut) {
-        // Activation passed pre-flight — supervisor is now restarting the app.
-        // Start polling /internal/ready from the SPA so we auto-reload.
+        // Older backend contract: activation already in progress.
         startReconnectPoll(releaseId);
         return;
       }
-      if (!data.ok) { 
+      if (!data.ok) {
         setStepStatus("error");
         setStepMessage(data.message || "Activation failed");
-        setErr(data.message || "Activation failed"); 
-        clearPendingRelease(); 
+        setErr(data.message || "Activation failed");
+        clearPendingRelease();
       }
     } catch {
       // Connection dropped = supervisor is quiescing (killing this process).
@@ -560,8 +690,35 @@ export function UpdatesPanel() {
               Activate
             </Button>
           </div>
+          {info.lastActivation && info.lastActivation.releaseId === pending.releaseId && (info.lastActivation.outcome === "rolled-back" || info.lastActivation.outcome === "failed") && (
+            <div role="alert" className="flex items-start gap-2 rounded border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-xs text-red-300">
+              <AlertCircleIcon className="size-3.5 shrink-0 mt-0.5" />
+              <span>{info.lastActivation.message ?? "The last activation of this release failed."} Auto-activate skips this build; you can retry manually.</span>
+            </div>
+          )}
+          {info.activation && info.activation.releaseId === pending.releaseId && info.activation.phase !== "failed" && (
+            <div className="flex items-center gap-2 rounded border border-signal/30 bg-signal/[0.05] px-3 py-2 text-xs text-white/85">
+              <Loader2Icon className="size-3.5 shrink-0 animate-spin text-signal" />
+              <span>
+                {info.activation.auto ? "Auto-activating · " : ""}
+                {ACTIVATION_PHASE_LABEL[info.activation.phase] ?? info.activation.phase}: {info.activation.detail}
+              </span>
+            </div>
+          )}
+          <ul className="space-y-1 text-[11px] text-muted-foreground">
+            {info.pendingMigrations && info.pendingMigrations.length > 0 && (
+              <li>
+                Includes {info.pendingMigrations.length} database migration{info.pendingMigrations.length === 1 ? "" : "s"} — a backup is taken automatically before activating.
+              </li>
+            )}
+            {info.pendingMigrations === null && <li>Couldn't read this build's migration list — a backup will be taken before activating, to be safe.</li>}
+            {info.busy && info.busy.length > 0 && (
+              <li>Activating waits (up to 2 min) for: {info.busy.join(", ")}.</li>
+            )}
+            <li>Downtime is usually 5–20s while the supervisor swaps builds; TorBox downloads resume after the restart. A failed health check rolls back automatically.</li>
+          </ul>
           {pending.notes && (
-            <details className="rounded bg-black/30 border border-white/5">
+            <details open className="rounded bg-black/30 border border-white/5">
               <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground font-mono select-none">Release notes</summary>
               <pre className="whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-relaxed text-white/75 max-h-64 overflow-y-auto">{pending.notes}</pre>
             </details>
@@ -693,6 +850,25 @@ export function UpdatesPanel() {
               <span className="text-[11px] text-muted-foreground font-mono">Auto-download</span>
               <Switch checked={autoDownload} onCheckedChange={toggleAutoDownload} />
             </label>
+            <label className="flex items-center gap-2 select-none" title="Activate a staged release by itself — only when nothing is importing or scanning. Off by default.">
+              <span className="text-[11px] text-muted-foreground font-mono">Auto-activate</span>
+              <select
+                aria-label="Auto-activate staged releases"
+                className="h-7 rounded-md border border-white/10 bg-black/40 px-2 text-[11px] font-mono text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60"
+                value={info.autoActivate?.mode === "window" ? `window:${info.autoActivate.hour}` : (info.autoActivate?.mode ?? "off")}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.startsWith("window:")) saveAutoActivate({ mode: "window", hour: Number(v.slice(7)) });
+                  else saveAutoActivate({ mode: v as "off" | "idle", hour: info.autoActivate?.hour ?? 4 });
+                }}
+              >
+                <option value="off">Off</option>
+                <option value="idle">When idle</option>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={`window:${h}`}>Nightly {String(h).padStart(2, "0")}:00 (idle)</option>
+                ))}
+              </select>
+            </label>
             <Button variant="ghost" size="sm" onClick={() => runCheck({ force: true, note: true })} disabled={checking} title="Check GitHub for a new release now">
               {checking ? <Loader2Icon className="size-3.5 animate-spin mr-1.5" /> : <RadioIcon className="size-3.5 mr-1.5" />}
               Check now
@@ -707,6 +883,32 @@ export function UpdatesPanel() {
           Watching the Releases feed automatically (this panel checks every ~20s while open; every 15 min in the background).
           {checkNote && <span className="text-signal"> {checkNote}</span>}
         </div>
+        {info.autoActivate?.mode === "window" && info.serverTime && (
+          <p className="text-[11px] font-mono text-muted-foreground">
+            Nightly window uses the server's clock (now {info.serverTime.slice(16, 21)}); it's skipped if ShowFlow is busy for the whole hour.
+          </p>
+        )}
+        {busyDownload && info.download && !activeUpdateTag && (
+          <div className="rounded-lg border border-signal/30 bg-signal/[0.04] p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-mono text-white/85">
+              <span>
+                {info.download.phase === "verifying" ? "Verifying" : info.download.phase === "resolving" ? "Resolving" : "Downloading"} {info.download.tag ?? "release"}
+                {info.download.attempt > 1 ? ` (attempt ${info.download.attempt})` : ""}
+              </span>
+              {info.download.totalBytes ? <span>{formatMb(info.download.receivedBytes)} / {formatMb(info.download.totalBytes)}</span> : null}
+            </div>
+            <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden" role="progressbar" aria-label="Release download progress"
+              aria-valuenow={info.download.totalBytes ? Math.round((info.download.receivedBytes / info.download.totalBytes) * 100) : undefined}>
+              <div className="bg-signal h-full transition-all duration-300 rounded-full"
+                style={{ width: `${info.download.phase === "verifying" ? 100 : info.download.totalBytes ? Math.round((info.download.receivedBytes / info.download.totalBytes) * 100) : 5}%` }} />
+            </div>
+          </div>
+        )}
+        {info.downloadFailure && !pending && (
+          <p className="text-[11px] font-mono text-amber-300">
+            {info.downloadFailure.tag}: {info.downloadFailure.message} — retrying automatically at {new Date(info.downloadFailure.nextRetryAt).toLocaleTimeString()}.
+          </p>
+        )}
         {loading && (
           <div className="flex items-center justify-center py-6">
             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />

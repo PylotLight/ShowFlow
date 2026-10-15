@@ -21,7 +21,7 @@
 // supervisor's native Bun.Archive support handles extraction even in
 // distroless images.
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename, unlink } from "node:fs/promises";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -75,7 +75,9 @@ function ttlFor(token: string | undefined, authedTtl: number, unauthTtl: number)
 }
 
 function rateLimited(res: Response): boolean {
-  const remaining = Number(res.headers.get("x-ratelimit-remaining") ?? "");
+  const header = res.headers.get("x-ratelimit-remaining");
+  if (header === null) return false; // no quota info (e.g. a CDN response) — don't invent a "0 remaining"
+  const remaining = Number(header);
   if (Number.isFinite(remaining) && remaining >= 0 && remaining < RATE_LIMIT_SAFETY_FLOOR) {
     console.warn(`[updates] GitHub rate limit nearly exhausted (${remaining} remaining) — cooling down cache for 10 min`);
     applyRateLimitCooldown();
@@ -253,19 +255,134 @@ async function fetchBuildDetails(token: string | undefined, repo: string, tagNam
 
 // ---- Download + local install (writes to /data/downloads/<releaseId>) -
 
-async function downloadAsset(assetId: number, token: string | undefined, repo: string): Promise<ArrayBuffer> {
-  // The asset-by-id endpoint (not the asset's browser_download_url) is what
-  // works for private repos — it accepts the same Bearer token as the rest
-  // of the API. `Accept: application/octet-stream` tells GitHub to return
-  // raw bytes instead of the asset's JSON metadata for this same URL.
-  const res = await fetch(`${GITHUB_API}/repos/${repo}/releases/assets/${assetId}`, {
-    headers: githubHeaders(token, "application/octet-stream"),
-    redirect: "follow",
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to download release asset ${assetId}: GitHub returned ${res.status}`);
+// ---- Download progress (polled by the Updates panel via /pending) -------
+
+export type DownloadPhase = "resolving" | "downloading" | "verifying" | "staged" | "error";
+
+export interface DownloadProgress {
+  tag: string | null;
+  releaseId: string | null;
+  phase: DownloadPhase;
+  receivedBytes: number;
+  totalBytes: number | null;
+  attempt: number;
+  message: string | null;
+  updatedAt: string;
+}
+
+let downloadProgress: DownloadProgress | null = null;
+
+export function getDownloadProgress(): DownloadProgress | null {
+  return downloadProgress;
+}
+
+function setProgress(p: Partial<DownloadProgress>): void {
+  downloadProgress = {
+    tag: null, releaseId: null, phase: "resolving", receivedBytes: 0, totalBytes: null, attempt: 1, message: null,
+    ...(downloadProgress ?? {}),
+    ...p,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_BACKOFF_MS = [2_000, 10_000];
+
+/**
+ * Streams a release asset to `destFile` (no whole-tarball ArrayBuffer in
+ * memory — the NAS pod is memory-tight), hashing as it goes. Verifies the
+ * byte count against the asset's size and, when GitHub supplies one, its
+ * `sha256:` digest. Retries transient failures with a short backoff.
+ */
+async function downloadAssetToFile(
+  asset: { id: number; size?: number; digest?: string | null },
+  token: string | undefined,
+  repo: string,
+  destFile: string,
+  onProgress?: (received: number, total: number | null, attempt: number) => void,
+): Promise<void> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      // The asset-by-id endpoint (not browser_download_url) is what works for
+      // private repos — it accepts the same Bearer token as the rest of the
+      // API. `Accept: application/octet-stream` returns raw bytes.
+      const res = await fetch(`${GITHUB_API}/repos/${repo}/releases/assets/${asset.id}`, {
+        headers: githubHeaders(token, "application/octet-stream"),
+        redirect: "follow",
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`GitHub returned ${res.status} for asset ${asset.id}`);
+      }
+      const total = Number(res.headers.get("content-length")) || asset.size || null;
+      const hasher = new Bun.CryptoHasher("sha256");
+      const sink = Bun.file(`${destFile}.part`).writer();
+      let received = 0;
+      let lastTick = 0;
+      try {
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+          sink.write(chunk);
+          hasher.update(chunk);
+          received += chunk.byteLength;
+          if (onProgress && Date.now() - lastTick > 250) {
+            lastTick = Date.now();
+            onProgress(received, total, attempt);
+          }
+        }
+      } finally {
+        await sink.end();
+      }
+      onProgress?.(received, total, attempt);
+      if (asset.size && received !== asset.size) {
+        throw new Error(`size mismatch: got ${received} bytes, expected ${asset.size}`);
+      }
+      const digest = typeof asset.digest === "string" && asset.digest.startsWith("sha256:") ? asset.digest.slice(7).toLowerCase() : null;
+      if (digest) {
+        const got = hasher.digest("hex");
+        if (got !== digest) throw new Error(`sha256 mismatch: got ${got.slice(0, 12)}…, expected ${digest.slice(0, 12)}…`);
+      }
+      await rename(`${destFile}.part`, destFile);
+      return;
+    } catch (err) {
+      lastErr = err;
+      await unlink(`${destFile}.part`).catch(() => {});
+      if (attempt < DOWNLOAD_ATTEMPTS) {
+        console.warn(`[updates] download attempt ${attempt} failed (${err instanceof Error ? err.message : String(err)}) — retrying`);
+        await Bun.sleep(DOWNLOAD_BACKOFF_MS[attempt - 1] ?? 10_000);
+      }
+    }
   }
-  return res.arrayBuffer();
+  throw new Error(`Failed to download release asset ${asset.id} after ${DOWNLOAD_ATTEMPTS} attempts: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+/** Download → supervisor verify/stage, with progress phases recorded for the UI. */
+async function stageRelease(
+  tag: string,
+  tarballAsset: any,
+  token: string | undefined,
+  repo: string,
+  onProgress?: (received: number, total: number | null) => void,
+): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+  const releaseId = releaseIdFromAsset(tarballAsset.name);
+  setProgress({ tag, releaseId, phase: "downloading", receivedBytes: 0, totalBytes: tarballAsset.size ?? null, attempt: 1, message: null });
+  try {
+    await installTarball(tarballAsset, token, repo, (received, total, attempt) => {
+      setProgress({ receivedBytes: received, totalBytes: total, attempt });
+      onProgress?.(received, total);
+    });
+    setProgress({ phase: "verifying", message: "Supervisor is extracting and verifying the build…" });
+    const result = await callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` });
+    setProgress(result.ok ? { phase: "staged", message: result.message } : { phase: "error", message: result.message });
+    return { ...result, releaseId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setProgress({ phase: "error", message });
+    return { ok: false, message, releaseId };
+  }
+}
+
+function releaseIdFromAsset(name: string): string {
+  return name.replace(/^showflow-/, "").replace(/\.tar\.gz$/, "");
 }
 
 /**
@@ -275,8 +392,12 @@ async function downloadAsset(assetId: number, token: string | undefined, repo: s
  * polling never touches this endpoint. Kept separate from listReleases so a
  * background auto-download never needs the full releases list.
  */
-export async function downloadAndInstallByTag(tag: string): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+export async function downloadAndInstallByTag(
+  tag: string,
+  onProgress?: (received: number, total: number | null) => void,
+): Promise<{ ok: boolean; message: string; releaseId?: string }> {
   const { token, repo } = githubConfig();
+  setProgress({ tag, releaseId: null, phase: "resolving", receivedBytes: 0, totalBytes: null, attempt: 1, message: null });
 
   const relRes = await fetch(`${GITHUB_API}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, {
     headers: githubHeaders(token),
@@ -290,11 +411,12 @@ export async function downloadAndInstallByTag(tag: string): Promise<{ ok: boolea
   const assets = (release.assets ?? []) as any[];
   const tarballAsset = assets.find((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
   if (!tarballAsset) {
-    return { ok: false, message: `Release "${tag}" is missing required tarball asset (showflow-<sha>.tar.gz).` };
+    const message = `Release "${tag}" has no showflow-<sha>.tar.gz asset yet (CI may still be building).`;
+    setProgress({ phase: "error", message });
+    return { ok: false, message };
   }
 
-  const releaseId = await installTarball(tarballAsset, token, repo);
-  return callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` }).then((result) => ({ ...result, releaseId }));
+  return stageRelease(tag, tarballAsset, token, repo, onProgress);
 }
 
 /**
@@ -319,17 +441,20 @@ export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok:
     return { ok: false, message: `Release "${release.tag_name}" is missing required tarball asset (showflow-<sha>.tar.gz).` };
   }
 
-  const releaseId = await installTarball(tarballAsset, token, repo);
-  return callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` }).then((result) => ({ ...result, releaseId }));
+  return stageRelease(release.tag_name, tarballAsset, token, repo);
 }
 
 /** Shared tarball download + stage-to-disk used by both id- and tag-based install. */
-async function installTarball(tarballAsset: { id: number; name: string }, token: string | undefined, repo: string): Promise<string> {
-  const tarballBytes = await downloadAsset(tarballAsset.id, token, repo);
-  const releaseId = tarballAsset.name.replace(/^showflow-/, "").replace(/\.tar\.gz$/, "");
+async function installTarball(
+  tarballAsset: { id: number; name: string; size?: number; digest?: string | null },
+  token: string | undefined,
+  repo: string,
+  onProgress?: (received: number, total: number | null, attempt: number) => void,
+): Promise<string> {
+  const releaseId = releaseIdFromAsset(tarballAsset.name);
   const dest = `${DOWNLOADS_DIR}/${releaseId}`;
   await mkdir(dest, { recursive: true });
-  await Bun.write(`${dest}/release.tar.gz`, tarballBytes);
+  await downloadAssetToFile(tarballAsset, token, repo, `${dest}/release.tar.gz`, onProgress);
   return releaseId;
 }
 
