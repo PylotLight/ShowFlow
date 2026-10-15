@@ -2,7 +2,7 @@ import { db } from '../db';
 import type { ReasonCode } from './pipeline/reason_codes';
 import type { MediaProbeInfo } from './media_probe';
 import { isSampleFile } from './sample_filter';
-import { matchTier, topTierAtResolution, SOURCE_LABELS, type ReleaseSource, type TierMatch } from './release_quality';
+import { matchTier, topTierAtResolution, parseResolution, parseSource, SOURCE_LABELS, type ReleaseSource, type TierMatch } from './release_quality';
 
 /**
  * Known technical "format families" - a single canonical concept that a
@@ -191,7 +191,15 @@ export class QualityEngine {
     const allowedQualities = db.getProfileQualities(profileId);
     if (allowedQualities.length === 0) return { allowed: true, hasRestriction: false };
     if (!qualityId) return { allowed: false, hasRestriction: true };
-    return { allowed: allowedQualities.some((q: any) => q.id === qualityId), hasRestriction: true };
+    if (allowedQualities.some((q: any) => q.id === qualityId)) return { allowed: true, hasRestriction: true };
+    // A bare resolution tier in the list ("1080p") means "any source at that
+    // resolution". Before source tiers matched, every 1080p release landed on
+    // the bare tier, so this keeps bare-only allow-lists accepting exactly
+    // what they did.
+    const tiers = db.listQualities() as any[];
+    const res = parseResolution(tiers.find(t => t.id === qualityId)?.name);
+    const bareAllowed = res != null && allowedQualities.some((q: any) => parseResolution(q.name) === res && parseSource(q.name) == null);
+    return { allowed: bareAllowed, hasRestriction: true };
   }
 
   /**

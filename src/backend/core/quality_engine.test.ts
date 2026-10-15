@@ -262,6 +262,15 @@ describe("real-world release names", () => {
     expect(rip.rejected).toBe(true);
     expect(rip.rejectCode).toBe('QUALITY_NOT_ALLOWED');
   });
+
+  test("a bare resolution in the allow-list still accepts every source at that resolution", () => {
+    resetQualityTables();
+    db.saveProfile({ id: 'p', name: 'P' });
+    db.addProfileQuality('p', 'q_1080p');
+    expect(qualityEngine.getReleaseScore('Show.S01E01.1080p.WEB-DL.H.264', 'p').rejected).toBe(false);
+    expect(qualityEngine.getReleaseScore('Show.S01E01.1080p.BluRay.REMUX', 'p').rejected).toBe(false);
+    expect(qualityEngine.getReleaseScore('Show.S01E01.720p.WEB-DL', 'p').rejected).toBe(true);
+  });
 });
 
 describe("probed files vs source tiers", () => {
