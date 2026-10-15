@@ -436,7 +436,7 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
                 onCheckedChange={setMonitorNewEpisodes}
                 aria-label="Monitor new episodes"
               />
-              <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Monitor new episodes</span>
+              <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Monitor new episodes</span>
             </label>
           )}
         </div>
