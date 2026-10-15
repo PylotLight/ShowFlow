@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.80] - 2026-10-15
 - **Pipeline explains itself**: new per-episode status (`episode_status`) + `explainEpisode()` sharing the exact auto-grab gates, so the Pipeline opens on a "Needs attention" list with a plain-english reason per episode (waiting for air, release delay, manual only, searched Nx nothing matched + next retry, downloading %, stuck/failed) and one-click fixes. Lanes view is a second tab and drops AVAILABLE. Episode rows get a "why?" popover. `GET /api/pipeline/attention`, `GET /api/episodes/:id/explain`.
 - **Download safety**: upgrades no longer delete the old file before the new one lands (temp + swap, rollback on failure). Multi-episode files must beat every covered episode's file. TorBox failures (error, stalled 15m, no progress 90m) mark the grab failed, blocklist the release and re-search right away. Blocklist UI under Activity → History, `GET/DELETE /api/blocklist`, `POST /api/grabs/:id/fail`.
 - **Cutoff upgrades + season packs**: profiles' cutoff is finally used. A few upgrade searches per cycle (and RSS) until cutoff is met, with a "Cutoff unmet" strip on the dashboard. Finished seasons with 2+ missing episodes try a season pack first.
