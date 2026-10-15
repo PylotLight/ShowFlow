@@ -98,3 +98,46 @@ test('a release GitHub flags as prerelease or draft is skipped before any downlo
     expect(calls.some((u) => u.includes('/releases/assets/'))).toBe(false);
   }
 });
+
+test('never re-stages the release that is running (ETXTBSY guard)', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith('/admin/status')) return Response.json({ phase: 'stable', active: 'cafef00d', activeReleaseId: 'cafef00d' });
+    if (url.endsWith('/releases/tags/v0.1.81')) {
+      return Response.json({ tag_name: 'v0.1.81', assets: [{ id: 7, name: 'showflow-cafef00d.tar.gz', size: 10 }] });
+    }
+    return new Response('nope', { status: 404 });
+  }) as any;
+  const { downloadAndInstallByTag } = await import('./updates_manager');
+  const r = await downloadAndInstallByTag('v0.1.81');
+  expect(r).toMatchObject({ ok: false, alreadyActive: true, releaseId: 'cafef00d' });
+  expect(calls.some((u) => u.includes('/releases/assets/'))).toBe(false);
+  expect(calls.some((u) => u.endsWith('/admin/install-archive'))).toBe(false);
+});
+
+test('listReleases: the running sha is current, only newer releases are updates', async () => {
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    if (url.includes('/releases?')) {
+      return Response.json([
+        { id: 3, tag_name: 'v0.1.82', assets: [{ id: 30, name: 'showflow-bbbb.tar.gz', size: 1 }] },
+        { id: 2, tag_name: 'v0.1.81', assets: [{ id: 20, name: 'showflow-aaaa.tar.gz', size: 1 }] },
+        { id: 1, tag_name: 'v0.1.80', assets: [{ id: 10, name: 'showflow-9999.tar.gz', size: 1 }] },
+      ]);
+    }
+    return new Response('nope', { status: 404 });
+  }) as any;
+  const { listReleases } = await import('./updates_manager');
+  // Stamp unknown ("main"), but the supervisor says we're running aaaa.
+  const a = await listReleases({ version: null, releaseId: 'aaaa' }, 7);
+  expect(a.releases.map((r) => [r.tagName, r.relation, r.isLikelyCurrent])).toEqual([
+    ['v0.1.82', 'unknown', false],
+    ['v0.1.81', 'current', true],
+    ['v0.1.80', 'unknown', false],
+  ]);
+  // Version resolved: same (cached) list, relation recomputed.
+  const b = await listReleases({ version: 'v0.1.81', releaseId: 'aaaa' }, 7);
+  expect(b.releases.map((r) => r.relation)).toEqual(['newer', 'current', 'older']);
+});

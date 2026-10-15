@@ -1,5 +1,8 @@
 import tailwind from "bun-plugin-tailwind";
-import { mkdir } from "node:fs/promises";
+import { resolveBuildStamp } from "./build_stamp";
+
+// Throws (fails the build) on a release build with a non-semver version.
+const STAMP = resolveBuildStamp(process.env);
 
 // Cross-compile target. Default: bun-linux-x64 (glibc/Debian).
 // Set BUILD_TARGET=bun-linux-x64-musl for Alpine runtime.
@@ -18,8 +21,8 @@ const result = await Bun.build({
   },
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
-    "__BUILD_COMMIT__": JSON.stringify(process.env.GITHUB_SHA ?? "development"),
-    "__BUILD_VERSION__": JSON.stringify(process.env.GITHUB_REF_NAME ?? "development"),
+    "__BUILD_COMMIT__": JSON.stringify(STAMP.commit),
+    "__BUILD_VERSION__": JSON.stringify(STAMP.version),
   },
 });
 
@@ -40,9 +43,9 @@ hasher.update(await artifactFile.arrayBuffer());
 const sha256 = hasher.digest("hex");
 
 const manifest = {
-  releaseId: process.env.GITHUB_SHA ?? "development",
-  version: process.env.GITHUB_REF_NAME ?? "development",
-  commit: process.env.GITHUB_SHA ?? "development",
+  releaseId: STAMP.commit,
+  version: STAMP.version,
+  commit: STAMP.commit,
   platform: "linux-x64",
   readyPath: "/internal/ready",
   artifact: {

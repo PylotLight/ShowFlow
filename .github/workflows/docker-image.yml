@@ -73,11 +73,20 @@ jobs:
       digest: ${{ steps.docker_build.outputs.digest }}
 
     steps:
+      # The tag always comes in explicitly: `inputs.tag` for workflow_call /
+      # workflow_dispatch, the release's tag_name for `release: published`.
+      # Never github.ref_name — under workflow_call it's the caller's ref
+      # ("main"), which is how v0.1.81 shipped stamped "main".
       - name: Resolve tag
         id: tag
         env:
-          TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
-        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release tag must look like vX.Y.Z (got '$TAG')"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,14 +108,35 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # SHOWFLOW_* not GITHUB_*: the runner ignores step env overrides of its
+      # own GITHUB_* vars. SHOWFLOW_RELEASE_BUILD=1 makes build.ts refuse a
+      # non-semver version / non-sha commit.
       - name: Build release binary + manifest + supervisor
         env:
-          GITHUB_SHA: ${{ steps.sha.outputs.sha }}
-          GITHUB_REF_NAME: ${{ steps.tag.outputs.tag }}
+          SHOWFLOW_RELEASE_BUILD: "1"
+          SHOWFLOW_VERSION: ${{ steps.tag.outputs.tag }}
+          SHOWFLOW_COMMIT: ${{ steps.sha.outputs.sha }}
           BUILD_TARGET: bun-linux-x64
         run: |
           bun run build.ts
           bun build --compile --minify --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor
+
+      - name: Verify version stamp
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          m() { bun -p "require('./manifest.json').$1"; }
+          v=$(m version); c=$(m commit); r=$(m releaseId)
+          echo "manifest: version=$v commit=$c releaseId=$r"
+          if [ "$v" != "$TAG" ] || [ "$c" != "$SHA" ] || [ "$r" != "$SHA" ]; then
+            echo "::error::manifest.json stamp doesn't match tag $TAG / sha $SHA"
+            exit 1
+          fi
+          if ! grep -aqF "\"$TAG\"" showflow || ! grep -aqF "\"$SHA\"" showflow; then
+            echo "::error::binary isn't stamped with $TAG / $SHA"
+            exit 1
+          fi
 
       - name: Package release assets
         run: tar -czf showflow-${{ steps.sha.outputs.sha }}.tar.gz -C "$PWD" showflow manifest.json -C src/backend/db migrations

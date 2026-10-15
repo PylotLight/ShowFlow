@@ -11,6 +11,7 @@ import {
   currentBusy,
 } from "../core/update_activation";
 import { normalizeAutoActivate } from "../core/update_policy";
+import { getCurrentRelease } from "../core/current_release";
 import { json, errorResponse, checkAdminAuth, unauthorized } from "./_shared";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
@@ -31,8 +32,9 @@ export function updateRoutes(adminToken: string) {
         try {
           const url = new URL(req.url);
           const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
-          const result = await listReleases(BUILD_VERSION, page);
-          return json({ current: { releaseId: BUILD_COMMIT, version: BUILD_VERSION }, ...result });
+          const current = await getCurrentRelease();
+          const result = await listReleases(current, page);
+          return json({ current: { releaseId: current.releaseId ?? BUILD_COMMIT, version: current.display, buildVersion: BUILD_VERSION }, ...result });
         } catch (err) {
           return errorResponse(err, 502);
         }
@@ -154,7 +156,8 @@ export function updateRoutes(adminToken: string) {
         if (!checkAdminAuth(req)) return unauthorized();
         try {
           const supervisor = await getSupervisorStatus();
-          return json({ ...supervisor, appReleaseId: BUILD_COMMIT, appVersion: BUILD_VERSION });
+          const current = await getCurrentRelease();
+          return json({ ...supervisor, appReleaseId: BUILD_COMMIT, appVersion: current.display });
         } catch (err) {
           return errorResponse(err, 502);
         }

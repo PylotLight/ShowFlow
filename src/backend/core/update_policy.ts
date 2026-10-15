@@ -52,6 +52,44 @@ export function compareSemver(a: string, b: string): number | null {
   return 0;
 }
 
+// ---- What we're running ------------------------------------------------------
+
+/** True when `v` is a real release version (`v0.1.81`), not "main"/"development". */
+export function isReleaseVersion(v: string | null | undefined): v is string {
+  return typeof v === 'string' && parseSemver(v) !== null;
+}
+
+/**
+ * The version we're actually on. The compiled-in BUILD_VERSION wins when it's
+ * a real version; a bad stamp ("main" — v0.1.81 shipped like that) falls back
+ * to the active release's manifest, then the tag recorded when that release
+ * was activated. null = unknown (treat as a dev build: never auto-update).
+ */
+export function resolveCurrentVersion(candidates: Array<string | null | undefined>): string | null {
+  for (const c of candidates) if (isReleaseVersion(c)) return c;
+  return null;
+}
+
+export type ReleaseRelation = 'current' | 'newer' | 'older' | 'unknown';
+
+/**
+ * Where a listed release sits relative to what's running. Same sha as the
+ * active release = current, whatever its tag says (that's the ETXTBSY guard:
+ * the running binary is never offered as an update). Otherwise semver vs the
+ * resolved current version; unknown when we can't tell.
+ */
+export function releaseRelation(
+  tag: string,
+  assetReleaseId: string | null,
+  current: { version: string | null; releaseId: string | null },
+): ReleaseRelation {
+  if (assetReleaseId && current.releaseId && assetReleaseId === current.releaseId) return 'current';
+  if (!current.version) return 'unknown';
+  const cmp = compareSemver(tag, current.version);
+  if (cmp === null) return 'unknown';
+  return cmp === 0 ? 'current' : cmp > 0 ? 'newer' : 'older';
+}
+
 /** Newest entry the watcher may auto-download: skips prerelease-suffixed tags
  *  (the atom feed has no prerelease/draft flag, so the tag is the signal; drafts
  *  never show up in the feed at all). */

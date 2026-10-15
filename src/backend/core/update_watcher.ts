@@ -18,8 +18,10 @@ import { backgroundJobs } from "./background_jobs";
 import { downloadAndInstallByTag } from "./updates_manager";
 import { emitConnectSignal } from "./connect/bus";
 import { retryDelayMs, compareSemver, latestStableEntry } from "./update_policy";
+import { getCurrentRelease } from "./current_release";
 
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
+const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 
 const FEED_TTL_MS = 15_000;
 const PENDING_KEY = "updates:pending";
@@ -230,7 +232,12 @@ async function refreshFeed(force: boolean): Promise<boolean> {
 export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<WatchResult> {
   if (inFlight) return inFlight;
   inFlight = (async (): Promise<WatchResult> => {
-    const base: Pick<WatchResult, "currentVersion"> = { currentVersion: BUILD_VERSION };
+    // Resolved, not the raw stamp: a build stamped "main" still knows it's
+    // v0.1.81 via the active release's manifest / activation record. Unknown
+    // stays non-semver, which compareVersions treats as "never update".
+    const current = await getCurrentRelease().catch(() => null);
+    const currentVersion = current?.version ?? BUILD_VERSION;
+    const base: Pick<WatchResult, "currentVersion"> = { currentVersion };
     const url = atomUrl();
     if (!url) return { ...base, status: "not-configured", latestTag: null, pending: getPendingUpdate() };
 
@@ -247,7 +254,7 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
 
     // Feed is newest-first; still guard with an explicit compare so a
     // mis-sourced entry never "downgrades" us.
-    if (compareVersions(latest.tag, BUILD_VERSION) <= 0) {
+    if (compareVersions(latest.tag, currentVersion) <= 0) {
       return { ...base, status: "up-to-date", latestTag: latest.tag, pending: getPendingUpdate() };
     }
 
@@ -283,9 +290,9 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
     const jobId = `update-download:${latest.tag}`;
     backgroundJobs.register({ id: jobId, type: 'update-download', label: `Downloading ShowFlow ${latest.title || latest.tag}`, total: 100, link: '/settings?tab=general' });
     db.logEvent({ type: "update", entityType: "system", entityId: latest.tag, message: `New release ${latest.tag} detected — auto-downloading` });
-    console.log(`[updates] new release ${latest.tag} (current ${BUILD_VERSION}) — auto-downloading`);
+    console.log(`[updates] new release ${latest.tag} (current ${currentVersion}) — auto-downloading`);
 
-    let result: { ok: boolean; message: string; releaseId?: string; skipped?: boolean };
+    let result: { ok: boolean; message: string; releaseId?: string; skipped?: boolean; alreadyActive?: boolean };
     try {
       result = await downloadAndInstallByTag(latest.tag, (received, total) => {
         if (total) backgroundJobs.update(jobId, { completed: Math.floor((received / total) * 100), detail: `${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB` });
@@ -294,6 +301,11 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       // Previously a throw here (404 on the tag, network) escaped the cycle
       // and left the background job spinning as "running" forever.
       result = { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    // The tag resolves to the release we're running: up to date, no retry.
+    if (result.alreadyActive) {
+      backgroundJobs.complete(jobId, result.message);
+      return { ...base, status: "up-to-date", latestTag: latest.tag, pending };
     }
     if (result.skipped) {
       skippedPrerelease = { tag: latest.tag, updated: latest.updated };
@@ -347,7 +359,7 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
  */
 export function reconcilePendingOnBoot(): void {
   const pending = getPendingUpdate();
-  if (pending && compareVersions(pending.tag, BUILD_VERSION) <= 0) {
+  if (pending && (pending.releaseId === BUILD_COMMIT || compareVersions(pending.tag, BUILD_VERSION) <= 0)) {
     clearPendingUpdate();
     console.log(`[updates] cleared pending marker — running release ${pending.tag} matches active version`);
   }
