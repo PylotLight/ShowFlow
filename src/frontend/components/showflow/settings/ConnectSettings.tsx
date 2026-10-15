@@ -1,5 +1,6 @@
-import { BellIcon, CheckIcon, Loader2Icon, PencilIcon, PlusIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
+import { BellIcon, Loader2Icon, PencilIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 import * as React from "react";
+import { notify } from "@frontend/lib/toast";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
@@ -65,14 +66,12 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 const post = <T,>(url: string, body: unknown) =>
   api<T>(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/** Status results surface as toasts (one per new result); renders nothing. */
 function StatusLine({ status }: { status: Status }) {
-  if (!status) return null;
-  return (
-    <p role="status" className={cn("flex items-start gap-1.5 text-sm", status.ok ? "text-emerald-300" : "text-red-300")}>
-      {status.ok ? <CheckIcon className="mt-0.5 size-4 shrink-0" /> : <XIcon className="mt-0.5 size-4 shrink-0" />}
-      <span className="min-w-0 break-words">{status.message || (status.ok ? "OK" : "Failed")}</span>
-    </p>
-  );
+  React.useEffect(() => {
+    if (status) notify(status.ok, status.message || (status.ok ? "OK" : "Failed"));
+  }, [status]);
+  return null;
 }
 
 function blankTarget(type: TargetType = "ntfy"): Target {
@@ -269,7 +268,7 @@ function TargetRow({ target, events, onEdit, onChanged }: {
           )}
         </div>
       </div>
-      {status && <div className="mt-2"><StatusLine status={status} /></div>}
+      <StatusLine status={status} />
     </li>
   );
 }

@@ -14,6 +14,7 @@ import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import { TraceDialog } from "@frontend/components/showflow/TraceDialog";
 import { navigate } from "@frontend/lib/router";
+import { notify } from "@frontend/lib/toast";
 import { usePolling, setIfChanged } from "@frontend/lib/usePolling";
 import { cn } from "@frontend/lib/utils";
 import {
@@ -49,13 +50,11 @@ function StateChip({ item }: { item: ExplainedEpisode }) {
 function AttentionRow({
   item,
   busy,
-  result,
   onAction,
   onTrace,
 }: {
   item: ExplainedEpisode;
   busy: boolean;
-  result: { ok: boolean; message: string } | null;
   onAction: () => void;
   onTrace: () => void;
 }) {
@@ -85,9 +84,6 @@ function AttentionRow({
           <div className="h-1 w-full max-w-xs rounded bg-white/10 overflow-hidden" role="progressbar" aria-valuenow={item.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Download progress">
             <div className="h-full bg-purple-400" style={{ width: `${item.progress}%` }} />
           </div>
-        )}
-        {result && (
-          <p className={cn("text-[12px]", result.ok ? "text-emerald-300" : "text-red-300")} role="status">{result.message}</p>
         )}
       </div>
       <div className="flex items-center gap-3 shrink-0 max-sm:w-full max-sm:justify-between">
@@ -171,7 +167,6 @@ function PipelineAttention({ onTotal }: { onTotal?: (total: number) => void }) {
   const [limit, setLimit] = React.useState(PAGE_SIZE);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const [results, setResults] = React.useState<Record<string, { ok: boolean; message: string }>>({});
   const [traceTarget, setTraceTarget] = React.useState<ExplainedEpisode | null>(null);
   const setPageIfChanged = React.useMemo(() => setIfChanged(setPage), []);
 
@@ -202,7 +197,7 @@ function PipelineAttention({ onTotal }: { onTotal?: (total: number) => void }) {
     const k = itemKey(item);
     setBusy(k);
     const res = await runExplainAction(item);
-    setResults(prev => ({ ...prev, [k]: res }));
+    notify(res.ok, res.message);
     setBusy(null);
     load();
   }
@@ -244,7 +239,6 @@ function PipelineAttention({ onTotal }: { onTotal?: (total: number) => void }) {
                 key={itemKey(item)}
                 item={item}
                 busy={busy === itemKey(item)}
-                result={results[itemKey(item)] ?? null}
                 onAction={() => act(item)}
                 onTrace={() => setTraceTarget(item)}
               />
