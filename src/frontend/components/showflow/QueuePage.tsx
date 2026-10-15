@@ -5,6 +5,7 @@ import { Button } from "@frontend/components/ui/button";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { StatTile } from "@frontend/components/showflow/StatTile";
 import { cn } from "@frontend/lib/utils";
+import { notify } from "@frontend/lib/toast";
 
 interface ActivityEvent {
   id: number;
@@ -59,7 +60,8 @@ function QueuePage() {
   const [busy, setBusy] = React.useState(false);
   const [rescanning, setRescanning] = React.useState(false);
   const [cancelingId, setCancelingId] = React.useState<string | null>(null);
-  const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
+  // Transient results go to the app toast; no inline status line.
+  const setMsg = (m: { ok: boolean; text: string }) => notify(m.ok, m.text);
 
   const refresh = React.useCallback(() => {
     fetch("/api/system/status").then((r) => r.json()).then((d) => setWatching(d.watching)).catch(() => setWatching(null));
@@ -72,12 +74,6 @@ function QueuePage() {
     const interval = setInterval(refresh, 10_000);
     return () => clearInterval(interval);
   }, [refresh]);
-
-  React.useEffect(() => {
-    if (!msg) return;
-    const t = setTimeout(() => setMsg(null), 4000);
-    return () => clearTimeout(t);
-  }, [msg]);
 
   async function toggle() {
     setBusy(true);
@@ -145,7 +141,7 @@ function QueuePage() {
   return (
     <div className="space-y-4">
       {/* Header + watcher control */}
-      <GlassPanel className="flex items-center justify-between p-5">
+      <GlassPanel className="flex flex-wrap items-center justify-between gap-3 p-5">
         <div className="flex items-center gap-3">
           <div className="relative flex items-center justify-center">
             <RadioIcon className={cn("size-5 z-10", watching ? "text-signal" : "text-muted-foreground")} />
@@ -159,9 +155,6 @@ function QueuePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {msg && (
-            <span className={cn("text-xs", msg.ok ? "text-emerald-400" : "text-red-400")}>{msg.text}</span>
-          )}
           <Button variant="outline" size="sm" onClick={rescan} disabled={rescanning || !watching}>
             {rescanning ? <Loader2Icon className="size-3.5 animate-spin" /> : <RefreshCwIcon className="size-3.5" />}
             Rescan Folder

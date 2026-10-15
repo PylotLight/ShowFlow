@@ -1,3 +1,4 @@
+import { notify } from "@frontend/lib/toast";
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
@@ -389,7 +390,6 @@ function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (sh
   const [shows, setShows] = React.useState<ShowSummary[]>([]);
   const [grabbing, setGrabbing] = React.useState<string | null>(null);
   const [grabbedKeys, setGrabbedKeys] = React.useState<Set<string>>(new Set());
-  const [grabMsg, setGrabMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [searchTarget, setSearchTarget] = React.useState<KanbanEpisode | null>(null);
   const [traceTarget, setTraceTarget] = React.useState<KanbanEpisode | null>(null);
   const [diagnoseTarget, setDiagnoseTarget] = React.useState<KanbanEpisode | null>(null);
@@ -406,12 +406,6 @@ function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (sh
   }, []);
 
   usePolling(load, 15_000);
-
-  React.useEffect(() => {
-    if (!grabMsg) return;
-    const t = setTimeout(() => setGrabMsg(null), 4000);
-    return () => clearTimeout(t);
-  }, [grabMsg]);
 
   function findShow(showId: string) {
     return shows.find(s => s.id === showId);
@@ -433,10 +427,10 @@ function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (sh
       const res = await fetch(`/api/shows/${ep.showId}/seasons/${ep.seasonNumber}/episodes/${ep.episodeNumber}/grab`, { method: "POST" });
       const result = await res.json();
       const ok = !!result.success;
-      setGrabMsg({ ok, text: result.message || (ok ? `Grabbed "${ep.showTitle}" S${ep.seasonNumber}E${ep.episodeNumber}` : "No matching release found") });
+      notify(ok, result.message || (ok ? `Grabbed "${ep.showTitle}" S${ep.seasonNumber}E${ep.episodeNumber}` : "No matching release found"));
       if (ok) setGrabbedKeys(prev => new Set(prev).add(k));
     } catch {
-      setGrabMsg({ ok: false, text: "Grab failed — check your indexer connection" });
+      notify(false, "Grab failed — check your indexer connection");
     } finally {
       setGrabbing(null);
     }
@@ -471,11 +465,6 @@ function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (sh
           {attentionCount > 0 && (
             <span className="rounded-full bg-accent-amber/15 border border-accent-amber/20 px-3 py-1 text-[11px] font-mono text-accent-amber">
               {attentionCount} need{attentionCount !== 1 ? "" : "s"} attention
-            </span>
-          )}
-          {grabMsg && (
-            <span className={cn("text-xs", grabMsg.ok ? "text-emerald-400" : "text-red-400")}>
-              {grabMsg.text}
             </span>
           )}
         </div>
@@ -563,7 +552,7 @@ function PipelineKanban({ onSelectShow, embedded = false }: { onSelectShow?: (sh
           season={searchTarget.seasonNumber}
           episode={searchTarget.episodeNumber}
           onGrabbed={(message, success) => {
-            setGrabMsg({ ok: success, text: message });
+            notify(success, message);
             setGrabbedKeys(prev => new Set(prev).add(epKey(searchTarget)));
           }}
         />

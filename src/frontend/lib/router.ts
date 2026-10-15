@@ -4,10 +4,14 @@ import * as React from "react";
  * Tiny hash router. Hash routing means the server keeps serving index.html
  * at "/*" untouched, while refresh / back / forward / deep links all work.
  *
- *   #/dashboard  #/calendar  #/queue  #/library  #/pipeline  #/history
- *   #/search  #/health  #/manual-import  #/sources
+ *   #/dashboard  #/calendar  #/library  #/pipeline  #/search
+ *   #/activity  #/activity/:tab   (now | history | manual-import | health)
  *   #/settings  #/settings/:tab  (optional ?section=<id> to scroll to)
  *   #/show/:id   (show detail, rendered over the page you came from)
+ *
+ * Legacy pages redirect: #/queue -> #/activity/now, #/history,
+ * #/manual-import, #/health -> the matching Activity tab, #/sources ->
+ * #/settings/sources, #/settings?tab=health -> #/activity/health.
  *
  * Unknown or empty hashes resolve to the dashboard.
  */
@@ -17,42 +21,44 @@ import * as React from "react";
 export type PageId =
   | "dashboard"
   | "agenda"
-  | "queue"
+  | "activity"
   | "library"
   | "pipeline"
-  | "history"
   | "search"
-  | "sources"
-  | "settings"
-  | "manual-import"
-  | "health";
+  | "settings";
 
 export const PAGE_LABELS: Record<PageId, string> = {
   dashboard: "Dashboard",
   agenda: "Calendar",
-  queue: "Queue",
+  activity: "Activity",
   library: "Library",
   pipeline: "Pipeline",
-  history: "History",
   search: "Indexer Search",
-  sources: "Sources",
   settings: "Settings",
-  "manual-import": "Manual Import",
-  health: "Health",
 };
+
+/** Tabs of the Activity page, in display order. First one is the default. */
+export const ACTIVITY_TABS = [
+  { id: "now", label: "Now" },
+  { id: "history", label: "History" },
+  { id: "manual-import", label: "Manual Import" },
+  { id: "health", label: "Health" },
+] as const;
+export type ActivityTab = (typeof ACTIVITY_TABS)[number]["id"];
+export const DEFAULT_ACTIVITY_TAB: ActivityTab = "now";
+
+function isActivityTab(t: string | undefined | null): t is ActivityTab {
+  return !!t && ACTIVITY_TABS.some((x) => x.id === t);
+}
 
 const PAGE_TO_PATH: Record<PageId, string> = {
   dashboard: "dashboard",
   agenda: "calendar",
-  queue: "queue",
+  activity: "activity",
   library: "library",
   pipeline: "pipeline",
-  history: "history",
   search: "search",
-  sources: "sources",
   settings: "settings",
-  "manual-import": "manual-import",
-  health: "health",
 };
 
 const PATH_TO_PAGE: Record<string, PageId> = {
@@ -60,11 +66,24 @@ const PATH_TO_PAGE: Record<string, PageId> = {
   agenda: "agenda",
 };
 
-export type Route =
-  | { kind: "page"; page: PageId; settingsTab?: string; section?: string }
-  | { kind: "show"; showId: string };
+/** Old top-level pages that now live inside Activity or Settings. */
+const LEGACY_REDIRECTS: Record<string, PageRoute> = {
+  queue: { kind: "page", page: "activity", activityTab: "now" },
+  history: { kind: "page", page: "activity", activityTab: "history" },
+  "manual-import": { kind: "page", page: "activity", activityTab: "manual-import" },
+  health: { kind: "page", page: "activity", activityTab: "health" },
+  sources: { kind: "page", page: "settings", settingsTab: "sources" },
+};
+
+export type PageRoute = { kind: "page"; page: PageId; settingsTab?: string; section?: string; activityTab?: ActivityTab };
+export type Route = PageRoute | { kind: "show"; showId: string };
 
 export const DEFAULT_ROUTE: Route = { kind: "page", page: "dashboard" };
+
+/** True for any first path segment the router understands (incl. redirects). */
+export function isKnownPath(head: string): boolean {
+  return head === "show" || !!PATH_TO_PAGE[head] || !!LEGACY_REDIRECTS[head];
+}
 
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#/, "").replace(/^\/+/, "");
@@ -80,14 +99,23 @@ export function parseHash(hash: string): Route {
     return second ? { kind: "show", showId: second } : DEFAULT_ROUTE;
   }
 
+  const legacy = LEGACY_REDIRECTS[head];
+  if (legacy) return { ...legacy };
+
   const page = PATH_TO_PAGE[head];
   if (!page) return DEFAULT_ROUTE;
 
   if (page === "settings") {
     // Accept both #/settings/indexers and the legacy #/settings?tab=indexers.
     const settingsTab = second ?? query.get("tab") ?? undefined;
+    // Health used to be linked as a settings tab; it lives in Activity now.
+    if (settingsTab === "health") return { kind: "page", page: "activity", activityTab: "health" };
     const section = query.get("section") ?? undefined;
     return { kind: "page", page, ...(settingsTab ? { settingsTab } : {}), ...(section ? { section } : {}) };
+  }
+  if (page === "activity") {
+    const tab = second ?? query.get("tab");
+    return { kind: "page", page, activityTab: isActivityTab(tab) ? tab : DEFAULT_ACTIVITY_TAB };
   }
   return { kind: "page", page };
 }
@@ -99,11 +127,18 @@ export function routeToHash(route: Route): string {
     hash += `/${encodeURIComponent(route.settingsTab)}`;
     if (route.section) hash += `?section=${encodeURIComponent(route.section)}`;
   }
+  if (route.page === "activity") {
+    hash += `/${route.activityTab ?? DEFAULT_ACTIVITY_TAB}`;
+  }
   return hash;
 }
 
 export function pageHash(page: PageId, settingsTab?: string, section?: string): string {
   return routeToHash({ kind: "page", page, settingsTab, section });
+}
+
+export function activityHash(tab: ActivityTab = DEFAULT_ACTIVITY_TAB): string {
+  return routeToHash({ kind: "page", page: "activity", activityTab: tab });
 }
 
 /**
@@ -116,7 +151,7 @@ export function linkToHash(link: string): string | null {
   if (!link.startsWith("/") || link.startsWith("//") || link.startsWith("/api/")) return null;
   const [path = "", query = ""] = link.slice(1).split("?");
   const head = path.split("/")[0] ?? "";
-  if (head !== "show" && !PATH_TO_PAGE[head]) return null;
+  if (!isKnownPath(head)) return null;
   return routeToHash(parseHash(`#/${path}${query ? `?${query}` : ""}`));
 }
 

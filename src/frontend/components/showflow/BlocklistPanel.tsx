@@ -2,7 +2,9 @@ import { BanIcon, ChevronDownIcon, Trash2Icon, XCircleIcon } from "lucide-react"
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { confirmDialog, type ConfirmOptions } from "@frontend/components/ui/confirm";
 import { formatImportDate } from "@frontend/lib/airtime";
+import { notify } from "@frontend/lib/toast";
 import { usePolling, setIfChanged } from "@frontend/lib/usePolling";
 import { cn } from "@frontend/lib/utils";
 
@@ -60,9 +62,7 @@ export function BlocklistPanel() {
   const [tab, setTab] = React.useState<"grabs" | "blocklist">("grabs");
   const [grabs, setGrabs] = React.useState<GrabItem[]>([]);
   const [blocks, setBlocks] = React.useState<BlockItem[]>([]);
-  const [armed, setArmed] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -79,20 +79,16 @@ export function BlocklistPanel() {
 
   usePolling(load, 30_000);
 
-  async function act(key: string, url: string, method: "POST" | "DELETE") {
-    if (armed !== key) {
-      setArmed(key);
-      return;
-    }
-    setArmed(null);
+  async function act(key: string, url: string, method: "POST" | "DELETE", confirm: ConfirmOptions, done: string) {
+    if (!(await confirmDialog(confirm))) return;
     setBusy(key);
-    setError(null);
     try {
       const res = await fetch(url, { method });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `HTTP ${res.status}`);
+      notify(true, done);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      notify(false, "Blocklist action failed", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -139,19 +135,19 @@ export function BlocklistPanel() {
             ))}
             {tab === "blocklist" && blocks.length > 0 && (
               <button
-                onClick={() => act("clear", "/api/blocklist", "DELETE")}
+                onClick={() => act("clear", "/api/blocklist", "DELETE",
+                  { title: `Clear all ${blocks.length} blocklisted release${blocks.length === 1 ? "" : "s"}?`, description: "They can be grabbed again on the next search.", confirmLabel: "Clear all", destructive: true },
+                  "Blocklist cleared")}
                 disabled={busy === "clear"}
                 className={cn(
                   "ml-auto rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide border border-white/10 text-white/70 hover:text-white hover:bg-white/[0.06]",
-                  armed === "clear" && "border-red-300/60 text-red-200",
                   focusRing,
                 )}
               >
-                {armed === "clear" ? "Click again to clear all" : "Clear all"}
+                Clear all
               </button>
             )}
           </div>
-          {error && <div className="px-5 pt-2 text-xs text-red-300">{error}</div>}
 
           <div className="max-h-80 overflow-y-auto px-3 py-2 space-y-0.5">
             {tab === "grabs" ? (
@@ -176,17 +172,18 @@ export function BlocklistPanel() {
                       {g.grabbedAt && <span className="text-[11px] font-mono text-white/60 shrink-0">{formatImportDate(g.grabbedAt)}</span>}
                       {canFail && (
                         <button
-                          onClick={() => act(key, `/api/grabs/${g.id}/fail`, "POST")}
+                          onClick={() => act(key, `/api/grabs/${g.id}/fail`, "POST",
+                            { title: "Mark failed & blocklist?", description: g.releaseTitle, confirmLabel: "Mark failed", destructive: true },
+                            "Marked failed and blocklisted, re-searching")}
                           disabled={busy === key}
                           aria-label={`Mark ${g.releaseTitle} failed and blocklist it`}
                           className={cn(
                             "flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 font-mono text-[11px] uppercase tracking-wide text-white/70 hover:text-red-200 hover:border-red-300/50",
-                            armed === key && "border-red-300/60 text-red-200",
                             focusRing,
                           )}
                         >
                           <XCircleIcon className="size-3.5" />
-                          {armed === key ? "Confirm" : "Mark failed & blocklist"}
+                          Mark failed &amp; blocklist
                         </button>
                       )}
                     </div>
@@ -215,18 +212,18 @@ export function BlocklistPanel() {
                     )}
                     <span className="text-[11px] font-mono text-white/60 shrink-0">{formatImportDate(b.createdAt)}</span>
                     <button
-                      onClick={() => act(key, `/api/blocklist/${b.id}`, "DELETE")}
+                      onClick={() => act(key, `/api/blocklist/${b.id}`, "DELETE",
+                        { title: "Remove from blocklist?", description: b.releaseTitle, confirmLabel: "Remove" },
+                        "Removed from blocklist")}
                       disabled={busy === key}
-                      aria-label={armed === key ? `Confirm removing ${b.releaseTitle} from the blocklist` : `Remove ${b.releaseTitle} from the blocklist`}
+                      aria-label={`Remove ${b.releaseTitle} from the blocklist`}
                       title="Remove from blocklist"
                       className={cn(
                         "flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-1 text-white/70 hover:text-white hover:bg-white/[0.06]",
-                        armed === key && "border-red-300/60 text-red-200",
                         focusRing,
                       )}
                     >
                       <Trash2Icon className="size-3.5" />
-                      {armed === key && <span className="font-mono text-[11px] uppercase">Confirm</span>}
                     </button>
                   </div>
                 );

@@ -1,17 +1,12 @@
 import {
   LayoutDashboard,
   Calendar,
-  Download,
-  History,
+  Activity,
   Library,
   Layers,
-  HardDrive,
   Settings,
   CheckCircle2,
   ChevronDown,
-  FolderOpen,
-  ExternalLink,
-  Heart,
   Search,
   MoreHorizontal,
   X,
@@ -25,6 +20,15 @@ import type { PageId } from "@frontend/lib/router";
 import { usePolling } from "@frontend/lib/usePolling";
 
 export type NavItem = PageId;
+
+type NavDef = {
+  id: NavItem;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: number;
+  badgeHint?: string;
+  badgeTitle?: string;
+};
 
 interface SidebarProps {
   activeItem: NavItem;
@@ -101,23 +105,28 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
     pollManual();
   }, 15_000);
 
-  const mainNavs = [
+  // Activity = live queue + History + Manual Import + Health (tabs). One
+  // badge: active downloads plus files waiting for a manual import.
+  const activityBadge = queueCount + manualCount;
+  const activityHint = [
+    queueCount > 0 ? `${queueCount} active download${queueCount !== 1 ? "s" : ""}` : "",
+    manualCount > 0 ? `${manualCount} file${manualCount !== 1 ? "s" : ""} awaiting import` : "",
+  ].filter(Boolean).join(", ");
+  const activityNav: NavDef = { id: "activity" as NavItem, label: "Activity", icon: Activity, badge: activityBadge, badgeTitle: activityHint };
+
+  const mainNavs: NavDef[] = [
     { id: "dashboard" as NavItem, label: "Dashboard", icon: LayoutDashboard },
     { id: "agenda" as NavItem, label: "Calendar", icon: Calendar },
-    { id: "queue" as NavItem, label: "Queue", icon: Download, badge: queueCount, badgeHint: "active downloads" },
+    activityNav,
   ];
 
-  const collectionNavs = [
+  const collectionNavs: NavDef[] = [
     { id: "library" as NavItem, label: "Library", icon: Library },
     { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
-    { id: "history" as NavItem, label: "History", icon: History },
     { id: "search" as NavItem, label: "Indexer Search", icon: Search },
   ];
 
-  const manageNavs = [
-    { id: "health" as NavItem, label: "Health", icon: Heart },
-    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount, badgeHint: "files awaiting import" },
-    { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
+  const manageNavs: NavDef[] = [
     { id: "settings" as NavItem, label: "Settings", icon: Settings },
   ];
 
@@ -128,6 +137,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
     { id: "indexers", label: "Indexers" },
     { id: "integrations", label: "Integrations" },
     { id: "connect", label: "Connect" },
+    { id: "sources", label: "Source Status" },
     { id: "quality", label: "Quality" },
     { id: "downloads", label: "Downloads" },
     { id: "tasks", label: "Tasks" },
@@ -135,20 +145,16 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
     { id: "debug", label: "Debug" },
   ];
 
-  const mobilePrimary = [
+  const mobilePrimary: NavDef[] = [
     { id: "dashboard" as NavItem, label: "Dashboard", icon: LayoutDashboard },
     { id: "agenda" as NavItem, label: "Calendar", icon: Calendar },
     { id: "library" as NavItem, label: "Library", icon: Library },
-    { id: "queue" as NavItem, label: "Queue", icon: Download, badge: queueCount, badgeHint: "active downloads" },
+    activityNav,
   ];
 
-  const mobileMore = [
+  const mobileMore: NavDef[] = [
     { id: "pipeline" as NavItem, label: "Pipeline", icon: Layers, badge: attentionCount, badgeHint: "items need attention" },
-    { id: "history" as NavItem, label: "History", icon: History },
     { id: "search" as NavItem, label: "Indexer Search", icon: Search },
-    { id: "health" as NavItem, label: "Health", icon: Heart },
-    { id: "manual-import" as NavItem, label: "Manual Import", icon: FolderOpen, badge: manualCount, badgeHint: "files awaiting import" },
-    { id: "sources" as NavItem, label: "Sources", icon: HardDrive },
     { id: "settings" as NavItem, label: "Settings", icon: Settings },
   ];
 
@@ -200,7 +206,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
                 <span className="flex-1 truncate hidden lg:inline">{nav.label}</span>
                 {nav.badge !== undefined && nav.badge > 0 && (
                   <span
-                    title={"badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
+                    title={"badgeTitle" in nav && nav.badgeTitle ? nav.badgeTitle : "badgeHint" in nav && nav.badgeHint ? `${nav.badge} ${nav.badgeHint}` : `${nav.badge}`}
                     className={cn(
                       "rounded px-1.5 py-0.5 text-caption font-mono font-bold leading-none",
                       activeItem === nav.id ? "bg-signal text-signal-foreground" : "bg-white/10 text-white/80"

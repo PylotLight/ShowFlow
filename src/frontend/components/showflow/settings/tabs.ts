@@ -1,5 +1,5 @@
 import {
-  Archive, BarChart3, BellRing, Bug, Clock, Database, Download, FileText, Gauge, KeyRound, Palette, Plug, Settings2,
+  Archive, BarChart3, BellRing, Bug, Clock, Database, Download, FileText, Gauge, HardDrive, KeyRound, Palette, Plug, Settings2,
 } from "lucide-react";
 import type * as React from "react";
 
@@ -32,6 +32,8 @@ export const SETTINGS_GROUPS: { label: string; tabs: SettingsTabDef[] }[] = [
       { id: "indexers", label: "Indexers", icon: Database, mobileStyle: "sheet" },
       { id: "integrations", label: "Integrations", icon: Plug, mobileStyle: "sheet" },
       { id: "connect", label: "Connect", icon: BellRing, mobileStyle: "drill" },
+      // Indexer/source status overview (was its own top-level page; #/sources redirects here).
+      { id: "sources", label: "Source Status", icon: HardDrive, mobileStyle: "drill" },
     ],
   },
   {

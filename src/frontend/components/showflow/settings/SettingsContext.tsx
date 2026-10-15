@@ -1,5 +1,7 @@
 import * as React from "react";
 
+import { notify } from "@frontend/lib/toast";
+
 export type SaveMsg = { ok: boolean; text: string } | null;
 
 interface SettingsContextValue {
@@ -9,11 +11,13 @@ interface SettingsContextValue {
   updateApiKey: (provider: string, value: string) => void;
   /** Parsed value of a /api/settings row (prowlarr, sonarr, ...), or undefined. */
   getSetting: (key: string) => any;
-  /** Header save indicator, shared by every tab. */
+  /** Header save spinner, shared by every tab. */
   saving: string | null;
   setSaving: React.Dispatch<React.SetStateAction<string | null>>;
+  /** Always null now: results go to the app toast instead of a header line. */
   saveMsg: SaveMsg;
-  setSaveMsg: React.Dispatch<React.SetStateAction<SaveMsg>>;
+  /** Report a save result. Non-null messages pop a toast; null is a no-op. */
+  setSaveMsg: (msg: SaveMsg) => void;
 }
 
 const SettingsContext = React.createContext<SettingsContextValue | null>(null);
@@ -50,7 +54,10 @@ export function SettingsProvider({ config, setConfig, settingsRows, children }: 
   children: React.ReactNode;
 }) {
   const [saving, setSaving] = React.useState<string | null>(null);
-  const [saveMsg, setSaveMsg] = React.useState<SaveMsg>(null);
+  const saveMsg: SaveMsg = null;
+  const setSaveMsg = React.useCallback((msg: SaveMsg) => {
+    if (msg) notify(msg.ok, msg.text);
+  }, []);
 
   const saveConfig = React.useCallback((updates: Record<string, any>) => {
     setSaving("config");
@@ -68,7 +75,7 @@ export function SettingsProvider({ config, setConfig, settingsRows, children }: 
       }
     }).catch(() => setSaveMsg({ ok: false, text: "Network error" }))
       .finally(() => setSaving(null));
-  }, [setConfig]);
+  }, [setConfig, setSaveMsg]);
 
   const updateApiKey = React.useCallback((provider: string, value: string) => {
     const newKeys = { ...(config.apiKeys || {}), [provider]: value || undefined };
@@ -84,7 +91,7 @@ export function SettingsProvider({ config, setConfig, settingsRows, children }: 
 
   const value = React.useMemo(
     () => ({ config, saveConfig, updateApiKey, getSetting, saving, setSaving, saveMsg, setSaveMsg }),
-    [config, saveConfig, updateApiKey, getSetting, saving, saveMsg],
+    [config, saveConfig, updateApiKey, getSetting, saving, saveMsg, setSaveMsg],
   );
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

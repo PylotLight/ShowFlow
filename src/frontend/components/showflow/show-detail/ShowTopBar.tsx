@@ -3,10 +3,9 @@ import * as React from "react";
 
 import { focusRing } from "./format";
 
-/** Sticky slim bar: back, breadcrumb title, transient status, expand/close. */
-export function ShowTopBar({ title, status, onBack, modal, onToggleExpand, expanded }: {
+/** Sticky slim bar: back, breadcrumb title, expand/close. Action results are toasts. */
+export function ShowTopBar({ title, onBack, modal, onToggleExpand, expanded }: {
   title: string;
-  status: { ok: boolean; text: string } | null;
   onBack: () => void;
   modal: boolean;
   onToggleExpand?: () => void;
@@ -25,11 +24,7 @@ export function ShowTopBar({ title, status, onBack, modal, onToggleExpand, expan
       <span className="text-white/20 text-xs" aria-hidden>/</span>
       <span className="text-foreground text-sm font-medium truncate">{title}</span>
 
-      <span role="status" aria-live="polite" className="min-w-0 flex-1 truncate">
-        {status && (
-          <span className={`ml-1 text-xs ${status.ok ? "text-emerald-400" : "text-red-400"}`}>{status.text}</span>
-        )}
-      </span>
+      <span className="min-w-0 flex-1" />
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
         {onToggleExpand && (

@@ -49,7 +49,7 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
   onToggleExpand?: () => void;
   expanded?: boolean;
 }) {
-  const { status, flashStatus } = useStatusFlash();
+  const { flashStatus } = useStatusFlash();
   const episodes = useShowEpisodes(show, flashStatus);
   const config = useShowConfig(show, flashStatus);
 
@@ -133,7 +133,6 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto relative">
       <ShowTopBar
         title={show.title}
-        status={status}
         onBack={onBack}
         modal={modal}
         onToggleExpand={onToggleExpand}

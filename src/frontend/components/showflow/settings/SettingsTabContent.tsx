@@ -5,6 +5,8 @@ import { BackupPanel } from "../BackupPanel";
 import { DebugSettings } from "../DebugSettings";
 import { NamingTab } from "../NamingTab";
 import { QualityProfilesTab } from "../QualityProfiles";
+import { SourcesPage } from "../SourcesPage";
+import { navigate, pageHash } from "@frontend/lib/router";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ConnectSettings } from "./ConnectSettings";
 import { DownloadsSettings } from "./DownloadsSettings";
@@ -40,6 +42,7 @@ export function SettingsTabContent({ id, scrollToSection, onReRunWizard }: {
     case "backup": return <BackupPanel />;
     case "analytics": return <AnalyticsPanel />;
     case "debug": return <DebugSettings />;
+    case "sources": return <SourcesPage onOpenSettings={() => navigate(pageHash("settings", "indexers"))} />;
     default: return null;
   }
 }

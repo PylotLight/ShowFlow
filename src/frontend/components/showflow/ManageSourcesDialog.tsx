@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@frontend/components/ui/tooltip";
 import { cn } from "@frontend/lib/utils";
+import { confirmDialog } from "@frontend/components/ui/confirm";
 
 interface ProviderRoles {
   metadata: boolean;
@@ -228,7 +229,13 @@ function ManageSourcesDialog({
   }
 
   async function handleRemove(type: string) {
-    if (!confirm(`Remove ${type} from "${showTitle}"?`)) return;
+    const ok = await confirmDialog({
+      title: `Remove ${type}?`,
+      description: `Unlink ${type} from "${showTitle}".`,
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await fetch(`/api/shows/${showId}/providers/${type}`, { method: "DELETE" });
       const updated = await fetch(`/api/shows/${showId}/providers`).then(r => r.json());

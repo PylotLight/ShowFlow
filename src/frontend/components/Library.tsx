@@ -7,6 +7,8 @@ import { BulkUpdateDialog } from "@frontend/components/showflow/BulkUpdateDialog
 import { DuplicatesDialog } from "@frontend/components/showflow/DuplicatesDialog";
 import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { cn } from "@frontend/lib/utils";
+import { confirmDialog } from "@frontend/components/ui/confirm";
+import { toast } from "@frontend/lib/toast";
 
 const POSTER_SIZE_KEY = 'showflow-poster-size';
 const MIN_POSTER_SIZE = 120;
@@ -183,8 +185,14 @@ export function Library({
     const count = selectedIds.size;
     if (count === 0) return;
     const names = shows?.filter((s) => selectedIds.has(s.id)).map((s) => s.title) ?? [];
-    const msg = `Remove ${count} show${count !== 1 ? "s" : ""}?\n\n${names.join("\n")}`;
-    if (!confirm(msg)) return;
+    const shown = names.slice(0, 10).join("\n") + (names.length > 10 ? `\n…and ${names.length - 10} more` : "");
+    const ok = await confirmDialog({
+      title: `Remove ${count} show${count !== 1 ? "s" : ""}?`,
+      description: shown,
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     setRemoving(true);
     try {
       const res = await fetch("/api/shows/bulk-delete", {
@@ -195,8 +203,9 @@ export function Library({
       if (!res.ok) throw new Error("Failed to remove shows");
       setShows((prev) => (prev ? prev.filter((s) => !selectedIds.has(s.id)) : prev));
       setSelectedIds(new Set());
+      toast.success(`Removed ${count} show${count !== 1 ? "s" : ""}`);
     } catch (err) {
-      alert(`Error removing shows: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error("Error removing shows", { description: err instanceof Error ? err.message : String(err) });
     } finally {
       setRemoving(false);
     }
