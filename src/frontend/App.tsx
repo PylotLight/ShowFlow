@@ -252,7 +252,9 @@ export function App() {
             className="order-last flex w-full min-w-0 items-center gap-2 empty:hidden md:order-none md:w-auto md:flex-1 md:gap-4"
           />
 
-          <div className="flex shrink-0 items-center gap-1">
+          {/* ml-auto keeps the global controls pinned right even when the
+              page-actions slot is empty (it's empty:hidden, so it can't push). */}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
