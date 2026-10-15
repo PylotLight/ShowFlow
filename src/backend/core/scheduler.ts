@@ -3,7 +3,8 @@ import { SyncManager } from './sync_manager';
 import { LibraryScanner } from './library_scanner';
 import { debugLog } from './debug';
 import { maybeForcedGc } from './memory_guard';
-import { runBackup, normalizeKeepCount, BACKUP_KEEP_COUNT_SETTING, DEFAULT_BACKUP_KEEP_COUNT } from "./backup";
+import { runBackup, loadRetention, DEFAULT_RETENTION } from "./backup";
+import { recordRssOutcome, recordAutoGrabRun, cadenceState, shouldRunAutoGrab } from "./auto_grab_cadence";
 import { runAutoGrabCycle } from './auto_grabber';
 import { runRssSyncCycle } from './rss_sync';
 import { JellyfinSync } from '../providers/jellyfin/sync';
@@ -31,6 +32,8 @@ export type TaskName =
  *  TorBox client so the Queue page sees in-flight downloads. */
 export interface TaskContext {
   getDownloadManager?: () => DownloadManager | null;
+  /** Set for "run now" from the UI: cadence throttles never apply. */
+  manual?: boolean;
 }
 
 export interface TaskDefinition {
@@ -77,11 +80,11 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     intervalMinutes: 1440, // Daily
     defaultEnabled: true,
     action: async () => {
-      let keep = DEFAULT_BACKUP_KEEP_COUNT;
+      let retention = DEFAULT_RETENTION;
       try {
-        keep = normalizeKeepCount(db.getSetting(BACKUP_KEEP_COUNT_SETTING) ?? DEFAULT_BACKUP_KEEP_COUNT);
+        retention = loadRetention((k) => db.getSetting(k));
       } catch {}
-      const result = await runBackup('backups', keep);
+      const result = await runBackup('backups', retention, db.imagesDir);
       debugLog(`Task backup complete: ${(result.dbSize / 1024 / 1024).toFixed(1)} MB DB, ${(result.sqlSize / 1024).toFixed(1)} KB seed`);
     },
   },
@@ -93,7 +96,13 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     intervalMinutes: 15, // Sonarr's default RssSync interval
     defaultEnabled: true,
     action: async (config, ctx) => {
-      await runRssSyncCycle(config, ctx.getDownloadManager?.() ?? null);
+      try {
+        const r = await runRssSyncCycle(config, ctx.getDownloadManager?.() ?? null);
+        recordRssOutcome({ at: Date.now(), feeds: r.feeds, feedErrors: r.feedErrors, threw: false });
+      } catch (err) {
+        recordRssOutcome({ at: Date.now(), feeds: 0, feedErrors: 0, threw: true });
+        throw err;
+      }
     },
   },
   'auto-grab': {
@@ -104,6 +113,27 @@ const TASKS: Record<TaskName, TaskDefinition> = {
     intervalMinutes: 15, // Sonarr-equivalent RssSync cadence; a no-op cycle is one cheap SQL query
     defaultEnabled: true,
     action: async (config, ctx) => {
+      // While RSS sync is healthy this sweep is only a backfill, so it backs
+      // off to hourly; it returns to every tick as soon as RSS is disabled,
+      // stale or failing (core/auto_grab_cadence.ts).
+      const tasks = db.listTasks();
+      const rssTask = tasks.find(t => t.name === 'rss-sync');
+      const self = tasks.find(t => t.name === 'auto-grab');
+      const { lastRss, lastAutoGrabRun } = cadenceState();
+      const decision = shouldRunAutoGrab({
+        now: Date.now(),
+        rssEnabled: !!rssTask && rssTask.enabled !== 0,
+        rssIntervalMinutes: rssTask?.interval_minutes ?? 15,
+        rss: lastRss,
+        configuredMinutes: self?.interval_minutes ?? 15,
+        lastRunAt: lastAutoGrabRun,
+        manual: ctx.manual,
+      });
+      if (!decision.run) {
+        debugLog(`Auto-grab: RSS sync healthy, backfill sweep deferred (every ${decision.intervalMinutes} min)`);
+        return;
+      }
+      recordAutoGrabRun();
       // Route TorBox grabs through the watcher's long-lived client when it's
       // running so the Queue page and background completion tracking see them.
       await runAutoGrabCycle(config, ctx.getDownloadManager?.() ?? null);
@@ -444,7 +474,7 @@ export class Scheduler {
     this.running.add(name as TaskName);
     try {
       const startTime = Date.now();
-      await taskDef.action(this.config, this.ctx);
+      await taskDef.action(this.config, { ...this.ctx, manual: true });
       const duration = Date.now() - startTime;
       
       // Update execution time but keep the existing schedule

@@ -13,6 +13,7 @@ function PosterImage({
   alt,
   className,
   size,
+  version,
 }: {
   source?: string;
   id?: string;
@@ -22,10 +23,18 @@ function PosterImage({
   /** "card" serves the lightweight variant (TMDB w342 / AniList medium) —
    *  plenty for grid cells and agenda thumbs at a fraction of the bytes. */
   size?: "card" | "full";
+  /** Content hash of the cached poster (from the API). Appended as ?v= so
+   *  the server can mark the response immutable and the browser never
+   *  revalidates it; a new poster means a new hash, so a new URL. */
+  version?: string | null;
 }) {
   let src: string;
   if (showId) {
-    src = `/api/shows/${showId}/images/poster${size === "card" ? "?size=card" : ""}`;
+    const qs = new URLSearchParams();
+    if (size === "card") qs.set("size", "card");
+    if (version) qs.set("v", version);
+    const q = qs.toString();
+    src = `/api/shows/${showId}/images/poster${q ? `?${q}` : ""}`;
   } else if (source && id) {
     src = `/api/images/poster/${source}/${id}`;
   } else {

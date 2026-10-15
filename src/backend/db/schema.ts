@@ -219,13 +219,21 @@ export const showArtworks = sqliteTable('show_artworks', {
   height: integer('height'),
   thumbnail: text('thumbnail'),
   content_type: text('content_type'),
+  /** Legacy inline bytes. New rows store files on disk (image_path); the
+   *  background image migration moves old blobs out and nulls this. */
   data: blob('data'),
+  /** sha1 of the image bytes; also the on-disk file name + the ETag. */
+  image_hash: text('image_hash'),
+  /** Path relative to the images dir, e.g. "ab/ab12…ef.jpg". */
+  image_path: text('image_path'),
+  byte_size: integer('byte_size'),
 }, (table) => ({
   uniqueArtwork: uniqueIndex('uq_show_artworks').on(
     table.show_id,
     table.provider_type,
     table.artwork_type,
   ),
+  imageHashIdx: index('idx_show_artworks_image_hash').on(table.image_hash),
 }));
 
 export const showsRelations = relations(shows, ({ many }) => ({

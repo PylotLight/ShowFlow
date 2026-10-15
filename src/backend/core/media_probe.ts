@@ -76,7 +76,13 @@ export function foldProbeToColumns(
  * columns (no disk access). Lets callers score a previously-probed file for
  * upgrade/duplicate decisions without re-reading the file.
  */
-export function mediaFromStoredRow(row: EpisodeFileRow): ProbeMediaForComparison | null {
+export type StoredMediaColumns = Pick<
+  EpisodeFileRow,
+  'container' | 'video_codec' | 'video_width' | 'video_height' | 'video_fps' | 'hdr'
+  | 'audio_codec' | 'audio_channels' | 'bitrate_kbps' | 'file_size'
+>;
+
+export function mediaFromStoredRow(row: StoredMediaColumns): ProbeMediaForComparison | null {
   if (!row.container && row.video_width == null && row.video_height == null) return null;
   return {
     video: {

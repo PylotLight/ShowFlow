@@ -22,7 +22,7 @@ export interface EpisodeDuplicateFile {
     videoHeight?: number | null;
     videoWidth?: number | null;
     videoCodec?: string | null;
-    hdr?: boolean;
+    hdr?: boolean | null;
     audioCodec?: string | null;
     bitrateKbps?: number | null;
   } | null;

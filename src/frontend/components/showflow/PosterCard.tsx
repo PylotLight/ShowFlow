@@ -13,6 +13,8 @@ export interface ShowSummary {
   grabbedCount?: number;
   addedAt?: string;
   lastUpdated?: string;
+  /** Hash of the cached poster file; makes the poster URL content-keyed. */
+  posterHash?: string | null;
 }
 
 /** Shows whose detail hero has been preloaded. Module-level so hovering the
@@ -55,7 +57,7 @@ function PosterCardInner({
         selected && "ring-2 ring-signal",
       )}
     >
-      <PosterImage showId={show.id} alt={show.title} className="size-full" size="card" />
+      <PosterImage showId={show.id} alt={show.title} className="size-full" size="card" version={show.posterHash} />
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent opacity-90 transition-opacity group-hover:opacity-100" />
 

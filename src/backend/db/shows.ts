@@ -2,6 +2,7 @@ import { eq, and, or, like, sql, asc, inArray } from 'drizzle-orm';
 import * as schema from './schema';
 import { extractShowTitleCandidates } from '../core/show_titles';
 import type { DatabaseManager } from './index';
+import { writeImage, readImage, deleteImageFile } from '../core/image_store';
 
 // ---- Title normalization ----
 
@@ -640,6 +641,8 @@ export interface ShowSummaryRow {
   tracked_count: number;
   grabbed_count: number;
   monitor_new_episodes: number;
+  /** sha1 of the cached poster file, for content-keyed (?v=) poster URLs. */
+  poster_hash: string | null;
 }
 
 /**
@@ -655,6 +658,9 @@ export function listShowSummaries(self: DatabaseManager): ShowSummaryRow[] {
       s.added_at, s.last_updated, s.monitor_new_episodes,
       (SELECT sp.provider_type FROM show_providers sp
         WHERE sp.show_id = s.id AND sp.is_primary = 1 LIMIT 1) AS provider_type,
+      (SELECT sa.image_hash FROM show_artworks sa
+        WHERE sa.show_id = s.id AND sa.artwork_type = '2' AND sa.image_hash IS NOT NULL
+        ORDER BY sa.id LIMIT 1) AS poster_hash,
       COALESCE(st.tracked_count, 0) AS tracked_count,
       COALESCE(st.grabbed_count, 0) AS grabbed_count
     FROM shows s
@@ -1404,14 +1410,19 @@ export function bulkUpdateShows(self: DatabaseManager, ids: string[], updates: P
 }
 
 export function removeShow(self: DatabaseManager, showId: string) {
+  const images = listArtworkPathsForShows(self, [showId]);
   self.drizz.delete(schema.shows)
     .where(eq(schema.shows.id, showId)).run();
+  // show_artworks rows cascade away with the show; drop their files too.
+  gcArtworkFiles(self, images);
 }
 
 export function removeShows(self: DatabaseManager, ids: string[]) {
   if (ids.length === 0) return;
+  const images = listArtworkPathsForShows(self, ids);
   self.drizz.delete(schema.shows)
     .where(inArray(schema.shows.id, ids)).run();
+  gcArtworkFiles(self, images);
 }
 
 // ---- Show Artworks ----
@@ -1429,7 +1440,20 @@ export function saveShowArtwork(self: DatabaseManager, showId: string, type: num
 
   const artworkType = String(type);
 
-  const existing = self.drizz.select({ id: schema.showArtworks.id })
+  // Bytes go to a content-addressed file; the row only keeps hash + path.
+  const stored = data && data.byteLength > 0 ? writeImage(self.imagesDir, data, contentType) : null;
+  const imageCols = {
+    image_hash: stored?.hash ?? null,
+    image_path: stored?.path ?? null,
+    byte_size: stored?.size ?? null,
+    data: null,
+  };
+
+  const existing = self.drizz.select({
+    id: schema.showArtworks.id,
+    image_hash: schema.showArtworks.image_hash,
+    image_path: schema.showArtworks.image_path,
+  })
     .from(schema.showArtworks)
     .where(and(
       eq(schema.showArtworks.show_id, showId),
@@ -1444,8 +1468,11 @@ export function saveShowArtwork(self: DatabaseManager, showId: string, type: num
       height: height ?? null,
       thumbnail: thumbnail ?? null,
       content_type: contentType ?? null,
-      data: data ?? null,
+      ...imageCols,
     }).where(eq(schema.showArtworks.id, existing.id)).run();
+    if (existing.image_path && existing.image_hash !== stored?.hash) {
+      gcArtworkFiles(self, [existing.image_path]);
+    }
   } else {
     self.drizz.insert(schema.showArtworks).values({
       show_id: showId,
@@ -1456,9 +1483,38 @@ export function saveShowArtwork(self: DatabaseManager, showId: string, type: num
       height: height ?? null,
       thumbnail: thumbnail ?? null,
       content_type: contentType ?? null,
-      data: data ?? null,
+      ...imageCols,
     }).run();
   }
+}
+
+/**
+ * Delete image files that no show_artworks row points at any more. Takes
+ * the relative paths that *might* have been orphaned (the caller just
+ * deleted/replaced rows) — anything still referenced is left alone.
+ */
+export function gcArtworkFiles(self: DatabaseManager, paths: (string | null | undefined)[]): number {
+  let removed = 0;
+  const q = self.db.query('SELECT 1 FROM show_artworks WHERE image_path = ? LIMIT 1');
+  for (const p of new Set(paths.filter((x): x is string => !!x))) {
+    if (q.get(p)) continue;
+    if (deleteImageFile(self.imagesDir, p)) removed++;
+  }
+  return removed;
+}
+
+/** image_path of every artwork row for these shows (collect before a delete). */
+export function listArtworkPathsForShows(self: DatabaseManager, showIds: string[]): string[] {
+  if (showIds.length === 0) return [];
+  const rows = self.db.query(
+    `SELECT DISTINCT image_path FROM show_artworks WHERE image_path IS NOT NULL AND show_id IN (${showIds.map(() => '?').join(',')})`,
+  ).all(...showIds) as { image_path: string }[];
+  return rows.map(r => r.image_path);
+}
+
+/** Forget a row's on-disk image (its file went missing) so it reads as uncached. */
+export function clearShowArtworkImage(self: DatabaseManager, id: number) {
+  self.db.run('UPDATE show_artworks SET image_hash = NULL, image_path = NULL, byte_size = NULL WHERE id = ?', [id]);
 }
 
 export function getShowArtworks(self: DatabaseManager, showId: string, type?: number, providerType?: string) {
@@ -1483,6 +1539,10 @@ export interface ShowArtworkMeta {
   height: number | null;
   thumbnail: string | null;
   content_type: string | null;
+  /** sha1 of the stored image (null for legacy blob-only / uncached rows). */
+  image_hash: string | null;
+  /** On-disk path relative to the images dir, when the bytes live in a file. */
+  image_path: string | null;
   /** Byte length of the stored image, 0 when no bytes are cached. */
   data_len: number;
 }
@@ -1499,17 +1559,28 @@ export function getShowArtworkMeta(self: DatabaseManager, showId: string, type?:
   const params: (string)[] = type !== undefined ? [showId, String(type)] : [showId];
   return self.db.query(`
     SELECT id, show_id, provider_type, artwork_type, image_url, width, height,
-           thumbnail, content_type, COALESCE(length(data), 0) AS data_len
+           thumbnail, content_type, image_hash, image_path,
+           CASE WHEN image_path IS NOT NULL THEN COALESCE(byte_size, 0)
+                ELSE COALESCE(length(data), 0) END AS data_len
     FROM show_artworks
     WHERE show_id = ? ${typeClause}
     ORDER BY artwork_type ASC
   `).all(...params) as ShowArtworkMeta[];
 }
 
-/** The image bytes for one show_artworks row. */
+/**
+ * The image bytes for one show_artworks row: the on-disk file when there is
+ * one, else the legacy blob (rows the background migration hasn't reached
+ * yet, or whose file went missing).
+ */
 export function getShowArtworkBlob(self: DatabaseManager, id: number): Uint8Array | null {
-  const row = self.db.query('SELECT data FROM show_artworks WHERE id = ?').get(id) as { data: Uint8Array | null } | null;
-  return row?.data ?? null;
+  const row = self.db.query('SELECT image_path, data FROM show_artworks WHERE id = ?').get(id) as { image_path: string | null; data: Uint8Array | null } | null;
+  if (!row) return null;
+  if (row.image_path) {
+    const bytes = readImage(self.imagesDir, row.image_path);
+    if (bytes) return bytes;
+  }
+  return row.data ?? null;
 }
 
 export function updateShowArtworkData(self: DatabaseManager, showId: string, type: number, data: Uint8Array, providerType?: string) {
@@ -1519,6 +1590,12 @@ export function updateShowArtworkData(self: DatabaseManager, showId: string, typ
   ];
   if (providerType !== undefined) conditions.push(eq(schema.showArtworks.provider_type, providerType));
 
-  self.drizz.update(schema.showArtworks).set({ data })
+  const rows = self.drizz.select({ path: schema.showArtworks.image_path, ct: schema.showArtworks.content_type })
+    .from(schema.showArtworks).where(and(...conditions)).all();
+  if (rows.length === 0) return;
+  const stored = writeImage(self.imagesDir, data, rows[0]!.ct);
+  self.drizz.update(schema.showArtworks)
+    .set({ image_hash: stored.hash, image_path: stored.path, byte_size: stored.size, data: null })
     .where(and(...conditions)).run();
+  gcArtworkFiles(self, rows.map(r => r.path).filter(p => p !== stored.path));
 }

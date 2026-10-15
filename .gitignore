@@ -50,6 +50,8 @@ bun/
 docs/archive/
 backups/
 showflow.db
+# artwork files (core/image_store.ts) live next to the DB
+/images/
 # SQLite WAL companions (db runs in WAL mode)
 *.db-wal
 *.db-shm
