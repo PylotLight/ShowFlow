@@ -179,7 +179,7 @@ export function NotificationsPopover() {
       </Button>
 
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-2 w-[26rem] max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-popover shadow-xl backdrop-blur-xl">
+        <div className="fixed inset-x-2 top-14 z-50 mt-1 rounded-lg md:absolute md:inset-x-auto md:top-full md:right-0 md:mt-2 md:w-[26rem] md:max-w-[calc(100vw-2rem)] border border-white/10 bg-popover shadow-xl backdrop-blur-xl">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-3 border-b border-white/5">
             <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
               Notifications
@@ -202,7 +202,7 @@ export function NotificationsPopover() {
             </div>
           </div>
 
-          <div className="max-h-[28rem] overflow-y-auto">
+          <div className="max-h-[min(28rem,calc(100dvh-10rem))] overflow-y-auto">
             {nothingToShow && (
               <p className="p-4 text-sm text-muted-foreground text-center">
                 {tab === 'alerts' ? "No alerts" : tab === 'jobs' ? "No background jobs" : tab === 'activity' ? "No recent activity" : "No notifications"}
