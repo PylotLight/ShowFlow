@@ -1,5 +1,5 @@
 import { watch, readFileSync } from 'node:fs';
-import { rename, mkdir, unlink, stat, readdir } from 'node:fs/promises';
+import { mkdir, unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Oracle } from '../../parser/oracle';
@@ -19,6 +19,8 @@ import type { ProbeMediaForComparison } from '../media_probe';
 import type { Config } from '../../db';
 import type { DownloadClient } from './types';
 import { isSampleFile } from '../sample_filter';
+import { FileReplacement } from './safe_replace';
+import { markReleaseFailed } from '../release_failures';
 
 /**
  * Suffixes that mark a file as an in-progress download artifact — ours
@@ -97,6 +99,11 @@ export function isIncompleteDownloadFile(filename: string): boolean {
 export function isTorrentArtifact(filename: string): boolean {
   const base = path.basename(filename).toLowerCase();
   return TORRENT_ARTIFACT_SUFFIXES.some((s) => base.endsWith(s));
+}
+
+/** An error that is the environment's fault (disk, permissions, DB), not the release's. */
+function infraError(message: string): Error {
+  return Object.assign(new Error(message), { infra: true });
 }
 
 export class BlackholeClient implements DownloadClient {
@@ -657,15 +664,16 @@ export class BlackholeClient implements DownloadClient {
       return;
     }
 
+    // Old file(s) are only retired AFTER the new one is safely in place and
+    // the DB points at it (see safe_replace.ts) — never deleted up front.
+    const replacePaths: string[] = [];
     const existing = db.getMovieFile(showId);
     if (existing) {
       const existingFilename = path.basename(existing.file_path);
       const profileId = show.profile || 'standard';
       if (opts?.force) {
         console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
-        try { await unlink(existing.file_path); } catch (e) {
-          console.warn(`[${this.name}] Failed to remove old file ${existing.file_path}:`, e);
-        }
+        replacePaths.push(existing.file_path);
       } else {
         let existingProbe: ProbeMediaForComparison | null = null;
         if (existing.container) {
@@ -689,9 +697,7 @@ export class BlackholeClient implements DownloadClient {
         }
         console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
         db.logEvent({ type: 'upgrade', entityType: 'file', message: `Upgrading ${existingFilename} to ${filename} for movie "${show.title}"` });
-        try { await unlink(existing.file_path); } catch (e) {
-          console.warn(`[${this.name}] Failed to remove old file ${existing.file_path}:`, e);
-        }
+        replacePaths.push(existing.file_path);
       }
     }
 
@@ -699,55 +705,63 @@ export class BlackholeClient implements DownloadClient {
       await mkdir(path.dirname(finalPath), { recursive: true });
     } catch (mkdirErr: any) {
       const code = mkdirErr?.code ? ` (${mkdirErr.code})` : '';
-      throw new Error(`Could not create destination directory ${path.dirname(finalPath)}${code}.`);
+      throw infraError(`Could not create destination directory ${path.dirname(finalPath)}${code}.`);
     }
-    let movedTo: string | null;
+    let replacement: FileReplacement | null;
     try {
-      movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
+      replacement = await this.beginReplace(fullPath, finalPath, replacePaths);
     } catch (moveErr: any) {
-      throw new Error(`Failed to move ${fullPath} -> ${finalPath}: ${moveErr instanceof Error ? moveErr.message : moveErr}.`);
+      throw infraError(`Failed to move ${fullPath} -> ${finalPath}: ${moveErr instanceof Error ? moveErr.message : moveErr}. Existing file left in place.`);
     }
-    if (movedTo === null) {
+    if (replacement === null) {
       const message = `Destination already exists for movie "${show.title}" (${finalPath}). Nothing imported.`;
       console.warn(`[${this.name}] ${message}`);
       if (opts?.force) throw new Error(message);
       this.holdForManual(fullPath);
       return;
     }
-    this.releaseManualHold(fullPath);
-
-    console.log(`[${this.name}] Moved ${filename} -> ${movedTo} (movie "${show.title}")`);
-    db.logProcessedFile(hash, fullPath, movedTo);
-    db.logEvent({
-      type: 'grab', entityType: 'episode', entityId: showId,
-      message: `Imported ${filename} for movie "${show.title}"`,
-      metadata: { movedTo },
-    });
+    const movedTo = replacement.finalPath;
 
     const mediaProbe = await probeMediaFile(movedTo);
     let fileSize: number | null = null;
     try { fileSize = (await stat(movedTo)).size; } catch {}
+    const grab = db.findMostRecentGrabForShow(showId, 30);
+    // Only credit the grab as this file's provenance when the landed release
+    // name actually matches it. Otherwise the most recent grab for the show
+    // (possibly an unrelated release) would be mis-stamped onto whatever file
+    // landed — e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE file.
+    const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
     try {
-      const grab = db.findMostRecentGrabForShow(showId, 30);
-      // Only credit the grab as this file's provenance when the landed release
-      // name actually matches it. Otherwise the most recent grab for the show
-      // (possibly an unrelated release) would be mis-stamped onto whatever file
-      // landed — e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE file.
-      const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
-      db.recordMovieFile({
-        showId,
-        filePath: movedTo,
-        originalName: filename,
-        fileSize,
-        sourceKind: attributable ? 'release' : 'import',
-        releaseTitle: attributable ? grab!.release_title : null,
-        indexerName: attributable ? grab!.indexer_name : null,
-        publishDate: attributable ? grab!.publish_date : null,
-        media: foldProbeToColumns(mediaProbe, filename),
-      });
-    } catch (err) {
-      console.warn(`[${this.name}] Failed to record movie provenance for ${filename}:`, err);
+      db.db.transaction(() => {
+        db.logProcessedFile(hash, fullPath, movedTo);
+        db.recordMovieFile({
+          showId,
+          filePath: movedTo,
+          originalName: filename,
+          fileSize,
+          sourceKind: attributable ? 'release' : 'import',
+          releaseTitle: attributable ? grab!.release_title : null,
+          indexerName: attributable ? grab!.indexer_name : null,
+          publishDate: attributable ? grab!.publish_date : null,
+          media: foldProbeToColumns(mediaProbe, filename),
+        });
+      })();
+    } catch (dbErr) {
+      await replacement.rollback();
+      throw infraError(`Database update failed for movie "${show.title}"; restored the previous file: ${dbErr instanceof Error ? dbErr.message : dbErr}`);
     }
+    await replacement.finalize();
+    if (attributable) {
+      try { db.markGrabStatus(grab!.id, 'imported'); } catch {}
+    }
+    this.releaseManualHold(fullPath);
+
+    console.log(`[${this.name}] Moved ${filename} -> ${movedTo} (movie "${show.title}")`);
+    db.logEvent({
+      type: 'grab', entityType: 'episode', entityId: showId,
+      message: `Imported ${filename} for movie "${show.title}"`,
+      metadata: { movedTo, replaced: replacement.replacedPaths },
+    });
     db.logPipelineEvent({
       showId, stage: 'AVAILABLE', eventType: 'import_completed',
       message: `Imported "${filename}" for movie "${show.title}"`,
@@ -801,6 +815,9 @@ export class BlackholeClient implements DownloadClient {
     if (this.processingQueue.has(fullPath)) return;
     this.processingQueue.add(fullPath);
 
+    // Set once the file is resolved to a show/episodes, so a failure after
+    // that point can be pinned on the grab that produced it.
+    let failCtx: { showId: string; episodes: Array<{ season: number; episode: number }> } | null = null;
     try {
       const stable = await this.waitForStableFile(fullPath);
       if (!stable) {
@@ -1058,6 +1075,7 @@ export class BlackholeClient implements DownloadClient {
         });
       }
 
+      failCtx = { showId, episodes: episodes.map(e => ({ season: e.season, episode: e.episode })) };
       for (const ep of episodes) {
         db.logPipelineEvent({
           showId, seasonNumber: ep.season, episodeNumber: ep.episode,
@@ -1094,149 +1112,80 @@ export class BlackholeClient implements DownloadClient {
         return;
       }
 
-      const firstEp = episodes[0];
-      if (firstEp) {
-        const existingEp = db.getEpisode(showId, firstEp.season, firstEp.episode);
-        if (existingEp && existingEp.file_path) {
-          const existingFilename = path.basename(existingEp.file_path);
-          const profileId = db.getShow(showId)?.profile || 'standard';
-          const existingFileRow = db.getCurrentEpisodeFile(showId, firstEp.season, firstEp.episode);
-
-          if (opts?.force) {
-            console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${existingFilename}).`);
-            try {
-              await unlink(existingEp.file_path);
-            } catch (e) {
-              console.warn(`[${this.name}] Failed to remove old file ${existingEp.file_path}:`, e);
-            }
-            db.logEvent({
-              type: 'manual-import',
-              entityType: 'file',
-              message: `Force-imported ${filename} over ${existingFilename} for ${show.title}`
-            });
-          } else {
-            // Use the stored file's PROBED media when we have it (resolution,
-            // bitrate, codec...) so a renamed/cleaned 2160p file on disk is
-            // never "upgraded" by an arriving 1080p. Fall back to a fresh on
-            // disk probe (orphan case), then to the raw filename.
-            let existingProbe: ProbeMediaForComparison | null = null;
-            if (existingFileRow?.container) {
-              existingProbe = mediaFromStoredRow(existingFileRow);
-            } else if (existingEp.file_path && (await Bun.file(existingEp.file_path).exists())) {
-              existingProbe = await probeMediaFile(existingEp.file_path);
-            }
-
-            const isUpgrade = existingProbe
-              ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
-              : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
-
-            if (!isUpgrade) {
-              const via = existingProbe && existingFileRow?.container ? 'probed' : existingProbe ? 'probed-on-disk' : '';
-              console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}${via ? ` (${via} ${existingProbe?.video?.height ?? ''}p)` : ''}. Skipping. File remains in watch folder for manual review.`);
-              db.logEvent({
-                type: 'skip',
-                entityType: 'file',
-                message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
-              });
-              if (firstEp) {
-                db.logPipelineEvent({
-                  showId, seasonNumber: firstEp.season, episodeNumber: firstEp.episode,
-                  stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
-                  message: `"${filename}" is not an upgrade over existing "${existingFilename}"`,
-                  releaseTitle: filename,
-                });
-              }
-              if (!opts?.force) this.holdForManual(fullPath);
-              return;
-            }
-
-            console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
-            db.logEvent({
-              type: 'upgrade',
-              entityType: 'file',
-              message: `Upgrading ${existingFilename} to ${filename} for ${show.title}`
-            });
-            try {
-              await unlink(existingEp.file_path);
-            } catch (e) {
-              console.warn(`[${this.name}] Failed to remove old file ${existingEp.file_path}:`, e);
-              db.logEvent({
-                type: 'error',
-                entityType: 'file',
-                message: `Failed to remove old file ${existingEp.file_path} during upgrade`
-              });
-            }
-          }
+      // ---- Upgrade check across EVERY covered episode --------------------
+      // A multi-episode file (S01E01E02) used to be compared only against
+      // E01's existing file, so a worse file could replace a better E02. Now
+      // the new file must beat (per the profile's upgrade rule) every
+      // distinct file currently stored for any episode it covers.
+      const plan = await this.planEpisodeReplacement(showId, episodes, filename, !!opts?.force);
+      if (plan.notUpgrade) {
+        const { ep: blockEp, existingFilename, via } = plan.notUpgrade;
+        console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}${via ? ` (${via})` : ''}. Skipping. File remains in watch folder for manual review.`);
+        db.logEvent({
+          type: 'skip',
+          entityType: 'file',
+          message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.`
+        });
+        for (const ep of episodes) {
+          db.logPipelineEvent({
+            showId, seasonNumber: ep.season, episodeNumber: ep.episode,
+            stage: 'GRABBED', eventType: 'import_skipped', reasonCode: 'NOT_AN_UPGRADE',
+            message: ep === blockEp || episodes.length === 1
+              ? `"${filename}" is not an upgrade over existing "${existingFilename}"`
+              : `"${filename}" is not an upgrade over existing "${existingFilename}" (S${String(blockEp.season).padStart(2, '0')}E${String(blockEp.episode).padStart(2, '0')})`,
+            releaseTitle: filename,
+          });
         }
+        if (!opts?.force) this.holdForManual(fullPath);
+        return;
+      }
+      if (plan.existingNames.length > 0) {
+        const names = plan.existingNames.join(', ');
+        if (opts?.force) {
+          console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${names}).`);
+          db.logEvent({ type: 'manual-import', entityType: 'file', message: `Force-imported ${filename} over ${names} for ${show.title}` });
+        } else {
+          console.log(`[${this.name}] New file ${filename} is an upgrade over ${names}. Replacing.`);
+          db.logEvent({ type: 'upgrade', entityType: 'file', message: `Upgrading ${names} to ${filename} for ${show.title}` });
+        }
+      }
+      for (const kept of plan.kept) {
+        console.warn(`[${this.name}] Keeping ${kept}: it also holds episodes outside ${filename}.`);
       }
 
       try {
         await mkdir(path.dirname(finalPath), { recursive: true });
       } catch (mkdirErr: any) {
         const code = mkdirErr?.code ? ` (${mkdirErr.code})` : '';
-        throw new Error(
+        throw infraError(
           `Could not create destination directory ${path.dirname(finalPath)}${code}. ` +
           `Check that the media folder is writable by the ShowFlow user (chmod/chown on the hostPath).`,
         );
       }
 
-      let movedTo: string | null;
+      // Stage -> back up old -> place (safe_replace.ts). The old file(s) are
+      // only deleted once the DB points at the new one.
+      let replacement: FileReplacement | null;
       try {
-        movedTo = await this.moveFile(fullPath, finalPath, this.config.onCollision);
+        replacement = await this.beginReplace(fullPath, finalPath, plan.replace);
       } catch (moveErr: any) {
         const code = moveErr?.code ? ` (${moveErr.code})` : '';
-        throw new Error(
+        throw infraError(
           `Failed to move ${fullPath} -> ${finalPath}${code}: ${moveErr instanceof Error ? moveErr.message : moveErr}. ` +
+          `Existing file left in place. ` +
           `If this is a k8s hostPath, make sure the destination mount allows writes by the container uid/gid (e.g. fsGroup).`,
         );
       }
-      if (movedTo === null) {
+      if (replacement === null) {
         // Destination already exists and onCollision=skip — the file stays in
         // the watch folder. Hold it for manual import so the rescan doesn't
         // keep re-queuing and re-logging the same mistake.
         if (!opts?.force) this.holdForManual(fullPath);
         return;
       }
+      const movedTo = replacement.finalPath;
       BlackholeClient.mem('after move ' + filename.slice(0, 30));
       maybeForcedGc();
-
-      // Import succeeded: the file is no longer in the watch folder, so drop
-      // any manual-import hold keyed to its source path.
-      this.releaseManualHold(fullPath);
-
-      console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
-      debugLog('File moved successfully', { filename, movedTo });
-      db.logProcessedFile(hash, fullPath, movedTo);
-      db.logEvent({
-        type: 'grab',
-        entityType: 'episode',
-        entityId: showId,
-        message: `Imported ${filename} for ${show.title}`,
-        metadata: { movedTo, episodes: episodes.map((e) => ({ season: e.season, episode: e.episode })) },
-      });
-
-      const firstEpisode = episodes[0];
-      if (firstEpisode) {
-        const seasonFolderFormat = this.config.seasonFolderFormat || 'Season {season}';
-        const seasonName = seasonFolderFormat
-          .replace('{season:02}', String(firstEpisode.season).padStart(2, '0'))
-          .replace('{season}', String(firstEpisode.season));
-        db.saveSeason(showId, firstEpisode.season, seasonName);
-      }
-
-      for (const ep of episodes) {
-        db.saveEpisode({
-          showId,
-          seasonNumber: ep.season,
-          episodeNumber: ep.episode,
-          absoluteNumber: ep.absoluteNumber,
-          title: ep.title,
-          filePath: movedTo,
-          // First sighting of this episode via an import (not a sync):
-          // follow the show's monitor-new-episodes setting.
-          autoTrackNew: true,
-        });
-      }
 
       // Record on-disk provenance for each episode this file maps to: which
       // release it came from (grabbed) vs. a direct drop without a grab.
@@ -1246,32 +1195,82 @@ export class BlackholeClient implements DownloadClient {
       // for the media badges + upgrade decisions later.
       const mediaProbe = await probeMediaFile(movedTo);
       const mediaCols = foldProbeToColumns(mediaProbe, filename);
-      for (const ep of episodes) {
-        try {
-          const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);
-          const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
-          let fileSize: number | null = null;
-          try {
-            const st = await stat(movedTo);
-            fileSize = st.size;
-          } catch {}
-          db.recordEpisodeFile({
-            showId,
-            season: ep.season,
-            episode: ep.episode,
-            filePath: movedTo,
-            originalName: filename,
-            fileSize,
-            sourceKind: attributable ? 'release' : 'import',
-            releaseTitle: attributable ? grab!.release_title : null,
-            indexerName: attributable ? grab!.indexer_name : null,
-            publishDate: attributable ? grab!.publish_date : null,
-            media: mediaCols,
-          });
-        } catch (err) {
-          console.warn(`[${this.name}] Failed to record provenance for ${filename}:`, err);
-        }
+      let fileSize: number | null = null;
+      try { fileSize = (await stat(movedTo)).size; } catch {}
+      const importedGrabIds = new Set<number>();
+
+      // All DB writes for this import in one transaction: either every
+      // covered episode points at the new file, or (on error) none do and
+      // the files are rolled back to how they were.
+      try {
+        db.db.transaction(() => {
+          db.logProcessedFile(hash, fullPath, movedTo);
+          const firstEpisode = episodes[0];
+          if (firstEpisode) {
+            const seasonFolderFormat = this.config.seasonFolderFormat || 'Season {season}';
+            const seasonName = seasonFolderFormat
+              .replace('{season:02}', String(firstEpisode.season).padStart(2, '0'))
+              .replace('{season}', String(firstEpisode.season));
+            db.saveSeason(showId, firstEpisode.season, seasonName);
+          }
+          for (const ep of episodes) {
+            db.saveEpisode({
+              showId,
+              seasonNumber: ep.season,
+              episodeNumber: ep.episode,
+              absoluteNumber: ep.absoluteNumber,
+              title: ep.title,
+              filePath: movedTo,
+              // First sighting of this episode via an import (not a sync):
+              // follow the show's monitor-new-episodes setting.
+              autoTrackNew: true,
+            });
+          }
+          for (const ep of episodes) {
+            const grab = db.findGrabbedReleaseForShowEpisode(showId, ep.season, ep.episode, 30);
+            const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
+            if (attributable) importedGrabIds.add(grab!.id);
+            db.recordEpisodeFile({
+              showId,
+              season: ep.season,
+              episode: ep.episode,
+              filePath: movedTo,
+              originalName: filename,
+              fileSize,
+              sourceKind: attributable ? 'release' : 'import',
+              releaseTitle: attributable ? grab!.release_title : null,
+              indexerName: attributable ? grab!.indexer_name : null,
+              publishDate: attributable ? grab!.publish_date : null,
+              media: mediaCols,
+            });
+          }
+        })();
+      } catch (dbErr) {
+        await replacement.rollback();
+        throw infraError(`Database update failed; restored the previous file(s): ${dbErr instanceof Error ? dbErr.message : dbErr}`);
       }
+      await replacement.finalize();
+      for (const id of importedGrabIds) {
+        try { db.markGrabStatus(id, 'imported'); } catch {}
+      }
+
+      // Import succeeded: the file is no longer in the watch folder, so drop
+      // any manual-import hold keyed to its source path.
+      this.releaseManualHold(fullPath);
+
+      console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
+      debugLog('File moved successfully', { filename, movedTo });
+      db.logEvent({
+        type: 'grab',
+        entityType: 'episode',
+        entityId: showId,
+        message: `Imported ${filename} for ${show.title}`,
+        metadata: {
+          movedTo,
+          replaced: replacement.replacedPaths,
+          episodes: episodes.map((e) => ({ season: e.season, episode: e.episode })),
+        },
+      });
 
       for (const ep of episodes) {
         db.logPipelineEvent({
@@ -1286,6 +1285,13 @@ export class BlackholeClient implements DownloadClient {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[${this.name}] Error processing ${filename}:`, e);
       db.logEvent({ type: 'error', entityType: 'file', message: `Error processing ${filename}: ${message}` });
+      // A release-caused import failure fails (and blocklists) the grab so
+      // the episode is re-searched right away. Infrastructure errors (disk
+      // permissions, a full volume, DB) are not the release's fault: the file
+      // stays in the watch folder for a retry and the grab is left alone.
+      if (failCtx && !(e as any)?.infra) {
+        this.failAttributedGrabs(failCtx, filename, `import failed: ${message}`);
+      }
     } finally {
       this.processingQueue.delete(fullPath);
     }
@@ -1332,62 +1338,104 @@ export class BlackholeClient implements DownloadClient {
     return hash;
   }
 
-  private async moveFile(
-    src: string,
-    dest: string,
-    onCollision: Config['onCollision'] = 'skip'
-  ): Promise<string | null> {
-    let finalDest = dest;
-    const exists = await Bun.file(dest).exists();
+  /** Safe move/replace into the library (see safe_replace.ts). */
+  private beginReplace(src: string, dest: string, replace: string[]): Promise<FileReplacement | null> {
+    return FileReplacement.begin({
+      src,
+      dest,
+      replace,
+      onCollision: this.config.onCollision ?? 'skip',
+      copyFallback: (from, to) => this.copyFileChunked(from, to),
+      log: (msg) => console.warn(`[${this.name}] ${msg}`),
+    });
+  }
 
-    if (exists) {
-      if (onCollision === 'skip') {
-        console.warn(`[${this.name}] Skipping ${src}: destination already exists (${dest})`);
-        return null;
-      }
+  /**
+   * Decide what an incoming file for `episodes` replaces. Every DISTINCT
+   * file currently stored for any covered episode is compared; one that the
+   * new file does not beat blocks the import (notUpgrade). Old files whose
+   * episodes are all covered by the new file are retired (replace); a file
+   * that also holds an episode outside the new file is kept on disk (kept)
+   * so that episode doesn't lose its file.
+   */
+  private async planEpisodeReplacement(
+    showId: string,
+    episodes: Array<{ season: number; episode: number }>,
+    filename: string,
+    force: boolean,
+  ): Promise<{
+    notUpgrade?: { ep: { season: number; episode: number }; existingFilename: string; via: string };
+    replace: string[];
+    kept: string[];
+    existingNames: string[];
+  }> {
+    const profileId = db.getShow(showId)?.profile || 'standard';
+    const covered = new Set(episodes.map(e => `${e.season}:${e.episode}`));
+    const byPath = new Map<string, { ep: { season: number; episode: number }; row: ReturnType<typeof db.getCurrentEpisodeFile> }>();
+    for (const ep of episodes) {
+      const existingEp = db.getEpisode(showId, ep.season, ep.episode);
+      if (!existingEp?.file_path || byPath.has(existingEp.file_path)) continue;
+      byPath.set(existingEp.file_path, { ep, row: db.getCurrentEpisodeFile(showId, ep.season, ep.episode) });
+    }
 
-      if (onCollision === 'version') {
-        const ext = path.extname(dest);
-        const base = dest.slice(0, dest.length - ext.length);
-        let n = 1;
-        while (await Bun.file(`${base} (${n})${ext}`).exists()) {
-          n++;
+    if (!force) {
+      for (const [filePath, { ep, row }] of byPath) {
+        const existingFilename = path.basename(filePath);
+        // Use the stored file's PROBED media when we have it (resolution,
+        // bitrate, codec...) so a renamed/cleaned 2160p file on disk is
+        // never "upgraded" by an arriving 1080p. Fall back to a fresh on
+        // disk probe (orphan case), then to the raw filename.
+        let existingProbe: ProbeMediaForComparison | null = null;
+        let via = '';
+        if (row?.container) {
+          existingProbe = mediaFromStoredRow(row);
+          via = 'probed';
+        } else if (await Bun.file(filePath).exists()) {
+          existingProbe = await probeMediaFile(filePath);
+          if (existingProbe) via = 'probed-on-disk';
         }
-        finalDest = `${base} (${n})${ext}`;
+        const isUpgrade = existingProbe
+          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId)
+          : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
+        if (!isUpgrade) {
+          return {
+            notUpgrade: { ep, existingFilename, via: via ? `${via} ${existingProbe?.video?.height ?? ''}p` : '' },
+            replace: [], kept: [], existingNames: [],
+          };
+        }
       }
     }
 
+    const replace: string[] = [];
+    const kept: string[] = [];
+    for (const filePath of byPath.keys()) {
+      const holders = db.db.query(
+        `SELECT season_number, episode_number FROM episodes WHERE show_id = ? AND file_path = ?`,
+      ).all(showId, filePath) as Array<{ season_number: number; episode_number: number }>;
+      const allCovered = holders.every(h => covered.has(`${h.season_number}:${h.episode_number}`));
+      (allCovered ? replace : kept).push(filePath);
+    }
+    return { replace, kept, existingNames: [...byPath.keys()].map(p => path.basename(p)) };
+  }
+
+  /** Fail + blocklist the grab(s) whose release produced `filename`. */
+  private failAttributedGrabs(
+    ctx: { showId: string; episodes: Array<{ season: number; episode: number }> },
+    filename: string,
+    reason: string,
+  ) {
     try {
-      await rename(src, finalDest);
-    } catch (err: any) {
-      if (err?.code === 'EXDEV' || err?.code === 'EACCES' || err?.code === 'EPERM') {
-        // Cross-device copy or destination directory write-blocked (e.g. a
-        // hostPath volume owned by a different uid than the container). Fall
-        // back to copy+delete so we degrade gracefully instead of erroring
-        // out. Same-mount drops never get here — `rename` is a metadata
-        // operation, instant for a 50GB file.
-        //
-        // `copyFile` maps to copy_file_range(2) on Linux: the kernel moves
-        // pages between the page caches without ever copying into our
-        // address space, so a 50GB remux costs no JS heap and no per-chunk
-        // event-loop yield. The chunked stream below is only the fallback for
-        // filesystems where the kernel fast path isn't supported (ENOTSUP/
-        // EXDEV on the copy itself).
-        try {
-          const { copyFile } = await import('node:fs/promises');
-          await copyFile(src, finalDest);
-        } catch (copyErr: any) {
-          if (!['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EINVAL'].includes(copyErr?.code)) throw copyErr;
-          debugLog('kernel-side copy unsupported, falling back to chunked stream', { code: copyErr?.code });
-          await this.copyFileChunked(src, finalDest);
-        }
-        await unlink(src);
-      } else {
-        throw err;
+      const ids = new Set<number>();
+      const lookups = ctx.episodes.length > 0
+        ? ctx.episodes.map(e => db.findGrabbedReleaseForShowEpisode(ctx.showId, e.season, e.episode, 30))
+        : [db.findMostRecentGrabForShow(ctx.showId, 30)];
+      for (const g of lookups) {
+        if (g && releaseTitlesMatch(g.release_title ?? '', filename)) ids.add(g.id);
       }
+      for (const id of ids) markReleaseFailed({ grabId: id, reason, source: 'import' });
+    } catch (err) {
+      console.warn(`[${this.name}] Could not mark grab failed for ${filename}:`, err);
     }
-
-    return finalDest;
   }
 
   /** Bounded-memory userspace copy (16MiB slices) for filesystems where

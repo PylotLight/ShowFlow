@@ -10,6 +10,8 @@ import { backgroundJobs } from '../background_jobs';
 import { Semaphore } from '../limiter';
 import type { DownloadClient } from './types';
 import { filterOutSamples } from '../sample_filter';
+import { TorrentHealthTracker } from './torbox_health';
+import { failGrabsForRelease, advanceGrabsForRelease } from '../release_failures';
 
 export interface TorboxClientConfig {
   apiKey?: string;
@@ -24,6 +26,8 @@ export interface TorboxClientConfig {
 export interface InflightDownload {
   torrentId: string;
   title: string;
+  /** Release info hash, used to find the grab rows to fail/advance. */
+  infoHash?: string;
 }
 
 export const TORBOX_INFLIGHT_KEY = 'torbox.inflight';
@@ -203,7 +207,7 @@ export class TorboxDownloadClient implements DownloadClient {
     for (const entry of this.readInflight()) {
       if (this.activeTitles.has(entry.title)) continue;
       console.log(`[${this.name}] Resuming in-flight download "${entry.title}" (torrent ${entry.torrentId})`);
-      this.trackDownload(entry.torrentId, entry.title);
+      this.trackDownload(entry.torrentId, entry.title, entry.infoHash);
     }
   }
 
@@ -354,7 +358,8 @@ export class TorboxDownloadClient implements DownloadClient {
       return { ok: false, message: `TorBox returned no torrent ID for "${title}"` };
     }
 
-    this.trackDownload(torrentId, title);
+    const hash = infoHash || magnetUrl?.match(/btih:([a-z0-9]+)/i)?.[1] || undefined;
+    this.trackDownload(torrentId, title, hash);
 
     return { ok: true, message: `Submitted "${title}" to TorBox` };
   }
@@ -364,9 +369,9 @@ export class TorboxDownloadClient implements DownloadClient {
    * fresh submissions and post-restart resumes, so a grab always ends in
    * a visible event + finished job instead of vanishing.
    */
-  trackDownload(torrentId: string, title: string): void {
+  trackDownload(torrentId: string, title: string, infoHash?: string): void {
     this.activeTitles.add(title);
-    this.waitForDownload(torrentId, title)
+    this.waitForDownload(torrentId, title, infoHash)
       .then((ok) => {
         db.logEvent({
           type: ok ? 'download' : 'error',
@@ -413,8 +418,8 @@ export class TorboxDownloadClient implements DownloadClient {
     } catch {}
   }
 
-  private async waitForDownload(torrentId: string, label: string): Promise<boolean> {
-    this.markInflight({ torrentId, title: label });
+  private async waitForDownload(torrentId: string, label: string, infoHash?: string): Promise<boolean> {
+    this.markInflight({ torrentId, title: label, ...(infoHash ? { infoHash } : {}) });
     this.activeTorrents.set(torrentId, label);
     const controller = new AbortController();
     this.controllers.set(torrentId, controller);
@@ -440,7 +445,7 @@ export class TorboxDownloadClient implements DownloadClient {
         return false;
       }
       try {
-        return await this.waitForDownloadInner(torrentId, label);
+        return await this.waitForDownloadInner(torrentId, label, infoHash);
       } finally {
         releaseSlot();
       }
@@ -702,7 +707,7 @@ export class TorboxDownloadClient implements DownloadClient {
     return { ok: false, lastError };
   }
 
-  private async waitForDownloadInner(torrentId: string, label: string): Promise<boolean> {
+  private async waitForDownloadInner(torrentId: string, label: string, infoHash?: string): Promise<boolean> {
     console.log(`[${this.name}] Torrent ${torrentId} ("${label}"). Waiting for download...`);
 
     // Expose this download in the header popover + queue as a live job.
@@ -719,6 +724,18 @@ export class TorboxDownloadClient implements DownloadClient {
     const failJob = (message: string) => {
       backgroundJobs.fail(jobId, message);
     };
+    // The release itself is bad (dead/stalled/errored/no video): fail its
+    // grab(s), blocklist it, and free the episode for an immediate re-search.
+    // Client-side problems (API down, CDN errors, user cancel) don't land here.
+    const failRelease = (reason: string) => {
+      try {
+        failGrabsForRelease({ title: label, infoHash }, reason, 'torbox');
+      } catch (err) {
+        console.warn(`[${this.name}] Could not mark "${label}" failed:`, err);
+      }
+    };
+    const health = new TorrentHealthTracker();
+    let markedDownloading = false;
 
     const finishCancelled = (): boolean => {
       this.activeDetails.delete(label);
@@ -800,20 +817,28 @@ export class TorboxDownloadClient implements DownloadClient {
           detail: stateSummary,
         });
 
-        // Terminal failure states — bail out early instead of polling forever
-        if (rawState.includes('error') || rawState.includes('fail') || rawState.includes('stalled')) {
-          console.error(`[${this.name}] Torrent ${torrentId} entered terminal failure state: ${rawState}`);
+        const isComplete = torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true;
+
+        // Terminal failure: error/failed state right away; stalled or not
+        // progressing only after a threshold (see torbox_health.ts).
+        const verdict = isComplete ? { failed: false as const } : health.observe(rawState, progress, Date.now());
+        if (verdict.failed) {
+          console.error(`[${this.name}] Torrent ${torrentId} failed: ${verdict.reason}`);
           db.logEvent({
             type: 'error',
             entityType: 'release',
-            message: `TorBox download failed for "${label}" (state: ${rawState}).`,
+            message: `TorBox download failed for "${label}" (${verdict.reason}). Blocklisted; the episode will be re-searched.`,
           });
           this.activeDetails.delete(label);
-          failJob(`Torrent entered ${rawState} state`);
+          failJob(`Torrent failed: ${verdict.reason}`);
+          failRelease(verdict.reason);
           return false;
         }
+        if (!markedDownloading) {
+          markedDownloading = true;
+          try { advanceGrabsForRelease({ title: label, infoHash }, 'downloading'); } catch {}
+        }
 
-        const isComplete = torrent.download_finished === true || torrent.download_state === 'completed' || torrent.cached === true;
         if (isComplete) {
           const videoFiles = (torrent.files || []).filter((f: any) => {
             const name = (f.name || '').toLowerCase();
@@ -837,6 +862,7 @@ export class TorboxDownloadClient implements DownloadClient {
             });
             this.activeDetails.delete(label);
             failJob('Torrent completed but contained no video files');
+            failRelease(`no video files in torrent (found: ${allNames.slice(0, 200)})`);
             return false;
           }
 
@@ -858,6 +884,7 @@ export class TorboxDownloadClient implements DownloadClient {
           if (anyDownloaded) {
             this.activeDetails.delete(label);
             backgroundJobs.complete(jobId, 'Downloaded — handed off for import');
+            try { advanceGrabsForRelease({ title: label, infoHash }, 'completed'); } catch {}
             return true;
           } else {
             db.logEvent({
@@ -891,6 +918,7 @@ export class TorboxDownloadClient implements DownloadClient {
     });
     this.activeDetails.delete(label);
     failJob('Download timed out');
+    failRelease(`timed out after ${maxAttempts} status checks`);
     return false;
   }
 

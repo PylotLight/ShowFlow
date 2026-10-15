@@ -74,7 +74,8 @@ export const REASON_CODES = {
   // ---- Grab ----
   GRAB_FAILED_NO_CLIENT: { category: 'download_client', label: 'Grab failed - check download client configuration', confidence: 'certain', suggestedAction: 'Check your download client settings in Settings > Downloads. Ensure the client is enabled and credentials are correct.' },
   GRAB_FAILED_INDEXER: { category: 'indexer', label: 'Indexer rejected the grab request', confidence: 'certain', suggestedAction: 'The indexer rejected the download request. Check the indexer status in Settings > Indexers.' },
-  GRAB_SUCCEEDED: { category: 'success', label: 'Sent to download client', confidence: 'certain', suggestedAction: 'No action needed. The release was sent to your download client.' },
+  RELEASE_FAILED_BLOCKLISTED: { category: 'download_client', label: 'Download failed - release blocklisted', confidence: 'certain', suggestedAction: 'The release failed (dead, stalled, errored or bad import) and was blocklisted; the episode will be re-searched for a different release. Remove it from the blocklist on the History page to allow it again.' },
+    GRAB_SUCCEEDED: { category: 'success', label: 'Sent to download client', confidence: 'certain', suggestedAction: 'No action needed. The release was sent to your download client.' },
 } as const satisfies Record<string, ReasonCodeDef>;
 
 export type ReasonCode = keyof typeof REASON_CODES;

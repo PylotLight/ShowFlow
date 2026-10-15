@@ -64,6 +64,7 @@ export function listRssCandidateEpisodes(
           AND g.season_number = e.season_number
           AND g.episode_number = e.episode_number
           AND replace(g.grabbed_at, ' ', 'T') >= ?
+          AND g.status != 'failed'
       )
     ORDER BY COALESCE(e.expected_release_at, e.air_date) DESC
     LIMIT ?

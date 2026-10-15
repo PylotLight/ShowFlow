@@ -25,6 +25,22 @@ export interface GrabbedReleaseRow {
   indexer_name: string | null;
   publish_date: string | null;
   grabbed_at: string | null;
+  status: GrabStatus;
+  info_hash: string | null;
+  release_key: string | null;
+  failure_reason: string | null;
+  failed_at: string | null;
+}
+
+export const GRAB_STATUSES = ['grabbed', 'downloading', 'completed', 'imported', 'failed'] as const;
+export type GrabStatus = typeof GRAB_STATUSES[number];
+
+/** Lowercased btih hash, or null. Accepts a bare hash or a magnet URI. */
+export function normalizeInfoHash(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const m = String(input).match(/btih:([a-z0-9]+)/i);
+  const h = (m ? m[1]! : String(input)).trim().toLowerCase();
+  return /^[a-z0-9]{32,40}$/.test(h) ? h : null;
 }
 
 /** Record that `releaseTitle` was grabbed for showId/season/episode. */
@@ -35,6 +51,10 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
   releaseTitle: string;
   indexerName?: string | null;
   publishDate?: string | null;
+  /** Info hash or magnet URI (normalized to a lowercase hash). */
+  infoHash?: string | null;
+  /** `indexer::guid` style identity for hash-less releases. */
+  releaseKey?: string | null;
 }) {
   const normalized = normalizeReleaseTitle(input.releaseTitle);
   if (!normalized) return;
@@ -48,6 +68,9 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
       normalized_title: normalized,
       indexer_name: input.indexerName ?? null,
       publish_date: input.publishDate ?? null,
+      info_hash: normalizeInfoHash(input.infoHash),
+      release_key: input.releaseKey ?? null,
+      status: 'grabbed',
       // Explicit ISO (same rationale as logPipelineEvent in pipeline.ts): the
       // column default is `datetime('now')` -> "YYYY-MM-DD HH:MM:SS", which
       // sorts *below* an ISO "YYYY-MM-DDTHH:MM:SSZ" cutoff on the same day
@@ -258,6 +281,7 @@ export function listEpisodesDueForGrab(
           AND g.season_number = e.season_number
           AND g.episode_number = e.episode_number
           AND replace(g.grabbed_at, ' ', 'T') >= ?
+          AND g.status != 'failed'
       )
       AND (
         e.last_searched_at IS NULL
@@ -298,4 +322,66 @@ export function recordEpisodeSearchMiss(
       last_searched_at = ?
     WHERE show_id = ? AND season_number = ? AND episode_number = ?
   `).run(nowIso, showId, season, episode);
+}
+
+export function getGrab(self: DatabaseManager, id: number): GrabbedReleaseRow | null {
+  return (self.drizz.select().from(schema.grabbedReleases)
+    .where(eq(schema.grabbedReleases.id, id)).get() as GrabbedReleaseRow | undefined) ?? null;
+}
+
+/**
+ * Move a grab forward in its lifecycle. Never resurrects a failed grab and
+ * never moves an imported one backwards (a late "completed" after import).
+ */
+export function markGrabStatus(self: DatabaseManager, id: number, status: Exclude<GrabStatus, 'failed'>) {
+  const order: Record<string, number> = { grabbed: 0, downloading: 1, completed: 2, imported: 3 };
+  self.db.query(`
+    UPDATE grabbed_releases SET status = ?
+    WHERE id = ? AND status != 'failed'
+      AND CASE status WHEN 'grabbed' THEN 0 WHEN 'downloading' THEN 1 WHEN 'completed' THEN 2 WHEN 'imported' THEN 3 ELSE 0 END < ?
+  `).run(status, id, order[status]!);
+}
+
+/**
+ * Grabs still in flight (not imported/failed) for a release, matched by info
+ * hash when known, else by normalized title. A pack/multi-ep grab has one row
+ * per episode; all of them are returned. Used by the TorBox waiter, which
+ * only knows the release it submitted.
+ */
+export function findOpenGrabsForRelease(
+  self: DatabaseManager,
+  release: { title: string; infoHash?: string | null },
+  withinDays = 7,
+): GrabbedReleaseRow[] {
+  const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000).toISOString();
+  const hash = normalizeInfoHash(release.infoHash);
+  const norm = normalizeReleaseTitle(release.title);
+  return self.db.query(`
+    SELECT * FROM grabbed_releases
+    WHERE status IN ('grabbed', 'downloading', 'completed')
+      AND replace(grabbed_at, ' ', 'T') >= ?
+      AND ((? IS NOT NULL AND info_hash = ?) OR normalized_title = ?)
+    ORDER BY id DESC
+  `).all(cutoff, hash, hash, norm) as GrabbedReleaseRow[];
+}
+
+/** Mark a grab failed (frees the in-flight cooldown for its episode). */
+export function markGrabFailed(self: DatabaseManager, id: number, reason: string, nowIso = new Date().toISOString()) {
+  self.db.query(`
+    UPDATE grabbed_releases SET status = 'failed', failure_reason = ?, failed_at = ?
+    WHERE id = ?
+  `).run(reason.slice(0, 500), nowIso, id);
+}
+
+export interface GrabListRow extends GrabbedReleaseRow {
+  show_title: string | null;
+}
+
+/** Recent grabs with show titles, newest first (History / fail action). */
+export function listRecentGrabs(self: DatabaseManager, limit = 100): GrabListRow[] {
+  return self.db.query(`
+    SELECT g.*, s.title AS show_title
+    FROM grabbed_releases g LEFT JOIN shows s ON s.id = g.show_id
+    ORDER BY g.id DESC LIMIT ?
+  `).all(Math.max(1, Math.min(500, limit))) as GrabListRow[];
 }

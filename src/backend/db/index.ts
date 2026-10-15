@@ -18,6 +18,7 @@ import * as pipeline from './pipeline';
 import * as analytics from './analytics';
 import * as health from './health';
 import * as grabs from './grabs';
+import * as blocklist from './blocklist';
 import * as mappings from './mappings';
 import * as episodeFiles from './episode_files';
 
@@ -336,6 +337,19 @@ export class DatabaseManager {
   listGrabbedReleasesForShow(showId: string, limit?: number) { return grabs.listGrabbedReleasesForShow(this, showId, limit); }
   listEpisodesDueForGrab(nowIso: string, grabCooldownIso: string, limit: number) { return grabs.listEpisodesDueForGrab(this, nowIso, grabCooldownIso, limit); }
   recordEpisodeSearchMiss(showId: string, season: number, episode: number, nowIso?: string) { return grabs.recordEpisodeSearchMiss(this, showId, season, episode, nowIso); }
+  getGrab(id: number) { return grabs.getGrab(this, id); }
+  markGrabStatus(id: number, status: Parameters<typeof grabs.markGrabStatus>[2]) { return grabs.markGrabStatus(this, id, status); }
+  markGrabFailed(id: number, reason: string, nowIso?: string) { return grabs.markGrabFailed(this, id, reason, nowIso); }
+  findOpenGrabsForRelease(release: { title: string; infoHash?: string | null }, withinDays?: number) { return grabs.findOpenGrabsForRelease(this, release, withinDays); }
+  listRecentGrabs(limit?: number) { return grabs.listRecentGrabs(this, limit); }
+
+  // ---- Release blocklist ---------------------------------------------------
+
+  addToBlocklist(input: Parameters<typeof blocklist.addToBlocklist>[1]) { return blocklist.addToBlocklist(this, input); }
+  isBlocklisted(showId: string, release: Parameters<typeof blocklist.isBlocklisted>[2]) { return blocklist.isBlocklisted(this, showId, release); }
+  listBlocklist(limit?: number) { return blocklist.listBlocklist(this, limit); }
+  removeFromBlocklist(id: number) { return blocklist.removeFromBlocklist(this, id); }
+  clearBlocklist() { return blocklist.clearBlocklist(this); }
 
   // ---- Episode files (provenance) ----------------------------------------
 

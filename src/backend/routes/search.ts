@@ -296,6 +296,7 @@ export function searchRoutes(systemManager: SystemManager) {
                   releaseTitle: release.title,
                   indexerName: release.indexerName ?? null,
                   publishDate: release.publishDate ?? null,
+                  infoHash: release.infoHash || release.magnetUrl || null,
                 });
               } catch {}
             }
