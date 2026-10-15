@@ -105,7 +105,7 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
     onTabChange?.(id);
   }, [tabProp, onTabChange]);
 
-  const [mobileSection, setMobileSection] = React.useState<string | null>(initialTab || tabProp || null);
+  const [mobileSection, setMobileSection] = React.useState<string | null>(initialTab || null);
   const isDesktop = useIsDesktop();
 
   const [config, setConfig] = React.useState<any>({});
