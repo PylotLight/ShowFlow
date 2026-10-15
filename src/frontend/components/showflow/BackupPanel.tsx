@@ -3,6 +3,7 @@ import { Loader2Icon, RefreshCwIcon, DownloadIcon, Trash2Icon } from "lucide-rea
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
 import { formatBytes } from "./SettingsShared";
+import { toast } from "@frontend/lib/toast";
 
 interface Retention { recent: number; daily: number; weekly: number }
 const DEFAULT_RETENTION: Retention = { recent: 2, daily: 7, weekly: 4 };
@@ -69,7 +70,7 @@ export function BackupPanel() {
       })
       .then(() => load())
       .catch(err => {
-        window.alert(`Backup upload failed: ${err instanceof Error ? err.message : String(err)}`);
+        toast.error("Backup upload failed", { description: err instanceof Error ? err.message : String(err) });
       })
       .finally(() => setUploading(false));
   }

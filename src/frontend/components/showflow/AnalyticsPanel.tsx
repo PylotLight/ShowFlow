@@ -4,6 +4,7 @@ import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { StatTile } from "@frontend/components/showflow/StatTile";
 import { Button } from "@frontend/components/ui/button";
 import { formatBytes } from "./SettingsShared";
+import { confirmDialog } from "@frontend/components/ui/confirm";
 
 interface TableStat {
   name: string;
@@ -169,9 +170,12 @@ function DatabaseCleanup({ sweepTask, onDone }: { sweepTask: any; onDone: () => 
   }
 
   async function start(action: CleanupAction) {
-    if (action === "vacuum" && !confirm(
-      "Vacuum rewrites the whole database file to reclaim space. It locks the database for a few minutes — the UI will show 502s until it finishes, then recover on its own. Continue?"
-    )) return;
+    if (action === "vacuum" && !(await confirmDialog({
+      title: "Vacuum the database?",
+      description: "Vacuum rewrites the whole database file to reclaim space. It locks the database for a few minutes — the UI will show 502s until it finishes, then recover on its own.",
+      confirmLabel: "Vacuum",
+      destructive: true,
+    }))) return;
     setBusyAction(action);
     setJobDetail("Starting…");
     setJobError(null);

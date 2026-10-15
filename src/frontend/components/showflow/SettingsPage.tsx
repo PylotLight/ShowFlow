@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
+import { ArrowLeft, Loader2Icon, XIcon } from "lucide-react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 
@@ -23,19 +23,13 @@ function useIsDesktop() {
   return desktop;
 }
 
-/** Save indicator in the global header, shared by every tab. */
+/** Save spinner in the global header; the result itself is a toast. */
 function SaveStatus() {
-  const { saveMsg, saving } = useSettings();
-  if (!saveMsg && !saving) return null;
+  const { saving } = useSettings();
+  if (!saving) return null;
   return (
-    <div className="flex shrink-0 items-center gap-2 pl-2" role="status" aria-live="polite">
-      {saveMsg && (
-        <span className={cn("flex shrink-0 items-center gap-1.5 text-xs", saveMsg.ok ? "text-emerald-400" : "text-red-400")}>
-          {saveMsg.ok ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
-          {saveMsg.text}
-        </span>
-      )}
-      {saving && <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />}
+    <div className="flex shrink-0 items-center gap-2 pl-2" role="status" aria-label="Saving">
+      <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
     </div>
   );
 }
@@ -118,6 +112,12 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
 
   const [mobileSection, setMobileSection] = React.useState<string | null>(initialTab || null);
   const isDesktop = useIsDesktop();
+
+  // An in-app link to another tab (e.g. Source Status -> Configure) while a
+  // mobile section is open should follow the URL, not stay on the old one.
+  React.useEffect(() => {
+    setMobileSection((cur) => (cur && tabProp && cur !== tabProp ? tabProp : cur));
+  }, [tabProp]);
 
   const [config, setConfig] = React.useState<any>({});
   const [settingsRows, setSettingsRows] = React.useState<{ key: string; value: string }[]>([]);

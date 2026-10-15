@@ -10,13 +10,12 @@ import { ShowDetailDialog } from "@frontend/components/showflow/ShowDetailDialog
 import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { SettingsPage } from "@frontend/components/showflow/SettingsPage";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
-import { QueuePage } from "@frontend/components/showflow/QueuePage";
 import { PipelinePage } from "@frontend/components/showflow/PipelinePage";
-import { HistoryPage } from "@frontend/components/showflow/HistoryPage";
-import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
-import { ManualImport } from "@frontend/components/showflow/ManualImport";
+import { ActivityPage } from "@frontend/components/showflow/ActivityPage";
+import { CommandPalette } from "@frontend/components/showflow/CommandPalette";
 import { IndexerSearch } from "@frontend/components/showflow/IndexerSearch";
-import { HealthDashboard } from "@frontend/components/showflow/HealthDashboard";
+import { Toaster } from "@frontend/components/ui/sonner";
+import { ConfirmHost } from "@frontend/components/ui/confirm";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { MenuIcon, SearchIcon } from "lucide-react";
@@ -25,15 +24,18 @@ import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
 import { OnboardingWizard } from "@frontend/components/showflow/onboarding/OnboardingWizard";
 import {
+  DEFAULT_ACTIVITY_TAB,
   PAGE_LABELS,
   cameFromApp,
   navigate,
   pageHash,
   routeToHash,
   useHashRoute,
-  type Route,
+  type PageRoute,
 } from "@frontend/lib/router";
 import "./styles/index.css";
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 export function App() {
   // Navigation lives in the URL hash (see lib/router.ts) so refresh, back /
@@ -41,7 +43,7 @@ export function App() {
   const route = useHashRoute();
   // The show detail renders over whichever page you opened it from; on a
   // pasted #/show/:id link that falls back to the dashboard.
-  const lastPageRoute = React.useRef<Extract<Route, { kind: "page" }>>({ kind: "page", page: "dashboard" });
+  const lastPageRoute = React.useRef<PageRoute>({ kind: "page", page: "dashboard" });
   if (route.kind === "page") lastPageRoute.current = route;
   const pageRoute = lastPageRoute.current;
   const activeNav: NavItem = pageRoute.page;
@@ -52,6 +54,8 @@ export function App() {
   const [showSummary, setShowSummary] = React.useState<ShowSummary | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [addShowOpen, setAddShowOpen] = React.useState(false);
   const selectedShowId = route.kind === "show" ? route.showId : null;
   const selected = selectedShowId && showSummary?.id === selectedShowId ? showSummary : null;
   // Three-state gate so the wizard never flashes on reload: while "checking"
@@ -249,6 +253,17 @@ export function App() {
           />
 
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Search and commands (Ctrl+K)"
+              title="Search and commands (⌘K / Ctrl+K)"
+              className="flex size-9 items-center justify-center gap-2 rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70 lg:w-auto lg:border lg:border-white/10 lg:bg-white/[0.03] lg:px-2.5"
+            >
+              <SearchIcon className="size-4" />
+              <span className="hidden text-xs lg:inline">Search</span>
+              <kbd className="hidden rounded border border-white/10 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground lg:inline">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+            </button>
             <DebugBadge className="mr-1 hidden md:inline-flex" onOpenDebug={() => openSettings("debug")} />
             {/* Single mount for every breakpoint — it polls, so never render two. */}
             <NotificationsPopover />
@@ -310,22 +325,14 @@ export function App() {
               scrollToSection={settingsScrollTo}
               onReRunWizard={reRunWizard}
             />
-          ) : activeNav === "queue" ? (
-            <QueuePage key={refreshKey} />
-          ) : activeNav === "pipeline" ? (
-            <PipelinePage key={refreshKey} onSelectShow={selectShow} />
-          ) : activeNav === "history" ? (
-            <HistoryPage key={refreshKey} />
-          ) : activeNav === "health" ? (
-            <HealthDashboard
+          ) : activeNav === "activity" ? (
+            <ActivityPage
+              key={refreshKey}
+              tab={pageRoute.activityTab ?? DEFAULT_ACTIVITY_TAB}
               onOpenSettings={(tab) => openSettings(tab)}
             />
-          ) : activeNav === "sources" ? (
-            <SourcesPage
-              onOpenSettings={() => openSettings("indexers")}
-            />
-          ) : activeNav === "manual-import" ? (
-            <ManualImport />
+          ) : activeNav === "pipeline" ? (
+            <PipelinePage key={refreshKey} onSelectShow={selectShow} />
           ) : activeNav === "search" ? (
             <IndexerSearch
               onOpenSettings={() => openSettings("indexers")}
@@ -352,6 +359,21 @@ export function App() {
         />
       )}
     </div>
+    <CommandPalette
+      open={paletteOpen}
+      onOpenChange={setPaletteOpen}
+      onSelectShow={selectShow}
+      onAddShow={() => setAddShowOpen(true)}
+    />
+    <AddShowDialog
+      hideTrigger
+      open={addShowOpen}
+      onOpenChange={setAddShowOpen}
+      onAdded={() => setRefreshKey((k) => k + 1)}
+    />
+    {/* Single toast + confirm hosts for the whole app. */}
+    <Toaster />
+    <ConfirmHost />
     {wizardOpen && (
       <OnboardingWizard onFinish={() => { setWizardState('closed'); window.location.reload(); }} />
     )}

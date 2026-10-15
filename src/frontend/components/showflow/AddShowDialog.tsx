@@ -120,8 +120,19 @@ function sortResults(results: SearchResult[], mode: SortMode): SearchResult[] {
   }
 }
 
-function AddShowDialog({ onAdded }: { onAdded: () => void }) {
-  const [open, setOpen] = React.useState(false);
+function AddShowDialog({ onAdded, open: openProp, onOpenChange, hideTrigger }: {
+  onAdded: () => void;
+  /** Controlled open state (command palette opens it without the trigger). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}) {
+  const [localOpen, setLocalOpen] = React.useState(false);
+  const open = openProp ?? localOpen;
+  const setOpen = (v: boolean) => {
+    if (openProp === undefined) setLocalOpen(v);
+    onOpenChange?.(v);
+  };
   const [source, setSource] = React.useState<ProviderId>("tvdb");
   // TV vs film search — films are TMDB-only (?kind=movie → /search/movie,
   // added with seriesType 'movie').
@@ -332,11 +343,13 @@ function AddShowDialog({ onAdded }: { onAdded: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setSelectedItems(new Map()); setProcessing({ status: "idle", results: [] }); }}}>
-      <DialogTrigger asChild>
-        <Button variant="default" size="sm">
-          <PlusIcon /> Add Show
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button variant="default" size="sm">
+            <PlusIcon /> Add Show
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6">
         <DialogHeader>
           <DialogTitle>Add shows</DialogTitle>
