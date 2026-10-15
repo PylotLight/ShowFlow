@@ -2,6 +2,63 @@
 // so it's unit-testable in isolation). The wiring lives in
 // update_activation.ts and update_watcher.ts.
 
+// ---- Versions / prereleases ------------------------------------------------
+
+interface Semver { core: number[]; pre: string[] }
+
+/** `v1.2.3-rc.1+build` -> { core: [1,2,3], pre: ['rc','1'] }. null if the core isn't numeric. */
+export function parseSemver(v: string): Semver | null {
+  const m = /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/i.exec(v.trim());
+  if (!m) return null;
+  return { core: m[1]!.split('.').map(Number), pre: m[2] ? m[2].split('.') : [] };
+}
+
+/** True for tags like `v0.1.80-test.1` / `v1.0.0-rc1` (anything with a semver prerelease suffix). */
+export function isPrereleaseTag(tag: string): boolean {
+  const p = parseSemver(tag);
+  return !!p && p.pre.length > 0;
+}
+
+/**
+ * semver precedence: numeric core first, then a version WITH a prerelease
+ * suffix sorts below the same version without one (`0.1.80-test.1` < `0.1.80`),
+ * prerelease identifiers compare numerically when both are numbers, else
+ * lexically, and a shorter identifier list wins ties. Build metadata is
+ * ignored. Returns null when either side isn't a version (e.g. "development").
+ */
+export function compareSemver(a: string, b: string): number | null {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  if (!pa || !pb) return null;
+  const len = Math.max(pa.core.length, pb.core.length);
+  for (let i = 0; i < len; i++) {
+    const d = (pa.core[i] ?? 0) - (pb.core[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  if (!pa.pre.length || !pb.pre.length) return pb.pre.length - pa.pre.length; // release > prerelease
+  for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+    const x = pa.pre[i];
+    const y = pb.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x) ? Number(x) : NaN;
+    const ny = /^\d+$/.test(y) ? Number(y) : NaN;
+    if (!Number.isNaN(nx) && !Number.isNaN(ny)) return nx - ny;
+    if (!Number.isNaN(nx)) return -1; // numeric ids sort below alphanumeric
+    if (!Number.isNaN(ny)) return 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Newest entry the watcher may auto-download: skips prerelease-suffixed tags
+ *  (the atom feed has no prerelease/draft flag, so the tag is the signal; drafts
+ *  never show up in the feed at all). */
+export function latestStableEntry<T extends { tag: string }>(list: T[]): T | undefined {
+  return list.find((e) => !isPrereleaseTag(e.tag));
+}
+
 // ---- Busy / drain ---------------------------------------------------------
 
 /** Something that would be interrupted by the stop-start handoff. */
@@ -134,7 +191,7 @@ export function normalizeAutoActivate(raw: unknown): AutoActivateSettings {
 export interface AutoActivateInput {
   settings: AutoActivateSettings;
   now: Date;
-  pending: { releaseId: string } | null;
+  pending: { releaseId: string; tag?: string | null } | null;
   /** releaseId of an earlier attempt that failed or rolled back. */
   failedReleaseId: string | null;
   busy: BusyItem[];
@@ -145,6 +202,9 @@ export interface AutoActivateInput {
 export function decideAutoActivate(i: AutoActivateInput): { activate: boolean; reason: string } {
   if (i.settings.mode === 'off') return { activate: false, reason: 'auto-activate is off' };
   if (!i.pending) return { activate: false, reason: 'nothing staged' };
+  if (i.pending.tag && isPrereleaseTag(i.pending.tag)) {
+    return { activate: false, reason: 'prerelease builds are never auto-activated — activate it manually' };
+  }
   if (i.activating) return { activate: false, reason: 'activation already in progress' };
   if (i.failedReleaseId && i.failedReleaseId === i.pending.releaseId) {
     return { activate: false, reason: 'this release already failed to activate — activate it manually' };

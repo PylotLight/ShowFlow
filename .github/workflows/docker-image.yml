@@ -32,6 +32,11 @@ on:
         description: Existing release tag to (re)build (e.g. v0.1.81)
         required: true
         type: string
+      ref:
+        description: Commit/branch to build instead of refs/tags/<tag> (for a draft release, whose tag doesn't exist yet)
+        required: false
+        type: string
+        default: ''
       prerelease:
         description: Skip the `latest` image tag
         required: false
@@ -88,7 +93,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          ref: ${{ inputs.ref || format('refs/tags/{0}', steps.tag.outputs.tag) }}
 
       - name: Resolve commit
         id: sha
@@ -161,6 +166,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # `latest` (what k8s/deployment.yaml pulls) is skipped for prereleases:
+      # the GitHub flag, the input, or a semver suffix in the tag (v1.2.3-rc.1).
+      # metadata-action already limits suffixed tags to {{version}} (no X.Y).
       # Explicit values: under workflow_call/dispatch github.ref/sha are the
       # caller's (main, pre-bump), so the default semver/sha sources are wrong.
       - name: Extract Docker metadata
@@ -169,7 +177,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ !(github.event.release.prerelease || inputs.prerelease) }}
+            type=raw,value=latest,enable=${{ !(github.event.release.prerelease || inputs.prerelease || contains(steps.tag.outputs.tag, '-')) }}
             type=semver,pattern={{version}},value=${{ steps.tag.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag.outputs.tag }}
             type=raw,value=sha-${{ steps.sha.outputs.short }}

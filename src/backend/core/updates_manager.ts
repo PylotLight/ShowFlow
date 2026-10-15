@@ -22,6 +22,7 @@
 // distroless images.
 
 import { mkdir, rename, unlink } from "node:fs/promises";
+import { isPrereleaseTag } from "./update_policy";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -395,7 +396,12 @@ function releaseIdFromAsset(name: string): string {
 export async function downloadAndInstallByTag(
   tag: string,
   onProgress?: (received: number, total: number | null) => void,
-): Promise<{ ok: boolean; message: string; releaseId?: string }> {
+): Promise<{ ok: boolean; message: string; releaseId?: string; skipped?: boolean }> {
+  // Auto-download path only (the watcher): never pull a prerelease. Manual
+  // installs by release id (downloadAndInstall) still allow it on purpose.
+  if (isPrereleaseTag(tag)) {
+    return { ok: false, skipped: true, message: `Release "${tag}" is a prerelease — skipped (install it manually from the releases list).` };
+  }
   const { token, repo } = githubConfig();
   setProgress({ tag, releaseId: null, phase: "resolving", receivedBytes: 0, totalBytes: null, attempt: 1, message: null });
 
@@ -408,6 +414,11 @@ export async function downloadAndInstallByTag(
   }
   rateLimited(relRes);
   const release = (await relRes.json()) as any;
+  if (release.draft || release.prerelease) {
+    const message = `Release "${tag}" is marked ${release.draft ? "draft" : "prerelease"} on GitHub — skipped (install it manually from the releases list).`;
+    downloadProgress = null; // not an error, nothing to show in the panel
+    return { ok: false, skipped: true, message };
+  }
   const assets = (release.assets ?? []) as any[];
   const tarballAsset = assets.find((a) => a.name.startsWith("showflow-") && a.name.endsWith(".tar.gz"));
   if (!tarballAsset) {
