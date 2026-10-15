@@ -3,6 +3,7 @@ import * as schema from '../db/schema';
 import { db } from '../db';
 import { json, errorResponse } from './_shared';
 import { getPendingUpdate } from '../core/update_watcher';
+import { getLastActivation } from '../core/update_activation';
 
 const DISMISSED_SETTING_KEY = 'notifications:dismissed';
 
@@ -87,12 +88,26 @@ export function notificationRoutes() {
             ...(() => {
               const pending = getPendingUpdate();
               if (!pending) return [];
+              const last = getLastActivation();
+              const rolledBack = !!last && last.releaseId === pending.releaseId && (last.outcome === 'rolled-back' || last.outcome === 'failed');
+              // First few meaningful lines of the release notes, so the
+              // notification says *what* changed, not just that something did.
+              const summary = (pending.notes ?? '')
+                .split('\n')
+                .map((l) => l.trim().replace(/^[•*-]\s+/, ''))
+                .filter((l) => l && !/^#+\s|^full changelog/i.test(l))
+                .slice(0, 3)
+                .join(' · ');
               return [{
-                id: `update:${pending.releaseId}`,
+                id: `update:${pending.releaseId}${rolledBack ? ':failed' : ''}`,
                 type: 'update' as const,
-                severity: 'info' as const,
-                title: `Update ${pending.tag} is ready to activate`,
-                message: 'Downloaded and verified — open Updates to activate when ready.',
+                severity: rolledBack ? ('warning' as const) : ('info' as const),
+                title: rolledBack ? `Update ${pending.tag} was rolled back` : `Update ${pending.tag} is ready to activate`,
+                message: rolledBack
+                  ? (last?.message ?? 'Activation failed — the previous build is still running.')
+                  : summary
+                    ? `${summary.length > 220 ? `${summary.slice(0, 217)}…` : summary}`
+                    : 'Downloaded and verified — open Updates to activate when ready.',
                 reasonCode: null,
                 timestamp: pending.stagedAt,
                 link: '/settings?tab=general',

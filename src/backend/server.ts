@@ -291,6 +291,18 @@ console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, vers
 // every 15 min thereafter, and the settings panel can force one on demand.
 try {
   const { reconcilePendingOnBoot, runWatchCycle } = await import("./core/update_watcher");
+  const { reconcileActivationOnBoot, setBusyProbe } = await import("./core/update_activation");
+  const { collectBusy } = await import("./core/update_policy");
+  const { backgroundJobs } = await import("./core/background_jobs");
+  // What a release handoff would interrupt: running scheduler tasks, scan /
+  // import / backup jobs, and blackhole/TorBox files mid-import.
+  setBusyProbe(() => collectBusy({
+    runningTasks: scheduler.runningTasks(),
+    activeJobs: backgroundJobs.listActive(),
+    processing: systemManager.getProcessingDetail(),
+  }));
+  // Did the last activation stick, or did the supervisor roll back?
+  reconcileActivationOnBoot();
   reconcilePendingOnBoot();
   setTimeout(() => {
     runWatchCycle({ force: true }).catch((err) =>

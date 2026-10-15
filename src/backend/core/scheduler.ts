@@ -181,6 +181,11 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       const { runWatchCycle } = await import('./update_watcher');
       const result = await runWatchCycle();
       debugLog(`Task update-check complete: ${result.status} (latest ${result.latestTag ?? 'none'})`);
+      // Optional auto-activate (Settings > Updates, off by default): a staged
+      // release goes live when idle / inside the chosen hour.
+      const { maybeAutoActivate } = await import('./update_activation');
+      const auto = maybeAutoActivate(result.pending);
+      if (result.pending) debugLog(`Auto-activate: ${auto.activate ? 'activating' : 'not now'} (${auto.reason})`);
     },
   },
   'pipeline-cleanup': {
@@ -328,6 +333,11 @@ export class Scheduler {
   private skipLogged = new Set<TaskName>();
 
   constructor(private config: Config, private ctx: TaskContext = {}) {}
+
+  /** Tasks currently mid-run (used by the update flow's drain/idle check). */
+  runningTasks(): string[] {
+    return [...this.running];
+  }
 
   /**
    * Get all available task definitions
