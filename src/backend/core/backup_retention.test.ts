@@ -51,10 +51,19 @@ test('legacy keepCount becomes keepRecent, new keys win', () => {
   expect(both).toEqual({ recent: 3, daily: 5, weekly: 4 });
 });
 
+// Fixture DBs: one transaction, no journal file, no fsync. The default
+// (rollback journal + synchronous=FULL, one autocommit per statement) cost ~3
+// fsyncs per statement, ~60 for the 10-backup test below; on the NAS runner
+// (docker-in-docker overlayfs on spinning disks) that alone took ~10s.
+// Durability means nothing for a throwaway temp file.
 function makeBackupDb(path: string, imagePaths: string[]) {
   const d = new Database(path);
-  d.run('CREATE TABLE show_artworks (id INTEGER PRIMARY KEY, image_path TEXT)');
-  for (const p of imagePaths) d.run('INSERT INTO show_artworks (image_path) VALUES (?)', [p]);
+  d.run('PRAGMA journal_mode = OFF');
+  d.run('PRAGMA synchronous = OFF');
+  d.transaction(() => {
+    d.run('CREATE TABLE show_artworks (id INTEGER PRIMARY KEY, image_path TEXT)');
+    for (const p of imagePaths) d.run('INSERT INTO show_artworks (image_path) VALUES (?)', [p]);
+  })();
   d.close();
 }
 
@@ -83,7 +92,7 @@ test('pruneBackups applies the policy on disk and drops unreferenced image-store
   expect(existsSync(join(dir, 'images', a.path))).toBe(true);
   expect(existsSync(join(dir, 'images', b.path))).toBe(false);
   expect(await pruneBackupImages(dir)).toBe(0);
-});
+}, 20_000); // ~25ms locally; headroom for slow runner disks (it's ~40 small file ops even without fsync)
 
 test('legacy numeric keepCount still works', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sf-bk-'));

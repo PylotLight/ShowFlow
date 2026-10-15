@@ -17,7 +17,7 @@ import { db } from "../db";
 import { backgroundJobs } from "./background_jobs";
 import { downloadAndInstallByTag } from "./updates_manager";
 import { emitConnectSignal } from "./connect/bus";
-import { retryDelayMs } from "./update_policy";
+import { retryDelayMs, compareSemver, latestStableEntry } from "./update_policy";
 
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
 
@@ -66,6 +66,7 @@ let inFlight: Promise<WatchResult> | null = null;
 // (1, 2, 5, 10 min…) driven by a timer, independent of the panel.
 let failure: { tag: string; count: number; nextAt: number; message: string } | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let skippedPrerelease: { tag: string; updated: string | null } | null = null;
 
 export function getDownloadFailure(): { tag: string; count: number; nextRetryAt: string; message: string } | null {
   return failure ? { tag: failure.tag, count: failure.count, nextRetryAt: new Date(failure.nextAt).toISOString(), message: failure.message } : null;
@@ -119,10 +120,12 @@ export function clearPendingUpdate(): void {
 
 // ---- Version comparison -------------------------------------------------
 
-/** Strips a leading `v` and compares dotted numeric versions. Returns
- *  >0 if a>b, <0 if a<b, 0 if equal. Non-numeric segments compare lexically
- *  so pre-release suffixes (`-rc1`, `-beta`) never throw us for a loop. */
+/** semver compare (see compareSemver: `0.1.80-test.1` < `0.1.80`), with a
+ *  lexical fallback for non-versions like "development" so a dev build still
+ *  never auto-updates. >0 if a>b, <0 if a<b, 0 if equal. */
 export function compareVersions(a: string, b: string): number {
+  const sem = compareSemver(a, b);
+  if (sem !== null) return sem;
   const clean = (s: string) => s.trim().replace(/^v/i, "");
   const pa = clean(a).split(/[.\-+]/);
   const pb = clean(b).split(/[.\-+]/);
@@ -239,7 +242,7 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       return { ...base, status: "unchanged", latestTag: entries[0]?.tag ?? null, pending: getPendingUpdate(), error: message };
     }
 
-    const latest = entries[0];
+    const latest = latestStableEntry(entries);
     if (!latest) return { ...base, status: "up-to-date", latestTag: null, pending: getPendingUpdate() };
 
     // Feed is newest-first; still guard with an explicit compare so a
@@ -264,6 +267,12 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       return { ...base, status: "skipped", latestTag: latest.tag, pending };
     }
 
+    // GitHub flagged this tag as a prerelease/draft (no `-` suffix to catch it
+    // earlier): don't touch it again until the feed entry changes.
+    if (skippedPrerelease && skippedPrerelease.tag === latest.tag && skippedPrerelease.updated === latest.updated) {
+      return { ...base, status: "skipped", latestTag: latest.tag, pending };
+    }
+
     // A recent attempt at this tag failed: wait out the backoff (a timer
     // re-runs the cycle when it's due) instead of re-spending API quota.
     if (failure && failure.tag === latest.tag && Date.now() < failure.nextAt) {
@@ -276,7 +285,7 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
     db.logEvent({ type: "update", entityType: "system", entityId: latest.tag, message: `New release ${latest.tag} detected — auto-downloading` });
     console.log(`[updates] new release ${latest.tag} (current ${BUILD_VERSION}) — auto-downloading`);
 
-    let result: { ok: boolean; message: string; releaseId?: string };
+    let result: { ok: boolean; message: string; releaseId?: string; skipped?: boolean };
     try {
       result = await downloadAndInstallByTag(latest.tag, (received, total) => {
         if (total) backgroundJobs.update(jobId, { completed: Math.floor((received / total) * 100), detail: `${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB` });
@@ -285,6 +294,12 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       // Previously a throw here (404 on the tag, network) escaped the cycle
       // and left the background job spinning as "running" forever.
       result = { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    if (result.skipped) {
+      skippedPrerelease = { tag: latest.tag, updated: latest.updated };
+      backgroundJobs.complete(jobId, result.message);
+      console.log(`[updates] ${result.message}`);
+      return { ...base, status: "skipped", latestTag: latest.tag, pending };
     }
     if (!result.ok || !result.releaseId) {
       const nextAt = scheduleRetry(latest.tag, result.message);

@@ -120,15 +120,35 @@ export async function readManifest(dir: string): Promise<Manifest | null> {
  * compiled-in __BUILD_COMMIT__ (checked separately, at readiness time,
  * against the manifest's `commit` field).
  */
-/** Simple semver comparison. Returns <0, 0, or >0. Handles "0.1.0" and "v0.1.0" formats. */
+/** semver comparison. Returns <0, 0, or >0. Handles "0.1.0", "v0.1.0" and
+ *  prerelease suffixes (`0.1.80-test.1` < `0.1.80`). Non-semver strings
+ *  (e.g. "development") compare equal, as before. */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/i, "").split(".").map(Number);
-  const pb = b.replace(/^v/i, "").split(".").map(Number);
+  const parse = (v: string) => /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/i.exec(v.trim());
+  const ma = parse(a);
+  const mb = parse(b);
+  if (!ma || !mb) return 0;
+  const pa = ma[1]!.split(".").map(Number);
+  const pb = mb[1]!.split(".").map(Number);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] ?? 0;
     const nb = pb[i] ?? 0;
-    if (isNaN(na) || isNaN(nb)) continue; // non-semver strings (e.g. "development") compare equal
     if (na !== nb) return na - nb;
+  }
+  const ra = ma[2] ? ma[2].split(".") : [];
+  const rb = mb[2] ? mb[2].split(".") : [];
+  if (!ra.length || !rb.length) return rb.length - ra.length; // release > prerelease
+  for (let i = 0; i < Math.max(ra.length, rb.length); i++) {
+    const x = ra[i];
+    const y = rb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) return Number(x) - Number(y);
+    if (nx !== ny) return nx ? -1 : 1;
+    return x < y ? -1 : 1;
   }
   return 0;
 }

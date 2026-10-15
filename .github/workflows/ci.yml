@@ -52,14 +52,11 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Cache bun install
-        if: env.PERSISTENT_CACHE != '1'
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
+      # No actions/cache: on the NAS runner a cold `bun install` is ~5s, but
+      # saving the ~190MB cache back to GitHub took ~70s ("Post Cache bun
+      # install"), and PR-branch caches aren't visible to other PRs so most
+      # runs missed and paid that save. Restoring 190MB over the NAS uplink
+      # wouldn't beat a cold install either. Same as the release workflow.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

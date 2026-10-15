@@ -10,8 +10,7 @@
     "build": "bun run build.ts",
     "build:supervisor": "bun build --compile --target=bun-linux-x64 supervisor/index.ts --outfile=dist/supervisor",
     "release": "bun release.ts",
-    "test": "bun test",
-    "check": "bun check"
+    "test": "bun test"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.19",

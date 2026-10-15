@@ -21,7 +21,7 @@ Default to using Bun instead of Node.js.
 
 ## Testing
 
-Use `bun test` to run tests and `bun check` (or `bun run check`) to typecheck. Don't use `tsc`.
+Use `bun test` to run tests and `bun check` to typecheck (it's bun's built-in checker, so there's deliberately no `check` script in package.json, which would shadow it and recurse). Don't use `tsc`.
 
 ```ts#index.test.ts
 import { test, expect } from "bun:test";

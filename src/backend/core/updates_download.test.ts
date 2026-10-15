@@ -71,3 +71,30 @@ test('a release without the tarball asset yet is a soft failure, not a throw', a
   expect(result.message).toContain('CI may still be building');
   expect(getDownloadProgress()?.phase).toBe('error');
 });
+
+test('a prerelease-suffixed tag is skipped without touching the network', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => { calls.push(String(input)); return new Response('nope', { status: 404 }); }) as any;
+  const { downloadAndInstallByTag } = await import('./updates_manager');
+  const r = await downloadAndInstallByTag('v9.9.9-test.1');
+  expect(r).toMatchObject({ ok: false, skipped: true });
+  expect(calls).toEqual([]);
+});
+
+test('a release GitHub flags as prerelease or draft is skipped before any download', async () => {
+  for (const flag of [{ prerelease: true }, { draft: true }]) {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith('/releases/tags/v9.9.11')) {
+        return Response.json({ tag_name: 'v9.9.11', ...flag, assets: [{ id: 7, name: 'showflow-cafe.tar.gz', size: 1 }] });
+      }
+      return new Response('nope', { status: 404 });
+    }) as any;
+    const { downloadAndInstallByTag } = await import('./updates_manager');
+    const r = await downloadAndInstallByTag('v9.9.11');
+    expect(r).toMatchObject({ ok: false, skipped: true });
+    expect(calls.some((u) => u.includes('/releases/assets/'))).toBe(false);
+  }
+});
