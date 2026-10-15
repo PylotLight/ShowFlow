@@ -1,6 +1,7 @@
 import { and, eq, desc, sql, gte } from 'drizzle-orm';
 import * as schema from './schema';
 import type { DatabaseManager } from './index';
+import { resolveStatusTargets, setEpisodeStatus } from './episode_status';
 
 /** How many grabbed releases to keep in the lookup table (FIFO). */
 const GRAB_RETENTION_LIMIT = 500;
@@ -91,6 +92,20 @@ export function recordGrabbedRelease(self: DatabaseManager, input: {
         AND (last_searched_at IS NOT NULL OR search_attempts != 0)
     `).run(input.showId, input.season, input.episode ?? null, input.episode ?? null);
   }
+
+  // Persisted pipeline status: the grabbed episode(s) are now downloading.
+  // Here rather than at each caller so auto-grab, RSS, manual and
+  // interactive grabs all land the same transition.
+  try {
+    const nowIso = new Date().toISOString();
+    for (const t of resolveStatusTargets(self, input.showId, input.season, input.episode)) {
+      setEpisodeStatus(self, t, {
+        state: 'grabbed_downloading', blocker: null, meta: null,
+        detail: `Sent "${input.releaseTitle}" to the download client`,
+        releaseTitle: input.releaseTitle,
+      }, nowIso);
+    }
+  } catch { /* status is best-effort; never fail a grab over it */ }
 
   // Retain only the most recent GRAB_RETENTION_LIMIT rows so the hint
   // lookup below never scans a stale, unbounded history.
@@ -222,6 +237,70 @@ export interface EpisodeDueForGrab {
 export const SEARCH_BACKOFF_MINUTES = [15, 60, 360, 1440] as const;
 
 /**
+ * True when the episode has never been searched, or its release window moved
+ * past the last search (air date changed later) - backoff doesn't apply.
+ */
+const SEARCH_WINDOW_FRESH =
+  `(e.last_searched_at IS NULL OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at)`;
+
+/**
+ * The auto-grab eligibility gates, one SQL predicate each, over `episodes e
+ * JOIN shows s`. This is the single source of truth: listEpisodesDueForGrab
+ * ANDs all of them, listRssCandidateEpisodes ANDs all but `outsideBackoff`,
+ * and core/pipeline/explain.ts selects each one as a column so the Pipeline
+ * can say *which* gate is holding an episode back - no parallel copy of the
+ * rules to drift. Bind with grabGateParams().
+ */
+export const GRAB_GATES = {
+  tracked: `e.is_tracked = 1`,
+  autoMode: `(e.search_mode IS NULL OR e.search_mode = 'auto')`,
+  missing: `(e.file_path IS NULL OR e.file_path = '')`,
+  notMovie: `COALESCE(s.series_type, 'standard') != 'movie'`,
+  released: `(
+        (e.expected_release_at IS NOT NULL AND e.expected_release_at <= $now)
+        OR (e.expected_release_at IS NULL AND e.air_date IS NOT NULL AND e.air_date != '' AND e.air_date <= $now)
+      )`,
+  notInflight: `NOT EXISTS (
+        SELECT 1 FROM grabbed_releases g
+        WHERE g.show_id = e.show_id
+          AND g.season_number = e.season_number
+          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
+          AND replace(g.grabbed_at, ' ', 'T') >= $cooldown
+          AND g.status != 'failed'
+      )`,
+  outsideBackoff: `(
+        ${SEARCH_WINDOW_FRESH}
+        OR e.last_searched_at <= CASE
+          WHEN e.search_attempts <= 1 THEN $b1
+          WHEN e.search_attempts = 2 THEN $b2
+          WHEN e.search_attempts = 3 THEN $b3
+          ELSE $b4
+        END
+      )`,
+} as const;
+
+export type GrabGate = keyof typeof GRAB_GATES;
+
+/** All gates ANDed: the auto-grab due set (before the live isDueForSearch check). */
+export const DUE_FOR_GRAB_WHERE = Object.values(GRAB_GATES).join('\n      AND ');
+
+/** Named bind params for GRAB_GATES ($now, $cooldown, $b1..$b4 backoff cutoffs). */
+export function grabGateParams(nowIso: string, grabCooldownIso: string): Record<string, string> {
+  const nowMs = new Date(nowIso).getTime();
+  const [b1, b2, b3, b4] = SEARCH_BACKOFF_MINUTES.map(m => new Date(nowMs - m * 60_000).toISOString());
+  return { $now: nowIso, $cooldown: grabCooldownIso, $b1: b1!, $b2: b2!, $b3: b3!, $b4: b4! };
+}
+
+/** When the backoff after `attempts` consecutive misses lapses (null = no backoff). */
+export function searchBackoffUntil(lastSearchedAt: string | null, attempts: number): string | null {
+  if (!lastSearchedAt || attempts <= 0) return null;
+  const idx = Math.min(Math.max(attempts, 1), SEARCH_BACKOFF_MINUTES.length) - 1;
+  const t = new Date(lastSearchedAt).getTime();
+  if (Number.isNaN(t)) return null;
+  return new Date(t + SEARCH_BACKOFF_MINUTES[idx]! * 60_000).toISOString();
+}
+
+/**
  * Episodes the auto-grabber should consider this cycle: tracked, in
  * auto-search mode, missing from disk, past their expected release time,
  * without an in-flight grab already recorded within `grabCooldownIso` (an
@@ -255,8 +334,6 @@ export function listEpisodesDueForGrab(
   grabCooldownIso: string,
   limit: number,
 ): EpisodeDueForGrab[] {
-  const nowMs = new Date(nowIso).getTime();
-  const [b1, b2, b3, b4] = SEARCH_BACKOFF_MINUTES.map(m => new Date(nowMs - m * 60_000).toISOString());
   return self.db.query(`
     SELECT
       e.show_id,
@@ -269,38 +346,13 @@ export function listEpisodesDueForGrab(
       s.release_delay_minutes
     FROM episodes e
     JOIN shows s ON s.id = e.show_id
-    WHERE e.is_tracked = 1
-      AND (e.search_mode IS NULL OR e.search_mode = 'auto')
-      AND (e.file_path IS NULL OR e.file_path = '')
-      AND COALESCE(s.series_type, 'standard') != 'movie'
-      AND (
-        (e.expected_release_at IS NOT NULL AND e.expected_release_at <= ?)
-        OR (e.expected_release_at IS NULL AND e.air_date IS NOT NULL AND e.air_date != '' AND e.air_date <= ?)
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM grabbed_releases g
-        WHERE g.show_id = e.show_id
-          AND g.season_number = e.season_number
-          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
-          AND replace(g.grabbed_at, ' ', 'T') >= ?
-          AND g.status != 'failed'
-      )
-      AND (
-        e.last_searched_at IS NULL
-        OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at
-        OR e.last_searched_at <= CASE
-          WHEN e.search_attempts <= 1 THEN ?
-          WHEN e.search_attempts = 2 THEN ?
-          WHEN e.search_attempts = 3 THEN ?
-          ELSE ?
-        END
-      )
+    WHERE ${DUE_FOR_GRAB_WHERE}
     ORDER BY
-      CASE WHEN e.last_searched_at IS NULL OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at THEN 0 ELSE 1 END,
-      CASE WHEN e.last_searched_at IS NULL OR COALESCE(e.expected_release_at, e.air_date, '') > e.last_searched_at THEN COALESCE(e.expected_release_at, e.air_date) END DESC,
+      CASE WHEN ${SEARCH_WINDOW_FRESH} THEN 0 ELSE 1 END,
+      CASE WHEN ${SEARCH_WINDOW_FRESH} THEN COALESCE(e.expected_release_at, e.air_date) END DESC,
       e.last_searched_at ASC
-    LIMIT ?
-  `).all(nowIso, nowIso, grabCooldownIso, b1!, b2!, b3!, b4!, limit) as EpisodeDueForGrab[];
+    LIMIT $limit
+  `).all({ ...grabGateParams(nowIso, grabCooldownIso), $limit: limit }) as EpisodeDueForGrab[];
 }
 
 /**
@@ -324,6 +376,9 @@ export function recordEpisodeSearchMiss(
       last_searched_at = ?
     WHERE show_id = ? AND season_number = ? AND episode_number = ?
   `).run(nowIso, showId, season, episode);
+  // Blocker/detail are kept: the grabber's search events already wrote the
+  // specific reason (no results vs rejected by profile) for this miss.
+  try { setEpisodeStatus(self, { showId, season, episode }, { state: 'not_found' }, nowIso); } catch {}
 }
 
 export function getGrab(self: DatabaseManager, id: number): GrabbedReleaseRow | null {

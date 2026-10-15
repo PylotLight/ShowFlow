@@ -1,5 +1,13 @@
 import { db } from "../db";
 import { json, errorResponse, toIsoUtc } from "./_shared";
+import {
+  buildLiveIndex,
+  explainEpisodes,
+  getPipelineSummary,
+  listAttention,
+  listKanbanEpisodes,
+  type LiveDownload,
+} from "../core/pipeline/explain";
 
 const STAGE_ORDER = ["WANTED", "SEARCHING", "GRABBED", "IMPORTING", "FAILED", "AVAILABLE"];
 
@@ -12,14 +20,47 @@ const STAGE_LABELS: Record<string, string> = {
   AVAILABLE: "Available",
 };
 
-export function pipelineRoutes() {
-  return {
-    "/api/pipeline/kanban": {
-      async GET() {
-        try {
-          const episodes = db.listKanbanEpisodes();
+/** Anything that can list in-flight downloads (SystemManager / DownloadManager). */
+export interface LiveDownloadSource {
+  getProcessingDetail(): { client: string; title: string; state: string; progress: number | null }[];
+}
 
-          // Group into lanes by effective stage
+/**
+ * Episode id for /api/episodes/:id/explain: `<showId>:<season>:<episode>`
+ * (url-encoded; show ids are uuids so `-` can't be the separator).
+ */
+export function parseEpisodeId(id: string): { showId: string; season: number; episode: number } | null {
+  const decoded = decodeURIComponent(id);
+  const m = decoded.match(/^(.+):(\d+):(\d+)$/);
+  if (!m) return null;
+  return { showId: m[1]!, season: parseInt(m[2]!, 10), episode: parseInt(m[3]!, 10) };
+}
+
+export function pipelineRoutes(liveSource?: LiveDownloadSource) {
+  // Live TorBox progress is in memory on the download client - cheap to read
+  // per request, mapped to episodes with one grabs query.
+  const liveIndex = () => {
+    try {
+      const live: LiveDownload[] = (liveSource?.getProcessingDetail() ?? [])
+        .filter(d => d.client === "torbox")
+        .map(d => ({ title: d.title, state: d.state, progress: d.progress }));
+      return buildLiveIndex(db, live);
+    } catch {
+      return new Map();
+    }
+  };
+
+  return {
+    // Legacy lanes. AVAILABLE is dropped unless ?includeAvailable=1 (it was
+    // ~1600 on-disk episodes re-sent every poll); lanes now come from the
+    // same explain() as the attention list instead of the newest event row.
+    "/api/pipeline/kanban": {
+      async GET(req: Request) {
+        try {
+          const url = new URL(req.url);
+          const includeAvailable = url.searchParams.get("includeAvailable") === "1";
+          const episodes = listKanbanEpisodes(db, { includeAvailable, live: liveIndex() });
+
           const laneMap = new Map<string, typeof episodes>();
           for (const ep of episodes) {
             const stage = ep.currentStage;
@@ -36,7 +77,7 @@ export function pipelineRoutes() {
               count: laneMap.get(stage)!.length,
             }));
 
-          const total = episodes.length;
+          const total = episodes.filter(e => e.currentStage !== "AVAILABLE").length;
           const attentionCount = lanes
             .filter(l => l.stage === "WANTED" || l.stage === "SEARCHING" || l.stage === "FAILED")
             .reduce((sum, l) => sum + l.count, 0);
@@ -48,16 +89,55 @@ export function pipelineRoutes() {
         }
       },
     },
+    // "Needs attention": every not-done episode with a plain-English reason,
+    // oldest wait first. ?limit=&offset=&showId=
+    "/api/pipeline/attention": {
+      async GET(req: Request) {
+        try {
+          const url = new URL(req.url);
+          const limitRaw = parseInt(url.searchParams.get("limit") ?? "50", 10);
+          const offsetRaw = parseInt(url.searchParams.get("offset") ?? "0", 10);
+          const showId = url.searchParams.get("showId")?.trim() || undefined;
+          const page = listAttention(db, {
+            limit: Number.isNaN(limitRaw) ? 50 : limitRaw,
+            offset: Number.isNaN(offsetRaw) ? 0 : offsetRaw,
+            showId,
+            live: liveIndex(),
+          });
+          return json(page);
+        } catch (err) {
+          console.error("[pipeline/attention]", err);
+          return errorResponse(err, 500);
+        }
+      },
+    },
+    "/api/episodes/:id/explain": {
+      async GET(req: Request & { params: { id: string } }) {
+        try {
+          const key = parseEpisodeId(req.params.id);
+          if (!key) return json({ error: "Episode id must be <showId>:<season>:<episode>" }, { status: 400 });
+          const [item] = explainEpisodes(
+            db,
+            { pipelineOnly: false, showId: key.showId, season: key.season, episode: key.episode },
+            { live: liveIndex() },
+          ).filter(e => e.season === key.season && e.episode === key.episode);
+          if (!item) return json({ error: "Episode not found" }, { status: 404 });
+          return json(item);
+        } catch (err) {
+          console.error("[episodes/explain]", err);
+          return errorResponse(err, 500);
+        }
+      },
+    },
     // Counts-only endpoint for badge polling (Sidebar, every 15s). Same
-    // numbers as /api/pipeline/kanban's total/attentionCount plus the library
-    // show count, without serializing every tracked episode + its latest
-    // event on each tick.
+    // numbers as /api/pipeline/kanban's total/attentionCount plus the
+    // attention-list size and per-state counts.
     "/api/pipeline/summary": {
       async GET() {
         try {
-          const { total, attentionCount } = db.getPipelineSummary();
+          const { total, attentionCount, needsAttention, byState } = getPipelineSummary(db);
           const showCount = db.countShows();
-          return json({ total, attentionCount, showCount });
+          return json({ total, attentionCount, needsAttention, byState, showCount });
         } catch (err) {
           console.error("[pipeline/summary]", err);
           return errorResponse(err, 500);

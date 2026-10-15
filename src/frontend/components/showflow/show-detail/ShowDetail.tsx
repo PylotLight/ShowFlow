@@ -1,6 +1,8 @@
 import { Loader2Icon } from "lucide-react";
 import * as React from "react";
 
+import { EpisodeShowContext } from "@frontend/components/showflow/EpisodeRow";
+
 import { EpisodeDuplicatesDialog } from "@frontend/components/showflow/EpisodeDuplicatesDialog";
 import type { ColumnDef } from "@frontend/components/showflow/EpisodeRow";
 import { EpisodeMappingDialog } from "@frontend/components/showflow/EpisodeMappingDialog";
@@ -99,6 +101,7 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
       {episodes.filter === "all" ? "No episodes loaded." : episodes.filter === "available" ? "No available episodes." : "No missing episodes."}
     </div>
   ) : (
+    <EpisodeShowContext.Provider value={show.id}>
     <SeasonList
       sections={episodes.sections}
       collapsed={episodes.collapsed}
@@ -114,6 +117,7 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
       changeSearchMode={episodes.changeSearchMode}
       autoGrabEpisode={episodes.autoGrabEpisode}
     />
+    </EpisodeShowContext.Provider>
   );
 
   const settingsTab = (

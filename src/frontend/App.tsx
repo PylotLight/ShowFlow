@@ -11,7 +11,7 @@ import { AddShowDialog } from "@frontend/components/showflow/AddShowDialog";
 import { SettingsPage } from "@frontend/components/showflow/SettingsPage";
 import { DebugPage } from "@frontend/components/showflow/DebugPage";
 import { QueuePage } from "@frontend/components/showflow/QueuePage";
-import { PipelineKanban } from "@frontend/components/showflow/PipelineKanban";
+import { PipelinePage } from "@frontend/components/showflow/PipelinePage";
 import { HistoryPage } from "@frontend/components/showflow/HistoryPage";
 import { SourcesPage } from "@frontend/components/showflow/SourcesPage";
 import { ManualImport } from "@frontend/components/showflow/ManualImport";
@@ -313,7 +313,7 @@ export function App() {
           ) : activeNav === "queue" ? (
             <QueuePage key={refreshKey} />
           ) : activeNav === "pipeline" ? (
-            <PipelineKanban key={refreshKey} onSelectShow={selectShow} />
+            <PipelinePage key={refreshKey} onSelectShow={selectShow} />
           ) : activeNav === "history" ? (
             <HistoryPage key={refreshKey} />
           ) : activeNav === "health" ? (

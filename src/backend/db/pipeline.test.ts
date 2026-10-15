@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { DatabaseManager } from './index';
+import { listKanbanEpisodes, getPipelineSummary } from '../core/pipeline/explain';
 
 function seed(db: DatabaseManager) {
   db.saveShow({ uuid: 'show1', providerId: 'p1', type: 'tmdb', title: 'Show One', config: {} });
@@ -20,13 +21,13 @@ test('dateless TBA episodes do not surface as WANTED', () => {
   const db = new DatabaseManager(':memory:');
   seed(db);
 
-  const eps = db.listKanbanEpisodes();
-  const nums = eps.map(e => `${e.seasonNumber}x${e.episodeNumber}`);
+  const eps = listKanbanEpisodes(db);
+  const nums = eps.map((e) => `${e.seasonNumber}x${e.episodeNumber}`);
 
   expect(nums).toContain('1x1');
   expect(nums).not.toContain('1x2');
   expect(nums).not.toContain('2x1');
-  const wantedNoDate = eps.filter(e => e.currentStage === 'WANTED' && e.airDate === null);
+  const wantedNoDate = eps.filter((e) => e.currentStage === 'WANTED' && e.airDate === null);
   expect(wantedNoDate.map(e => `${e.seasonNumber}x${e.episodeNumber}`)).toEqual(['1x3']);
 
   db.close();
@@ -36,7 +37,7 @@ test('TBA episode with a release forecast still counts as WANTED', () => {
   const db = new DatabaseManager(':memory:');
   seed(db);
 
-  const forecast = db.listKanbanEpisodes().find(e => e.episodeNumber === 3 && e.seasonNumber === 1);
+  const forecast = listKanbanEpisodes(db).find(e => e.episodeNumber === 3 && e.seasonNumber === 1);
   expect(forecast?.currentStage).toBe('WANTED');
 
   db.close();
@@ -94,15 +95,17 @@ test('getPipelineSummary matches the kanban counts', () => {
   const db = new DatabaseManager(':memory:');
   seed(db);
   db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'SEARCHING', eventType: 'search_completed', message: 'x' });
+  db.recordGrabbedRelease({ showId: 'show1', season: 1, episode: 1, releaseTitle: 'Show One S01E01 1080p' });
   db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 1, stage: 'GRABBED', eventType: 'grab_sent', message: 'y' });
   db.logPipelineEvent({ showId: 'show1', seasonNumber: 1, episodeNumber: 3, stage: 'FAILED', eventType: 'grab_failed', message: 'z' });
 
-  const kanban = db.listKanbanEpisodes();
+  const kanban = listKanbanEpisodes(db);
   const attention = kanban.filter(e => ['WANTED', 'SEARCHING', 'FAILED'].includes(e.currentStage)).length;
-  const summary = db.getPipelineSummary();
+  const summary = getPipelineSummary(db);
   expect(summary.total).toBe(kanban.length);
   expect(summary.attentionCount).toBe(attention);
   expect(summary.attentionCount).toBe(1); // 1x1 grabbed, 1x3 failed
+  expect(kanban.find(e => e.episodeNumber === 3)?.currentStage).toBe('FAILED');
   db.close();
 });
 

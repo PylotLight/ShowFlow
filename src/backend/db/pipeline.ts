@@ -1,6 +1,7 @@
 import { eq, and, desc, lt, gte, sql } from 'drizzle-orm';
 import * as schema from './schema';
 import type { DatabaseManager } from './index';
+import { applyPipelineEventToStatus, pruneEpisodeStatus } from './episode_status';
 import { describeReasonCode, type ReasonCode, type PipelineStage } from '../core/pipeline/reason_codes';
 
 export interface LogPipelineEventInput {
@@ -18,6 +19,11 @@ export interface LogPipelineEventInput {
 
 export function logPipelineEvent(self: DatabaseManager, event: LogPipelineEventInput) {
   const reasonCategory = event.reasonCode ? describeReasonCode(event.reasonCode)?.category ?? null : null;
+
+  // Current state lives in episode_status; this table is the audit trail.
+  try { applyPipelineEventToStatus(self, event); } catch (err) {
+    console.warn('[pipeline] episode status update failed:', err);
+  }
 
   return self.drizz
     .insert(schema.pipelineEvents)
@@ -119,228 +125,9 @@ export function listRecentPipelineEvents(self: DatabaseManager, limit = 50) {
     .all();
 }
 
-/**
- * All tracked episodes with their latest pipeline stage — powers the
- * Kanban view (§1). Uses a window-function subquery to grab the most
- * recent event per (show, season, episode) in a single scan. Episodes
- * with no pipeline event at all resolve to WANTED; episodes that already
- * have a file on disk resolve to AVAILABLE regardless of event history
- * (covers legacy imports from before pipeline tracking existed).
- */
-export interface KanbanEpisode {
-  showId: string;
-  showTitle: string;
-  seasonNumber: number;
-  episodeNumber: number;
-  episodeTitle: string | null;
-  airDate: string | null;
-  filePath: string | null;
-  currentStage: string;
-  eventId: number | null;
-  eventType: string | null;
-  reasonCode: string | null;
-  reasonCategory: string | null;
-  message: string | null;
-  releaseTitle: string | null;
-  eventCreatedAt: string | null;
-  searchMode: string;
-}
-
-export interface KanbanLane {
-  stage: string;
-  label: string;
-  items: KanbanEpisode[];
-}
-
-interface KanbanStageRow {
-  show_id: string;
-  season_number: number;
-  air_date: string | null;
-  expected_release_at: string | null;
-  file_path: string | null;
-  current_stage: string | null;
-}
-
-/**
- * Effective Kanban stage for a tracked episode row (null = hidden), shared
- * by listKanbanEpisodes and getPipelineSummary so the sidebar badge can
- * never drift from the board. Needs every tracked row up front to work out
- * which seasons have started.
- */
-function kanbanClassifier(rows: KanbanStageRow[]): (r: KanbanStageRow) => string | null {
-  const now = Date.now();
-  const seasonKey = (showId: string, season: number) => `${showId}::${season}`;
-
-  // A season "has started" once any of its episodes has aired (past air date)
-  // or exists on disk. Seasons that haven't started (whole upcoming season is
-  // "TBA" with no air dates yet, e.g. a not-yet-premiered S2) have nothing to
-  // grab, so their tracked episodes must not surface as WANTED.
-  const startedSeasons = new Set<string>();
-  for (const r of rows) {
-    const aired = r.air_date !== null && new Date(r.air_date).getTime() <= now;
-    const onDisk = r.file_path !== null && r.file_path !== '';
-    if (aired || onDisk) {
-      startedSeasons.add(seasonKey(r.show_id, r.season_number));
-    }
-  }
-
-  return (r) => {
-    const hasFile = r.file_path !== null && r.file_path !== '';
-    if (hasFile) return 'AVAILABLE';
-    const isFuture = r.air_date !== null && new Date(r.air_date) > new Date();
-    const airDateKnown = r.air_date !== null && r.air_date !== '' && !isNaN(new Date(r.air_date).getTime());
-    const hasExpectedRelease = r.expected_release_at !== null && r.expected_release_at !== '';
-    const stage = r.current_stage ?? 'WANTED';
-
-    // A dateless ("TBA") episode with no release forecast is unsearchable -
-    // the auto-grabber's due-for-grab query requires a date - so it must not
-    // count as WANTED either, even mid-season.
-    if (stage === 'WANTED' && (isFuture || (!airDateKnown && !hasExpectedRelease) || !startedSeasons.has(seasonKey(r.show_id, r.season_number)))) {
-      return null;
-    }
-    return stage;
-  };
-}
-
-/** Stages the sidebar "needs attention" badge counts. */
-export const ATTENTION_STAGES = new Set(['WANTED', 'SEARCHING', 'FAILED']);
-
-export interface PipelineSummary {
-  /** Visible Kanban items (same as /api/pipeline/kanban `total`). */
-  total: number;
-  /** Items in WANTED/SEARCHING/FAILED (same as kanban `attentionCount`). */
-  attentionCount: number;
-}
-
-/**
- * Counts-only version of listKanbanEpisodes for the 15s sidebar badge poll.
- * Same classification, but no window function over the whole event table
- * and no row payload: the latest stage is looked up per *missing* episode
- * via idx_pipeline_events_item_latest (episodes on disk are AVAILABLE no
- * matter what their history says).
- */
-export function getPipelineSummary(self: DatabaseManager): PipelineSummary {
-  const rows = self.db.query(`
-    SELECT
-      e.show_id,
-      e.season_number,
-      e.air_date,
-      e.expected_release_at,
-      e.file_path,
-      CASE WHEN e.file_path IS NULL OR e.file_path = '' THEN (
-        SELECT pe.stage FROM pipeline_events pe
-        WHERE pe.show_id = e.show_id
-          AND pe.season_number = e.season_number
-          AND pe.episode_number = e.episode_number
-        ORDER BY pe.created_at DESC, pe.id DESC
-        LIMIT 1
-      ) END AS current_stage
-    FROM episodes e
-    JOIN shows s ON s.id = e.show_id
-    WHERE e.is_tracked = 1
-  `).all() as KanbanStageRow[];
-
-  const classify = kanbanClassifier(rows);
-  let total = 0;
-  let attentionCount = 0;
-  for (const r of rows) {
-    const stage = classify(r);
-    if (stage === null) continue;
-    total++;
-    if (ATTENTION_STAGES.has(stage)) attentionCount++;
-  }
-  return { total, attentionCount };
-}
-
-export function listKanbanEpisodes(self: DatabaseManager): KanbanEpisode[] {
-  const rows = self.db.query(`
-    SELECT
-      e.show_id,
-      e.season_number,
-      e.episode_number,
-      e.title              AS episode_title,
-      e.air_date,
-      e.expected_release_at,
-      e.file_path,
-      e.search_mode,
-      s.title              AS show_title,
-      pe.id                AS event_id,
-      pe.stage             AS current_stage,
-      pe.event_type,
-      pe.reason_code,
-      pe.reason_category,
-      pe.message,
-      pe.release_title,
-      pe.created_at        AS event_created_at
-    FROM episodes e
-    JOIN shows s ON s.id = e.show_id
-    LEFT JOIN (
-      SELECT
-        show_id, season_number, episode_number,
-        id, stage, event_type, reason_code, reason_category,
-        message, release_title, created_at,
-        ROW_NUMBER() OVER (
-          PARTITION BY show_id, season_number, episode_number
-          ORDER BY created_at DESC, id DESC
-        ) AS rn
-      FROM pipeline_events
-    ) pe ON pe.show_id         = e.show_id
-        AND pe.season_number    = e.season_number
-        AND pe.episode_number   = e.episode_number
-        AND pe.rn               = 1
-    WHERE e.is_tracked = 1
-    ORDER BY s.title ASC, e.season_number ASC, e.episode_number ASC
-  `).all() as any[];
-
-  const classify = kanbanClassifier(rows);
-
-  return rows.map(r => {
-    const hasFile = r.file_path !== null && r.file_path !== '';
-
-    if (hasFile) {
-      return {
-        showId: r.show_id,
-        showTitle: r.show_title,
-        seasonNumber: r.season_number,
-        episodeNumber: r.episode_number,
-        episodeTitle: r.episode_title ?? null,
-        airDate: r.air_date ?? null,
-        filePath: r.file_path ?? null,
-        currentStage: 'AVAILABLE',
-        eventId: r.event_id ?? null,
-        eventType: r.event_type ?? null,
-        reasonCode: r.reason_code ?? null,
-        reasonCategory: r.reason_category ?? null,
-        message: r.message ?? null,
-        releaseTitle: r.release_title ?? null,
-        eventCreatedAt: r.event_created_at ?? null,
-        searchMode: r.search_mode ?? 'auto',
-      };
-    }
-
-    const stage = classify(r);
-    if (stage === null) return null;
-
-    return {
-      showId: r.show_id,
-      showTitle: r.show_title,
-      seasonNumber: r.season_number,
-      episodeNumber: r.episode_number,
-      episodeTitle: r.episode_title ?? null,
-      airDate: r.air_date ?? null,
-      filePath: r.file_path ?? null,
-      currentStage: stage,
-      eventId: r.event_id ?? null,
-      eventType: r.event_type ?? null,
-      reasonCode: r.reason_code ?? null,
-      reasonCategory: r.reason_category ?? null,
-      message: r.message ?? null,
-      releaseTitle: r.release_title ?? null,
-      eventCreatedAt: r.event_created_at ?? null,
-      searchMode: r.search_mode ?? 'auto',
-    };
-  }).filter((e): e is NonNullable<typeof e> => e !== null);
-}
+// Kanban / summary / attention views moved to core/pipeline/explain.ts:
+// they're derived from episode_status + the auto-grab gates now, not from
+// the newest pipeline_events row.
 
 /** Retention: pipeline_events is high-volume (every search can write several rows), so this needs to run on a schedule same as cleanupOldLogs. */
 export function cleanupOldPipelineEvents(self: DatabaseManager, beforeDate: string) {
@@ -348,6 +135,9 @@ export function cleanupOldPipelineEvents(self: DatabaseManager, beforeDate: stri
     .delete(schema.pipelineEvents)
     .where(lt(schema.pipelineEvents.created_at, beforeDate))
     .run() as unknown as { changes: number };
+  // Status rows are current state, not history: only finished (done) and
+  // orphaned rows go, so retention can't revert a stuck item to wanted.
+  try { pruneEpisodeStatus(self, beforeDate); } catch {}
   return result;
 }
 

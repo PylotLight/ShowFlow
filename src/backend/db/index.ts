@@ -21,6 +21,7 @@ import * as grabs from './grabs';
 import * as blocklist from './blocklist';
 import * as mappings from './mappings';
 import * as episodeFiles from './episode_files';
+import * as episodeStatus from './episode_status';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -422,8 +423,9 @@ export class DatabaseManager {
   getPipelineEventStats() { return pipeline.getPipelineEventStats(this); }
   getHourlyPipelineEventCounts(hours?: number) { return pipeline.getHourlyPipelineEventCounts(this, hours); }
   getNoisiestShows(limit?: number) { return pipeline.getNoisiestShows(this, limit); }
-  listKanbanEpisodes() { return pipeline.listKanbanEpisodes(this); }
-  getPipelineSummary() { return pipeline.getPipelineSummary(this); }
+  setEpisodeStatus(target: episodeStatus.StatusTarget, update: episodeStatus.StatusUpdate, nowIso?: string) { return episodeStatus.setEpisodeStatus(this, target, update, nowIso); }
+  getEpisodeStatus(target: episodeStatus.StatusTarget) { return episodeStatus.getEpisodeStatus(this, target); }
+  setStatusForRelease(releaseTitle: string, update: episodeStatus.StatusUpdate, withinHours?: number) { return episodeStatus.setStatusForRelease(this, releaseTitle, update, withinHours); }
   listHistory(filter: Parameters<typeof pipeline.listHistory>[1]) { return pipeline.listHistory(this, filter); }
 
   // ---- Analytics / DB usage -----------------------------------------------

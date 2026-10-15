@@ -1,4 +1,11 @@
 import type { DatabaseManager } from './index';
+import { GRAB_GATES, grabGateParams } from './grabs';
+
+/** Auto-grab's gates (db/grabs.ts GRAB_GATES) minus the search backoff. */
+const RSS_WHERE = (Object.keys(GRAB_GATES) as (keyof typeof GRAB_GATES)[])
+  .filter(k => k !== 'outsideBackoff')
+  .map(k => GRAB_GATES[k])
+  .join('\n      AND ');
 
 /**
  * RSS sync storage. Kept in its own module (not grabs.ts) so the RSS path
@@ -50,25 +57,10 @@ export function listRssCandidateEpisodes(
       s.release_delay_minutes
     FROM episodes e
     JOIN shows s ON s.id = e.show_id
-    WHERE e.is_tracked = 1
-      AND (e.search_mode IS NULL OR e.search_mode = 'auto')
-      AND (e.file_path IS NULL OR e.file_path = '')
-      AND COALESCE(s.series_type, 'standard') != 'movie'
-      AND (
-        (e.expected_release_at IS NOT NULL AND e.expected_release_at <= ?)
-        OR (e.expected_release_at IS NULL AND e.air_date IS NOT NULL AND e.air_date != '' AND e.air_date <= ?)
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM grabbed_releases g
-        WHERE g.show_id = e.show_id
-          AND g.season_number = e.season_number
-          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
-          AND replace(g.grabbed_at, ' ', 'T') >= ?
-          AND g.status != 'failed'
-      )
+    WHERE ${RSS_WHERE}
     ORDER BY COALESCE(e.expected_release_at, e.air_date) DESC
-    LIMIT ?
-  `).all(nowIso, nowIso, grabCooldownIso, limit) as RssCandidateEpisode[];
+    LIMIT $limit
+  `).all({ ...grabGateParams(nowIso, grabCooldownIso), $limit: limit }) as RssCandidateEpisode[];
 }
 
 /** Per-feed RSS position: newest pubDate seen + recent guids (tie-breaker / no-date feeds). */

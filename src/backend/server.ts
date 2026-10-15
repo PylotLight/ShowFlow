@@ -133,7 +133,6 @@ const routeDefinitions: Record<string, any> = {
   ...debugRoutes(),
   ...integrationRoutes(),
   ...analyticsRoutes(),
-  ...pipelineRoutes(),
   ...backgroundJobRoutes(),
   ...notificationRoutes(),
   ...blocklistRoutes(),
@@ -147,6 +146,7 @@ function lazyRoutes() {
     ...showRoutes(scheduler, systemManager),
     ...searchRoutes(systemManager),
     ...systemRoutes(scheduler, systemManager, isShuttingDown),
+    ...pipelineRoutes(systemManager),
     ...miscRoutes(systemManager),
     ...updateRoutes(ADMIN_TOKEN),
   };
