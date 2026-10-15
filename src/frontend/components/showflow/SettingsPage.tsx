@@ -1,5 +1,6 @@
 import { ArrowLeft, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import * as React from "react";
+import { createPortal } from "react-dom";
 
 import { HeaderActions } from "@frontend/lib/header-actions";
 
@@ -39,16 +40,26 @@ function SaveStatus() {
   );
 }
 
-/** Mobile overlay for one section: bottom sheet or full-screen drill-down. */
-function MobileSection({ id, onClose, children }: { id: string; onClose: () => void; children: React.ReactNode }) {
+/**
+ * Mobile overlay for one section: bottom sheet or full-screen drill-down.
+ * Portaled to <body>: the page container keeps a transform from its
+ * enter animation, which turns `position: fixed` into "fixed to the
+ * scrolling page" — the sheet then sat inside the z-10 content layer,
+ * scrolled with the list, and the list + bottom nav showed through.
+ */
+function MobileSection(props: { id: string; onClose: () => void; children: React.ReactNode }) {
+  return createPortal(<MobileSectionInner {...props} />, document.body);
+}
+
+function MobileSectionInner({ id, onClose, children }: { id: string; onClose: () => void; children: React.ReactNode }) {
   const def = findTab(id);
   const Icon = def?.icon;
   const iconBtn = "flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white outline-none focus-visible:ring-2 focus-visible:ring-signal/70";
 
   if (def?.mobileStyle === "sheet") {
     return (
-      <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={def.label}>
-        <div className="absolute inset-0 bg-black/60 animate-[fadeIn_0.15s_ease-out]" onClick={onClose} />
+      <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label={def.label}>
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]" onClick={onClose} />
         <div
           className="mobile-nav-safe absolute inset-x-0 bottom-0 flex flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] shadow-2xl"
           style={{ maxHeight: "92vh", animation: "slideUp 0.25s ease-out" }}
@@ -69,7 +80,7 @@ function MobileSection({ id, onClose, children }: { id: string; onClose: () => v
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-[#1c2028]"
+      className="fixed inset-0 z-[60] flex flex-col bg-[#1c2028]"
       role="dialog"
       aria-modal="true"
       aria-label={def?.label}

@@ -183,10 +183,12 @@ export async function mergeShows(db: DatabaseManager, targetId: string, sourceId
   const sourceArtworks = db.drizz.select().from(schema.showArtworks)
     .where(eq(schema.showArtworks.show_id, sourceId)).all() as any[];
 
+  const droppedImages: string[] = [];
   for (const a of sourceArtworks) {
     const key = `${a.provider_type}|${a.artwork_type}`;
     if (targetArtworkKeys.has(key)) {
       db.drizz.delete(schema.showArtworks).where(eq(schema.showArtworks.id, a.id)).run();
+      if (a.image_path) droppedImages.push(a.image_path);
     } else {
       db.drizz.update(schema.showArtworks)
         .set({ show_id: targetId })
@@ -194,6 +196,8 @@ export async function mergeShows(db: DatabaseManager, targetId: string, sourceId
       targetArtworkKeys.add(key);
     }
   }
+
+  db.gcArtworkFiles(droppedImages);
 
   // 7. Re-point grabbed releases (no FK, no uniqueness to worry about).
   db.drizz.update(schema.grabbedReleases)

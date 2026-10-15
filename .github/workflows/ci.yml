@@ -39,10 +39,7 @@ jobs:
       - name: Test
         run: bun test
 
-      # tsc isn't a gate yet: main has a handful of pre-existing type errors.
-      # Turn this into a blocking step once those are fixed.
-      - name: Typecheck (non-blocking)
-        continue-on-error: true
+      - name: Typecheck
         run: bunx tsc --noEmit -p .
 
       - name: Build

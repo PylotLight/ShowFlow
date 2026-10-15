@@ -71,6 +71,13 @@
       "when": 1792027193689,
       "tag": "0009_episode_status",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792027315333,
+      "tag": "0010_artwork_files_on_disk",
+      "breakpoints": true
     }
   ]
 }

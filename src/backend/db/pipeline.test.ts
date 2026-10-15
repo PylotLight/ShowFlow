@@ -11,7 +11,7 @@ function seed(db: DatabaseManager) {
   db.saveEpisode({ showId: 'show1', seasonNumber: 1, episodeNumber: 3, title: 'TBA but forecast', airDate: '' });
   db.saveEpisode({ showId: 'show1', seasonNumber: 2, episodeNumber: 1, title: 'Next season, all TBA' });
 
-  for (const [s, e] of [[1, 1], [1, 2], [1, 3], [2, 1]]) {
+  for (const [s, e] of [[1, 1], [1, 2], [1, 3], [2, 1]] as const) {
     db.setTracked('show1', s, e, true);
   }
   db.updateEpisodeAirWindow('show1', 1, 3, { expectedReleaseAt: new Date(Date.now() - 60_000).toISOString() });

@@ -254,20 +254,41 @@ function EpisodeRow({
   const showSearch = columns.find(c => c.id === 'search')?.visible;
   const showActions = columns.find(c => c.id === 'actions')?.visible ?? true;
 
+  // Two templates: the full column set from sm up, and a phone layout
+  // (<640px) where the air date folds under the title, status shrinks to a
+  // dot + info glyph and the search-mode toggle hides, so the title column
+  // keeps most of a 390px row instead of being squeezed to a few letters.
+  // CSS vars (not an inline gridTemplateColumns) so the breakpoint can switch.
+  const desktopCols = [
+    '24px',
+    '60px',
+    showAirDate ? 'auto' : '',
+    'minmax(0, 1fr)',
+    showStatus ? 'auto' : '',
+    showActions ? '76px' : '',
+    showSearch ? '48px' : '',
+  ].filter(Boolean).join(' ');
+  const mobileCols = [
+    '24px',
+    'auto',
+    'minmax(0, 1fr)',
+    showStatus ? 'auto' : '',
+    showActions ? 'auto' : '',
+  ].filter(Boolean).join(' ');
+
+  const airDateLabel = episode.airDate
+    ? (() => {
+        const d = new Date(episode.airDate);
+        const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const time = expectedReleaseTime(episode.expectedReleaseAt, episode.airDate) ?? formatAirTime(episode.airDate);
+        return time ? `${date} ${time}` : date;
+      })()
+    : null;
+
   return (
     <div
-      className="group grid gap-2 items-center px-4 py-2 transition-colors hover:bg-white/[0.02]"
-      style={{
-        gridTemplateColumns: [
-          '24px',
-          '60px',
-          showAirDate ? 'auto' : '',
-          'minmax(0, 1fr)',
-          showStatus ? 'auto' : '',
-          showActions ? '76px' : '',
-          showSearch ? '48px' : '',
-        ].filter(Boolean).join(' '),
-      }}
+      className="group grid gap-2 items-center px-3 sm:px-4 py-2 transition-colors hover:bg-white/[0.02] grid-cols-[var(--ep-cols-sm)] sm:grid-cols-[var(--ep-cols)]"
+      style={{ '--ep-cols': desktopCols, '--ep-cols-sm': mobileCols } as React.CSSProperties}
     >
       {/* Track toggle */}
       <button
@@ -295,34 +316,40 @@ function EpisodeRow({
         />
       </div>
 
-      {/* Air Date */}
+      {/* Air Date (own column from sm up; folded under the title on phones) */}
       {showAirDate && (
-        <span className="font-mono text-sub text-muted-foreground/70 truncate whitespace-nowrap">
-          {episode.airDate
-            ? (() => {
-                const d = new Date(episode.airDate);
-                const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-                const time = expectedReleaseTime(episode.expectedReleaseAt, episode.airDate) ?? formatAirTime(episode.airDate);
-                return time ? `${date} ${time}` : date;
-              })()
-            : '—'}
+        <span className="hidden sm:block font-mono text-sub text-muted-foreground truncate whitespace-nowrap">
+          {airDateLabel ?? '—'}
         </span>
       )}
 
       {/* Title */}
-      <span className="truncate text-sm leading-snug text-foreground/85 group-hover:text-foreground transition-colors">
-        {episode.title || "TBA"}
+      <span className="min-w-0 flex flex-col">
+        <span className="truncate text-sm leading-snug text-foreground/85 group-hover:text-foreground transition-colors">
+          {episode.title || "TBA"}
+        </span>
+        {showAirDate && airDateLabel && (
+          <span className="sm:hidden truncate font-mono text-[11px] leading-snug text-muted-foreground">
+            {airDateLabel}
+          </span>
+        )}
       </span>
 
       {/* Status */}
       {showStatus && (
         <span className="flex items-center gap-1.5 whitespace-nowrap">
-          <span className={`font-mono text-caption uppercase tracking-wider ${
+          <span className={`hidden sm:inline font-mono text-caption uppercase tracking-wider ${
             available ? "text-signal/70" : "text-muted-foreground"
           }`}>
             {available ? "Available" : "Missing"}
           </span>
           {!available && showId && <WhyPopover showId={showId} episode={episode} />}
+          <span
+            role="img"
+            aria-label={available ? "Available" : "Missing"}
+            title={available ? "Available" : "Missing"}
+            className={`sm:hidden size-2 rounded-full ${available ? "bg-signal" : "border border-white/40"}`}
+          />
           <InfoPopover episode={episode} />
         </span>
       )}
@@ -357,7 +384,7 @@ function EpisodeRow({
         <button
           type="button"
           onClick={() => onChangeSearchMode?.(episode.searchMode === 'auto' ? 'interactive' : 'auto')}
-          className="flex items-center justify-center transition-colors"
+          className="hidden sm:flex items-center justify-center transition-colors"
           aria-label={`Search mode: ${episode.searchMode || 'auto'}`}
           title={`Search mode: ${episode.searchMode || 'auto'} (click to toggle)`}
         >

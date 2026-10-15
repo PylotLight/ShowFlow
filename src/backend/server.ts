@@ -295,6 +295,19 @@ try {
   console.error("Failed to initialize release watcher:", err instanceof Error ? err.message : err);
 }
 
+// Artwork blobs -> files on disk (core/image_migration.ts). Resumable and
+// batched; deferred so it never sits on the boot / readiness path.
+setTimeout(() => {
+  import("./core/image_migration")
+    .then(({ runImageMigration }) => runImageMigration(db))
+    .then((r) => {
+      if (r.moved || r.failed || r.orphansRemoved) {
+        console.log(`[images] moved ${r.moved} artwork blobs to disk (${r.failed} failed), removed ${r.orphansRemoved} orphan files`);
+      }
+    })
+    .catch((err) => console.warn("[images] artwork migration failed:", err instanceof Error ? err.message : err));
+}, 30_000);
+
 // ---- Graceful shutdown ----------------------------------------------------
 
 let sigtermReceived = false;

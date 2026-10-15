@@ -6,6 +6,8 @@ import type { ProviderType } from "../providers/factory";
 import { json, errorResponse, loadConfig, isProviderType, extractPosterUrl, extractBackdropUrl, toCardPosterUrl, NO_SIGNAL_SVG } from "./_shared";
 import { warmPoster } from "./artwork_warmer";
 import type { ShowArtworkMeta } from "../db/shows";
+import { absImagePath } from "../core/image_store";
+import { existsSync } from "node:fs";
 
 export interface BackdropOption {
   index: number;
@@ -37,20 +39,47 @@ export function clampBackdropIndex(options: { url: string }[], stored: number): 
 
 /**
  * Serve one cached show_artworks row with an ETag, answering 304 from the
- * metadata alone when the browser already has it — the blob is only read
- * from SQLite on a real miss. The ETag is keyed on the row's source URL +
- * byte length, so it changes whenever the stored image is replaced.
- * (These route URLs aren't content-addressed — ?index / re-warms can change
- * what they return — so no `immutable`; max-age stays as before and the
- * ETag makes revalidation after it lapses nearly free.)
+ * metadata alone when the browser already has it.
+ *
+ * Rows moved to disk (core/image_store.ts) are served straight from their
+ * content-addressed file with ETag = the sha1. When the request carries
+ * ?v=<that same hash> the URL itself is content-keyed, so it's cached for a
+ * year as immutable. Without it (or with a stale v) the route URL can
+ * change what it returns (?index, re-warms), so it keeps the normal
+ * max-age and the ETag makes revalidation nearly free.
+ *
+ * Legacy rows still holding a blob (background migration not there yet)
+ * and rows whose file went missing fall back to the DB bytes.
  */
 function serveArtworkRow(req: Request, row: ShowArtworkMeta, maxAge: number): Response {
-  const etag = `W/"a${row.id}-${Bun.hash(`${row.image_url}|${row.data_len}`).toString(36)}"`;
+  const version = new URL(req.url).searchParams.get("v");
+  const etag = row.image_hash
+    ? `"${row.image_hash}"`
+    : `W/"a${row.id}-${Bun.hash(`${row.image_url}|${row.data_len}`).toString(36)}"`;
+  const immutable = !!row.image_hash && version === row.image_hash;
   const headers = {
     "Content-Type": row.content_type ?? "image/jpeg",
-    "Cache-Control": `public, max-age=${maxAge}`,
+    "Cache-Control": immutable ? "public, max-age=31536000, immutable" : `public, max-age=${maxAge}`,
     ETag: etag,
   };
+  if (row.image_path) {
+    const abs = absImagePath(db.imagesDir, row.image_path);
+    if (abs && existsSync(abs)) {
+      const inm = req.headers?.get("if-none-match");
+      if (inm && inm.split(",").some((t) => { const v = t.trim(); return v === etag || v === `W/${etag}` || v === "*"; })) {
+        return new Response(null, { status: 304, headers });
+      }
+      return new Response(Bun.file(abs), { headers });
+    }
+    // File gone (volume wiped / manual cleanup): forget it so the row reads
+    // as uncached and gets re-warmed, then try the legacy blob below.
+    db.clearShowArtworkImage(row.id);
+    const legacy = db.getShowArtworkBlob(row.id);
+    if (!legacy || legacy.byteLength === 0) return new Response("", { status: 404 });
+    return new Response(legacy as unknown as BodyInit, {
+      headers: { "Content-Type": row.content_type ?? "image/jpeg", "Cache-Control": `public, max-age=${maxAge}` },
+    });
+  }
   const inm = req.headers?.get("if-none-match");
   if (inm && inm.split(",").some((t) => t.trim() === etag || t.trim() === "*")) {
     return new Response(null, { status: 304, headers });

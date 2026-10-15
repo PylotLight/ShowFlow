@@ -22,6 +22,7 @@ import * as blocklist from './blocklist';
 import * as mappings from './mappings';
 import * as episodeFiles from './episode_files';
 import * as episodeStatus from './episode_status';
+import { resolveImagesDir } from '../core/image_store';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -38,6 +39,7 @@ export class DatabaseManager {
   public db: Database;
   public drizz: ReturnType<typeof drizzle>;
   private dbPath: string;
+  private _imagesDir: string | null = null;
 
   constructor(dbPath = 'showflow.db') {
     this.dbPath = dbPath;
@@ -56,6 +58,12 @@ export class DatabaseManager {
    * with WAL: still crash-safe, just no fsync on every commit.
    * journal_mode is a no-op for :memory: DBs (tests), which is fine.
    */
+  /** Where artwork files live (core/image_store.ts); resolved on first use. */
+  get imagesDir(): string {
+    if (!this._imagesDir) this._imagesDir = resolveImagesDir(this.dbPath);
+    return this._imagesDir;
+  }
+
   static open(dbPath: string): Database {
     const conn = new Database(dbPath);
     // Only takes effect on a brand-new (empty) DB file; an existing DB keeps
@@ -321,6 +329,8 @@ export class DatabaseManager {
   getShowArtworks(showId: string, type?: number, providerType?: string) { return shows.getShowArtworks(this, showId, type, providerType); }
   getShowArtworkMeta(showId: string, type?: number) { return shows.getShowArtworkMeta(this, showId, type); }
   getShowArtworkBlob(id: number) { return shows.getShowArtworkBlob(this, id); }
+  clearShowArtworkImage(id: number) { return shows.clearShowArtworkImage(this, id); }
+  gcArtworkFiles(paths: (string | null | undefined)[]) { return shows.gcArtworkFiles(this, paths); }
   updateShowArtworkData(showId: string, type: number, data: Uint8Array, providerType?: string) { return shows.updateShowArtworkData(this, showId, type, data, providerType); }
 
   // ---- Processed files ---------------------------------------------------

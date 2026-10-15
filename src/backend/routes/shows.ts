@@ -148,6 +148,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
               trackedCount: s.tracked_count,
               grabbedCount: s.grabbed_count,
               monitorNewEpisodes: s.monitor_new_episodes !== 0,
+              posterHash: s.poster_hash ?? null,
             })),
           );
         } catch (err) {
@@ -582,6 +583,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           let folderRenamed = false;
           let episodesUpdated = 0;
           let folderError: string | undefined;
+          let newFolderName: string | undefined;
 
           if (rootFolder && renamedShow) {
             const { currentFolderPath, targetFolderPath, wouldChange } =
@@ -600,6 +602,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
                 episodesUpdated++;
               }
               folderRenamed = true;
+              newFolderName = path.basename(targetFolderPath);
             } else if (wouldChange) {
               folderError = fs.existsSync(targetFolderPath)
                 ? `Target folder already exists: ${targetFolderPath}`
@@ -615,7 +618,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
             type: 'organize',
             entityType: 'show',
             entityId: showId,
-            message: `Renamed show "${result.oldTitle}" → "${result.newTitle}"${folderRenamed ? `, folder moved to ${path.basename(targetFolderPath)} (${episodesUpdated} episode paths updated)` : ''}`,
+            message: `Renamed show "${result.oldTitle}" → "${result.newTitle}"${folderRenamed ? `, folder moved to ${newFolderName} (${episodesUpdated} episode paths updated)` : ''}`,
           });
 
           return json({
