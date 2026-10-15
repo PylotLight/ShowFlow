@@ -373,6 +373,13 @@ export class TorboxDownloadClient implements DownloadClient {
     this.activeTitles.add(title);
     this.waitForDownload(torrentId, title, infoHash)
       .then((ok) => {
+        // Persisted pipeline status, so a dead download shows as stuck
+        // instead of sitting in "grabbed" until the 12h cooldown lapses.
+        try {
+          db.setStatusForRelease(title, ok
+            ? { state: 'importing', blocker: null, detail: 'Downloaded from TorBox, handed off for import' }
+            : { state: 'stuck', blocker: 'torbox_failed', detail: 'TorBox download failed or timed out' });
+        } catch {}
         db.logEvent({
           type: ok ? 'download' : 'error',
           entityType: 'release',
@@ -382,6 +389,7 @@ export class TorboxDownloadClient implements DownloadClient {
         });
       })
       .catch((err) => {
+        try { db.setStatusForRelease(title, { state: 'stuck', blocker: 'torbox_failed', detail: `TorBox download error: ${err instanceof Error ? err.message : String(err)}` }); } catch {}
         db.logEvent({
           type: 'error',
           entityType: 'release',

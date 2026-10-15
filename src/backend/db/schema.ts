@@ -675,6 +675,39 @@ export const pipelineEvents = sqliteTable('pipeline_events', {
   stageIndex: index('idx_pipeline_events_stage').on(table.stage),
 }));
 
+// ---- Episode pipeline status (current state, not a log) -----------------
+//
+// One row per episode (movies use the S0E0 sentinel, same as episode_files)
+// holding the *last known* pipeline outcome: grabbed, importing, stuck,
+// last search miss, done. Upserted at each transition (recordGrabbedRelease,
+// recordEpisodeSearchMiss, logPipelineEvent, TorBox outcome) so the "why
+// hasn't this been pulled" answer survives pipeline_events retention -
+// events stay as the audit trail only. Live gates (tracked, search mode, air
+// window, cooldown, backoff) are NOT stored here; core/pipeline/explain.ts
+// evaluates those on read from the same SQL as listEpisodesDueForGrab.
+export const episodeStatus = sqliteTable('episode_status', {
+  show_id: text('show_id')
+    .notNull()
+    .references(() => shows.id, { onDelete: 'cascade' }),
+  season_number: integer('season_number').notNull(),
+  episode_number: integer('episode_number').notNull(),
+  /** grabbed_downloading | importing | stuck | not_found | done */
+  state: text('state').notNull(),
+  /** Short machine reason (reason code or slug like torbox_failed). */
+  blocker: text('blocker'),
+  /** Plain-English line for the UI. */
+  detail: text('detail'),
+  release_title: text('release_title'),
+  /** Extra structured detail, e.g. rejection breakdown of the last search. */
+  meta_json: text('meta_json'),
+  /** When the episode entered `state` (kept across same-state upserts). */
+  since: text('since').notNull(),
+  updated_at: text('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.show_id, table.season_number, table.episode_number] }),
+  stateIndex: index('idx_episode_status_state').on(table.state),
+}));
+
 export const pipelineEventsRelations = relations(pipelineEvents, ({ one }) => ({
   show: one(shows, {
     fields: [pipelineEvents.show_id],
