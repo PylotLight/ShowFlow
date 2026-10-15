@@ -22,6 +22,7 @@ import { cn } from "@frontend/lib/utils";
 import { DebugBadge } from "@frontend/components/showflow/DebugBadge";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import type { PageId } from "@frontend/lib/router";
+import { usePolling } from "@frontend/lib/usePolling";
 
 export type NavItem = PageId;
 
@@ -54,7 +55,9 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
   const [appVersion, setAppVersion] = React.useState("");
   const [releaseId, setReleaseId] = React.useState("");
 
-  React.useEffect(() => {
+  // All four sidebar polls on one 15s timer that pauses while the tab is
+  // hidden (usePolling).
+  usePolling(() => {
     // Poll processing queue count
     const pollQueue = () =>
       fetch("/api/system/processing")
@@ -96,15 +99,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
     pollHealth();
     pollCounts();
     pollManual();
-
-    const id = setInterval(() => {
-      pollQueue();
-      pollHealth();
-      pollCounts();
-      pollManual();
-    }, 15_000);
-    return () => clearInterval(id);
-  }, []);
+  }, 15_000);
 
   const mainNavs = [
     { id: "dashboard" as NavItem, label: "Dashboard", icon: LayoutDashboard },

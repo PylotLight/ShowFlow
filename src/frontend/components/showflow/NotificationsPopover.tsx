@@ -3,6 +3,7 @@ import { BellIcon, AlertTriangleIcon, XCircleIcon, InfoIcon, ChevronDownIcon, Lo
 import { Button } from "@frontend/components/ui/button";
 import { cn } from "@frontend/lib/utils";
 import { openAppLink } from "@frontend/lib/router";
+import { usePolling } from "@frontend/lib/usePolling";
 
 interface Notification {
   id: string;
@@ -58,32 +59,6 @@ function groupConsecutive(items: Notification[]): RecentGroup[] {
 
 type Tab = 'all' | 'alerts' | 'jobs' | 'activity';
 
-// Runs `fn` now and every `ms`, but pauses while the tab is hidden and
-// catches up immediately when it becomes visible again.
-function useVisibleInterval(fn: () => void, ms: number) {
-  const fnRef = React.useRef(fn);
-  fnRef.current = fn;
-  React.useEffect(() => {
-    let id: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (id !== null) return;
-      fnRef.current();
-      id = setInterval(() => fnRef.current(), ms);
-    };
-    const stop = () => {
-      if (id !== null) clearInterval(id);
-      id = null;
-    };
-    const onVisibility = () => (document.hidden ? stop() : start());
-    if (!document.hidden) start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [ms]);
-}
-
 // Single combined control for everything time-based: alerts that need
 // attention, live background jobs, and the routine activity log. One icon,
 // one panel, filterable — instead of separate bell / spinner / feedback
@@ -97,14 +72,14 @@ export function NotificationsPopover() {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const popoverRef = React.useRef<HTMLDivElement>(null);
 
-  useVisibleInterval(async () => {
+  usePolling(async () => {
     try {
       const res = await fetch("/api/notifications");
       if (res.ok) setData(await res.json());
     } catch {}
   }, 15000);
 
-  useVisibleInterval(async () => {
+  usePolling(async () => {
     try {
       const res = await fetch("/api/background-jobs");
       if (res.ok) setJobs(await res.json());
