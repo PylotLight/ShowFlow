@@ -79,6 +79,7 @@ const MODE_CHIP: Record<Mode, string> = {
 };
 
 const CUSTOM = "custom:";
+const GROUP = "group:";
 const resLabel = (r: number | null) => (r == null ? "Any" : r === 4320 ? "8K" : `${r}p`);
 
 function signed(n: number) {
@@ -182,6 +183,104 @@ function TermChips({ draft, lib, paint, onChange }: { draft: Profile; lib: TermL
   );
 }
 
+/**
+ * Per-profile release groups: type a group (or pick one seen in your own
+ * grabs/files) and it's added in the current click mode. Matches the parsed
+ * group exactly, case-insensitive: leading `[Group]` or trailing `-GROUP`.
+ */
+function ReleaseGroupsRow({ draft, paint, onChange }: { draft: Profile; paint: Mode; onChange: (terms: ProfileTerm[]) => void }) {
+  const [text, setText] = React.useState("");
+  const [seen, setSeen] = React.useState<{ name: string; count: number }[]>([]);
+  React.useEffect(() => {
+    api<{ name: string; count: number }[]>("/api/quality/release-groups?limit=60").then(r => setSeen(Array.isArray(r) ? r : [])).catch(() => {});
+  }, []);
+  const groups = draft.terms.filter(t => t.termId.startsWith(GROUP));
+  const have = new Set(groups.map(t => t.termId.slice(GROUP.length).toLowerCase()));
+
+  function add(raw: string) {
+    const name = raw.trim().replace(/^\[|\]$/g, "").replace(/^-/, "").trim();
+    if (!name || name.length > 40) return;
+    if (have.has(name.toLowerCase())) {
+      toast.message(`${name} is already on this profile`);
+      return;
+    }
+    onChange([...draft.terms, { termId: GROUP + name, mode: paint, weight: null }]);
+    setText("");
+  }
+  function repaint(termId: string) {
+    const cur = draft.terms.find(t => t.termId === termId);
+    if (!cur) return;
+    if (cur.mode === paint) onChange(draft.terms.filter(t => t.termId !== termId));
+    else onChange(draft.terms.map(t => (t.termId === termId ? { ...t, mode: paint, weight: null } : t)));
+  }
+  const q = text.trim().toLowerCase();
+  const suggestions = seen.filter(s => !have.has(s.name.toLowerCase()) && (!q || s.name.toLowerCase().includes(q))).slice(0, 8);
+
+  return (
+    <div className="grid gap-1.5 sm:grid-cols-[8.5rem_1fr] sm:items-baseline">
+      <span className="text-caption text-muted-foreground">Release groups</span>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {groups.map(t => {
+            const name = t.termId.slice(GROUP.length);
+            return (
+              <span key={t.termId} className={cn("inline-flex items-center rounded-full border text-caption leading-none", MODE_CHIP[t.mode])}>
+                <button
+                  type="button"
+                  onClick={() => repaint(t.termId)}
+                  aria-label={`${name}: ${MODE_LABEL[t.mode]}. Click to ${t.mode === paint ? "remove" : `set ${MODE_LABEL[paint]}`}`}
+                  className="inline-flex items-center gap-1 rounded-full py-1 pl-2.5 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
+                >
+                  <span className={cn(t.mode === "never" && "line-through decoration-1")}>{name}</span>
+                  <span className="font-mono text-[11px]">{MODES.find(m => m.id === t.mode)!.short}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange(draft.terms.filter(x => x.termId !== t.termId))}
+                  aria-label={`Remove release group ${name}`}
+                  className="mr-1 rounded-full p-0.5 opacity-80 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-signal/70"
+                >
+                  <XIcon className="size-3" aria-hidden />
+                </button>
+              </span>
+            );
+          })}
+          <form onSubmit={e => { e.preventDefault(); add(text); }} className="flex items-center gap-1.5">
+            <Input
+              value={text}
+              onChange={e => setText(e.target.value)}
+              placeholder={groups.length ? "add another" : "type a group, e.g. SubsPlease"}
+              aria-label="Add a release group"
+              className="h-7 w-44 text-caption"
+            />
+            <Button type="submit" size="sm" variant="secondary" className="h-7" disabled={!text.trim()}>
+              <PlusIcon className="size-3.5" /> {MODE_LABEL[paint]}
+            </Button>
+          </form>
+        </div>
+        {suggestions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">Seen in your library</span>
+            {suggestions.map(s => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => add(s.name)}
+                aria-label={`Add ${s.name} (${s.count} releases) as ${MODE_LABEL[paint]}`}
+                className={cn(chipBase, chipOff, "px-2 py-0.5")}
+              >
+                {s.name}
+                <span className="font-mono text-[11px] text-muted-foreground">{s.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-muted-foreground">Exact name, any case. Matches a leading [Group] or a trailing -GROUP.</p>
+      </div>
+    </div>
+  );
+}
+
 function PaintBar({ paint, setPaint, weights }: { paint: Mode; setPaint: (m: Mode) => void; weights: Record<Mode, number> }) {
   return (
     <div role="radiogroup" aria-label="What a click on a term sets" className="flex flex-wrap items-center gap-1.5">
@@ -260,7 +359,7 @@ function AdvancedSection({ draft, lib, onChange, onLibChange }: {
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sub font-medium outline-none focus-visible:ring-2 focus-visible:ring-signal/70">
         <ChevronRightIcon className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
         Advanced
-        <span className="text-caption font-normal text-muted-foreground">custom regex terms, numeric weights</span>
+        <span className="text-caption font-normal text-muted-foreground">custom regex terms, numeric weights (incl. groups)</span>
       </summary>
       <div className="space-y-4 px-3 pb-3">
         <div className="space-y-2">
@@ -317,7 +416,7 @@ function AdvancedSection({ draft, lib, onChange, onLibChange }: {
             <div className="flex flex-wrap gap-2">
               {active.map(t => (
                 <label key={t.termId} className="flex items-center gap-1.5 rounded-md bg-white/[0.03] px-2 py-1">
-                  <span className="text-caption">{builtinLabel.get(t.termId) ?? t.termId}</span>
+                  <span className="text-caption">{t.termId.startsWith(GROUP) ? `${t.termId.slice(GROUP.length)} (group)` : builtinLabel.get(t.termId) ?? t.termId}</span>
                   <Input
                     type="number"
                     inputMode="numeric"
@@ -342,6 +441,7 @@ interface TermHit { termId: string; label: string; mode: Mode; weight: number; m
 interface ReleaseTestResult {
   resolution: number | null;
   source: string | null;
+  releaseGroup?: string | null;
   quality: { name: string; rank: number } | null;
   terms: TermHit[];
   termScore: number;
@@ -415,6 +515,7 @@ function TestBox({ profileId, dirty }: { profileId: string; dirty: boolean }) {
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-caption text-muted-foreground">
             <span>resolution <span className="font-mono text-foreground">{result.resolution ? `${result.resolution}p` : "?"}</span></span>
             <span>source <span className="font-mono text-foreground">{result.source ?? "?"}</span></span>
+            <span>group <span className="font-mono text-foreground">{result.releaseGroup ?? "none"}</span></span>
             <span>terms <span className="font-mono text-foreground">{signed(result.termScore)}</span></span>
           </div>
           {matched.length > 0 ? (
@@ -564,6 +665,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
       <Section title="Terms" description="Each term counts once. Strong avoid beats a codec bonus, Never rejects outright.">
         <PaintBar paint={paint} setPaint={setPaint} weights={lib.modeWeights} />
         <TermChips draft={draft} lib={lib} paint={paint} onChange={t => set("terms", t)} />
+        <ReleaseGroupsRow draft={draft} paint={paint} onChange={t => set("terms", t)} />
         <AdvancedSection draft={draft} lib={lib} onChange={t => set("terms", t)} onLibChange={onLibChange} />
       </Section>
 

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { convertLegacyProfile, classifyFormat, type LegacyFormat } from "./quality_migration";
+import { convertLegacyProfile, classifyFormat, groupFromRegex, type LegacyFormat } from "./quality_migration";
 
 const f = (id: string, name: string, regex: string, score: number, type = "bonus"): LegacyFormat => ({ id, name, regex, score, type });
 
@@ -12,7 +12,9 @@ describe("classifyFormat", () => {
     expect(classifyFormat({ name: "HEVC", regex: "\\b(x|h)\\.?265\\b" })).toEqual({ kind: "term", termId: "hevc" });
     expect(classifyFormat({ name: "Dolby Vision", regex: "\\b(DV|DoVi)\\b" })).toEqual({ kind: "term", termId: "dv" });
     expect(classifyFormat({ name: "HDR", regex: "HDR" })).toEqual({ kind: "term", termId: "hdr" });
-    expect(classifyFormat({ name: "SubsPlease", regex: "\\[SubsPlease\\]" })).toEqual({ kind: "term", termId: "g_subsplease" });
+    expect(classifyFormat({ name: "SubsPlease", regex: "\\[SubsPlease\\]" })).toEqual({ kind: "term", termId: "group:SubsPlease" });
+    expect(classifyFormat({ name: "Erai", regex: "\\[Erai-raws\\]" })).toEqual({ kind: "term", termId: "group:Erai-raws" });
+    expect(classifyFormat({ name: "NTb", regex: "-NTb$" })).toEqual({ kind: "term", termId: "group:NTb" });
     expect(classifyFormat({ name: "2160p", regex: "2160p" })).toEqual({ kind: "resolution", res: 2160 });
     expect(classifyFormat({ name: "4K", regex: "4k|uhd" })).toEqual({ kind: "resolution", res: 2160 });
     expect(classifyFormat({ name: "Remux", regex: "remux" })).toEqual({ kind: "source", source: "remux" });
@@ -83,5 +85,15 @@ describe("convertLegacyProfile", () => {
     expect(c.terms.find(t => t.termId === "flac")).toBeUndefined();
     expect(c.skipSources).toEqual(["hdtv"]);
     expect(c.targetResolution).toBe(1080);
+  });
+});
+
+describe("groupFromRegex", () => {
+  test("bracket / trailing-dash group regexes, not codecs", () => {
+    expect(groupFromRegex("\\[SubsPlease\\]")).toBe("SubsPlease");
+    expect(groupFromRegex("-FraMeSToR$")).toBe("FraMeSToR");
+    expect(groupFromRegex("-x265")).toBeNull();
+    expect(groupFromRegex("\\[1080p\\]")).toBeNull();
+    expect(groupFromRegex("x265|vostfr")).toBeNull();
   });
 });

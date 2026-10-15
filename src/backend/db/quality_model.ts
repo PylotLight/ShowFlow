@@ -7,11 +7,12 @@
  * profile_formats, cutoff_quality_id) are left untouched and read-only for
  * one release so the migration preview can score old vs new.
  */
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { DatabaseManager } from './index';
 import * as schema from './schema';
 import {
-  BUILTIN_TERMS, CUSTOM_PREFIX, TERM_MODES, getBuiltinTerm, isCustomTermId, isReleaseSource,
+  BUILTIN_TERMS, CUSTOM_PREFIX, TERM_MODES, LEGACY_GROUP_TERMS, getBuiltinTerm, isCustomTermId, isReleaseSource,
+  isGroupTermId, cleanGroupName, groupTermId, groupNameOf, parseReleaseGroup,
   type ResolvedTerm, type TermMode, type ReleaseSource,
 } from '../core/quality_terms';
 import { convertLegacyProfile, type LegacyFormat } from '../core/quality_migration';
@@ -127,6 +128,10 @@ export function resolveProfileTerms(dbm: DatabaseManager, model: Pick<ProfileMod
       const c = customs.get(t.termId.slice(CUSTOM_PREFIX.length));
       if (!c) continue;
       out.push({ termId: t.termId, label: c.name, group: 'custom', mode: t.mode, weight: t.weight, regex: c.regex });
+    } else if (isGroupTermId(t.termId)) {
+      const name = groupNameOf(t.termId);
+      if (!name) continue;
+      out.push({ termId: t.termId, label: name, group: 'group', mode: t.mode, weight: t.weight, regex: null });
     } else {
       const b = getBuiltinTerm(t.termId);
       if (!b) continue;
@@ -189,17 +194,92 @@ export function saveProfileModel(dbm: DatabaseManager, input: ProfileModelInput)
   return getProfileModel(dbm, input.id)!;
 }
 
+/** Canonical term id: old built-in group ids -> `group:<Name>`, group names trimmed. null = unknown. */
+export function normalizeTermId(termId: string): string | null {
+  if (LEGACY_GROUP_TERMS[termId]) return groupTermId(LEGACY_GROUP_TERMS[termId]);
+  if (isGroupTermId(termId)) {
+    const name = cleanGroupName(groupNameOf(termId));
+    return name ? groupTermId(name) : null;
+  }
+  if (isCustomTermId(termId) || getBuiltinTerm(termId)) return termId;
+  return null;
+}
+
+/** Dedupe key: group names compare case-insensitively. */
+function termKey(termId: string): string {
+  return isGroupTermId(termId) ? termId.toLowerCase() : termId;
+}
+
 function writeTerms(dbm: DatabaseManager, profileId: string, terms: { termId: string; mode: string; weight?: number | null }[]) {
   dbm.drizz.delete(schema.profileTerms).where(eq(schema.profileTerms.profile_id, profileId)).run();
   const seen = new Set<string>();
   for (const t of terms) {
-    if (!t?.termId || seen.has(t.termId)) continue;
+    if (!t?.termId) continue;
+    const termId = normalizeTermId(t.termId);
+    if (!termId) throw new Error(`unknown term "${t.termId}"`);
+    if (seen.has(termKey(termId))) continue;
     if (!(TERM_MODES as string[]).includes(t.mode)) throw new Error(`bad mode "${t.mode}" for ${t.termId}`);
-    if (!isCustomTermId(t.termId) && !getBuiltinTerm(t.termId)) throw new Error(`unknown term "${t.termId}"`);
-    seen.add(t.termId);
+    seen.add(termKey(termId));
     const weight = t.mode === 'must' || t.mode === 'never' ? null : intOrNull(t.weight);
-    dbm.drizz.insert(schema.profileTerms).values({ profile_id: profileId, term_id: t.termId, mode: t.mode, weight }).run();
+    dbm.drizz.insert(schema.profileTerms).values({ profile_id: profileId, term_id: termId, mode: t.mode, weight }).run();
   }
+}
+
+/**
+ * One-time (idempotent): the built-in release-group chips are gone, so any
+ * profile still using one gets a `group:<Name>` term with the same mode and
+ * weight. If the profile somehow already has that group, the old row is
+ * just dropped. Returns how many rows were converted.
+ */
+export function convertBuiltinGroupTerms(dbm: DatabaseManager): number {
+  const ids = Object.keys(LEGACY_GROUP_TERMS);
+  const rows = dbm.drizz.select().from(schema.profileTerms).where(inArray(schema.profileTerms.term_id, ids)).all();
+  if (!rows.length) return 0;
+  let n = 0;
+  dbm.db.transaction(() => {
+    for (const r of rows) {
+      const newId = groupTermId(LEGACY_GROUP_TERMS[r.term_id]!);
+      const have = dbm.drizz.select().from(schema.profileTerms).where(eq(schema.profileTerms.profile_id, r.profile_id)).all()
+        .some(x => x.term_id.toLowerCase() === newId.toLowerCase());
+      if (have) {
+        dbm.db.query('DELETE FROM profile_terms WHERE profile_id = ? AND term_id = ?').run(r.profile_id, r.term_id);
+      } else {
+        dbm.db.query('UPDATE profile_terms SET term_id = ? WHERE profile_id = ? AND term_id = ?').run(newId, r.profile_id, r.term_id);
+        n++;
+      }
+    }
+  })();
+  return n;
+}
+
+/**
+ * Release groups seen in the user's own grabs and library files, most
+ * frequent first, for the "Release groups" input. Casing is the most common
+ * spelling seen.
+ */
+export function releaseGroupSuggestions(dbm: DatabaseManager, limit = 50): { name: string; count: number }[] {
+  const titles: string[] = [];
+  const grabs = dbm.db.query('SELECT release_title AS t FROM grabbed_releases ORDER BY id DESC LIMIT 5000').all() as { t: string | null }[];
+  for (const g of grabs) if (g.t) titles.push(g.t);
+  const files = dbm.db.query('SELECT original_name AS o, release_title AS r FROM episode_files ORDER BY id DESC LIMIT 10000').all() as { o: string | null; r: string | null }[];
+  for (const f of files) {
+    const t = f.r || f.o;
+    if (t) titles.push(t);
+  }
+  const counts = new Map<string, { count: number; spellings: Map<string, number> }>();
+  for (const t of titles) {
+    const g = parseReleaseGroup(t);
+    if (!g) continue;
+    const key = g.toLowerCase();
+    const e = counts.get(key) ?? { count: 0, spellings: new Map() };
+    e.count++;
+    e.spellings.set(g, (e.spellings.get(g) ?? 0) + 1);
+    counts.set(key, e);
+  }
+  return [...counts.values()]
+    .map(e => ({ name: [...e.spellings].sort((a, b) => b[1] - a[1])[0]![0], count: e.count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, Math.max(1, Math.min(limit, 500)));
 }
 
 export function clearMigrationNote(dbm: DatabaseManager, profileId: string) {

@@ -33,9 +33,7 @@ describe("term library", () => {
     expect(builtinTermsIn("Show S01 MULTi 1080p")).toContain("multi");
     expect(builtinTermsIn("Show S01 Multi-Subs 1080p")).toEqual(expect.arrayContaining(["multi_subs"]));
     expect(builtinTermsIn("Show S01 Multi-Subs 1080p")).not.toContain("multi");
-    expect(builtinTermsIn("[SubsPlease] Frieren - 01 (1080p) [ABCD].mkv")).toContain("g_subsplease");
-    expect(builtinTermsIn("Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb")).toEqual(expect.arrayContaining(["ddp", "avc", "g_ntb"]));
-    expect(builtinTermsIn("Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb.mkv")).toContain("g_ntb");
+    expect(builtinTermsIn("Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb")).toEqual(expect.arrayContaining(["ddp", "avc"]));
     expect(builtinTermsIn("[Team] Frieren - 01 VOSTFR 1080p")).toContain("vostfr");
   });
 

@@ -114,6 +114,46 @@ export function releaseGroup(name: string): string {
   return g.toLowerCase();
 }
 
+const CONTAINER_EXT = /\.(?:mkv|mp4|m4v|avi|ts|m2ts|webm|wmv|mov|nzb|torrent)$/i;
+const HASH_TAG = /^[0-9a-f]{8}$/i;
+const GROUP_CHARS = /^[a-z0-9][a-z0-9_&@!+]*$/i;
+
+function plausibleGroup(g: string): boolean {
+  if (g.length < 2 || g.length > 30) return false;
+  if (/^\d+$/.test(g) || HASH_TAG.test(g)) return false;
+  if (NOT_A_GROUP.test(g)) return false;
+  return true;
+}
+
+/**
+ * Release group as written (case kept) for the quality "Release groups" row:
+ *  - anime style: a leading `[Group]` (`[SubsPlease] Show - 01 (1080p) [HASH].mkv`)
+ *  - scene style: the trailing `-GROUP`, after dropping the container extension
+ *    and trailing bracket tags (`...H.264-NTb[rartv].mkv` -> `NTb`).
+ * Codec/source/quality tails (`-x265`, `-DL`, `-HEVC`) and bare numbers are not
+ * groups. Returns null when there's no group.
+ */
+export function parseReleaseGroup(name: string | null | undefined): string | null {
+  if (!name) return null;
+  let s = name.trim().replace(CONTAINER_EXT, '').trim();
+  const lead = /^\[([^\]]{1,40})\]/.exec(s);
+  if (lead) {
+    const g = lead[1]!.trim();
+    if (plausibleGroup(g) && !/^\d{3,4}p$/i.test(g)) return g;
+  }
+  // trailing bracket/paren tags: [rartv], (1080p), [ABCD1234]
+  for (let i = 0; i < 4; i++) {
+    const next = s.replace(/\s*(?:\[[^\[\]]*\]|\([^()]*\))\s*$/, '').replace(CONTAINER_EXT, '');
+    if (next === s) break;
+    s = next;
+  }
+  const idx = s.lastIndexOf('-');
+  if (idx <= 0 || /\s/.test(s[idx - 1]!)) return null; // "Show - 01" is a separator, not a group
+  const g = s.slice(idx + 1);
+  if (!GROUP_CHARS.test(g) || !plausibleGroup(g)) return null;
+  return g;
+}
+
 function normTitle(t: string): string[] {
   const n = t.normalize('NFKC').replace(/[._-]+/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   return n ? n.split(' ') : [];
