@@ -130,7 +130,9 @@ export class BackgroundJobRegistry {  private jobs = new Map<string, BackgroundJ
   }
 
   private pruneFinished(): void {
-    const finished = this.list().filter((j) => j.status !== 'running');
+    // Map insertion order (not list(), which is newest-first) so jobs that
+    // finished in the same millisecond evict oldest-first; sort is stable.
+    const finished = Array.from(this.jobs.values()).filter((j) => j.status !== 'running');
     const over = finished.length - BackgroundJobRegistry.MAX_FINISHED;
     if (over <= 0) return;
     finished
