@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Faster updates**: the update unpacks while it downloads, status polls every 500ms (also during the handoff), and the staged banner estimates how long apply takes. Supervisor apply ~1.1s → ~0.5s. The new image also hashes the binary once and checks readiness every 100ms, so the next update after this one is quicker still.
+- **Settings density**: setting rows put the label on the left and the control on the right (stacking on narrow widths), one compact 13/12px text scale, a slimmer left nav that becomes a dropdown under 1280px, sticky section pills on General, and Quality rows are tighter so score selects no longer clip.
 
 ## [v0.1.82] - 2026-10-15
 - **Fix**: v0.1.81 shipped stamped as version `main`, so the app listed every release as an update and tried to reinstall the running build (`ETXTBSY`). Builds now get the tag/commit explicitly and fail if the stamp is wrong. The app never re-installs the active release (supervisor installs via temp dir + rename), falls back to the active release's manifest if the version stamp is bad, only offers newer releases (older ones show as previous), and the post-update refresh matches on the active release sha with a 60 attempt cap. Coming from v0.1.81 you'll need to hit Update + Activate once by hand.
