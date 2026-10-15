@@ -47,6 +47,14 @@ export class ReleaseManager {
   }
 
   private async runActivation(releaseId: string, isRestore: boolean): Promise<{ ok: boolean; message: string }> {
+    const t0 = performance.now();
+    const marks: string[] = [];
+    let last = t0;
+    const mark = (label: string) => {
+      const now = performance.now();
+      marks.push(`${label} ${Math.round(now - last)}ms`);
+      last = now;
+    };
     const dir = releasePath(releaseId);
     const manifest = await readManifest(dir);
     if (!manifest) {
@@ -62,10 +70,12 @@ export class ReleaseManager {
           `The pod's image must be rebuilt with a newer supervisor.`,
       };
     }
+    mark("preflight");
 
     this.phase = "quiescing";
     await writeStateAtomic({ phase: "quiescing", candidate: releaseId });
     await this.quiesceAndStop(this.current);
+    mark("stop-old");
     this.current = null;
     this.phase = "stopped";
     await writeStateAtomic({ phase: "stopped" });
@@ -89,6 +99,7 @@ export class ReleaseManager {
     }
 
     const ok = await this.waitReadyRepeated(port, manifest);
+    mark("start+ready");
     if (!ok) {
       try { candidateProc.kill("SIGKILL"); } catch {}
       return this.handleFailedStart(releaseId, isRestore, `Release "${releaseId}" failed readiness checks.`);
@@ -103,6 +114,7 @@ export class ReleaseManager {
       candidate: undefined,
       phase: "stable",
     });
+    console.log(`[supervisor] activated ${releaseId} in ${Math.round(performance.now() - t0)}ms (${marks.join(", ")})`);
     return { ok: true, message: `Release "${releaseId}" is active.` };
   }
 
@@ -136,24 +148,14 @@ export class ReleaseManager {
   }
 
   private async waitReadyRepeated(port: number, manifest: { commit: string; readyPath: string }, passesNeeded = 3): Promise<boolean> {
-    let passes = 0;
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${port}${manifest.readyPath}`);
-        const body = await res.json();
-        if (res.ok && body.ready && body.releaseId === manifest.commit) {
-          passes++;
-          if (passes >= passesNeeded) return true;
-        } else {
-          passes = 0;
-        }
-      } catch {
-        passes = 0;
-      }
-      await Bun.sleep(300);
-    }
-    return false;
+    return waitReadyRepeated(
+      async () => {
+        const res = await fetch(`http://127.0.0.1:${port}${manifest.readyPath}`, { signal: AbortSignal.timeout(2_000) });
+        const body = (await res.json()) as { ready?: boolean; releaseId?: string };
+        return res.ok && !!body.ready && body.releaseId === manifest.commit;
+      },
+      { passesNeeded },
+    );
   }
 
   /**
@@ -182,3 +184,35 @@ export class ReleaseManager {
 }
 
 
+
+/**
+ * Readiness gate: `passesNeeded` consecutive good probes before a release is
+ * trusted. Polls fast (every `pollMs`) while the candidate is still booting,
+ * then spaces the confirmation probes `confirmMs` apart. Was a flat 300ms
+ * sleep between every probe, i.e. ≥600ms of pure waiting after the app was
+ * already up, plus up to 300ms before the first probe noticed it.
+ */
+export async function waitReadyRepeated(
+  probe: () => Promise<boolean>,
+  opts: { passesNeeded?: number; timeoutMs?: number; pollMs?: number; confirmMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<boolean> {
+  const passesNeeded = opts.passesNeeded ?? 3;
+  const pollMs = opts.pollMs ?? 100;
+  const confirmMs = opts.confirmMs ?? 150;
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const deadline = now() + (opts.timeoutMs ?? 15_000);
+  let passes = 0;
+  while (now() < deadline) {
+    let good = false;
+    try { good = await probe(); } catch { good = false; }
+    if (good) {
+      passes++;
+      if (passes >= passesNeeded) return true;
+    } else {
+      passes = 0;
+    }
+    await sleep(passes > 0 ? confirmMs : pollMs);
+  }
+  return false;
+}

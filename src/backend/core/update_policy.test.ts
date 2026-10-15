@@ -44,6 +44,14 @@ describe('waitForQuiet (drain with timeout)', () => {
     expect(r).toEqual({ quiet: true, waitedMs: 0, busy: [] });
   });
 
+  test('re-checks every 500ms by default, so the handoff follows the last job closely', async () => {
+    const sleeps: number[] = [];
+    let t = 0;
+    const r = await waitForQuiet(() => (t < 1_200 ? [item] : []), { timeoutMs: 60_000, now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; } });
+    expect(r.quiet).toBe(true);
+    expect(sleeps).toEqual([500, 500, 500]);
+  });
+
   test('waits until the job finishes', async () => {
     const c = fakeClock();
     const waits: number[] = [];

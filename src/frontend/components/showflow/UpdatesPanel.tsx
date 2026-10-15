@@ -5,6 +5,7 @@ import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
 import { usePolling } from "@frontend/lib/usePolling";
+import { reconnectDelayMs, pendingPollMs, applyEstimateLabel } from "@frontend/lib/updateTiming";
 
 interface PendingUpdate {
   tag: string;
@@ -25,10 +26,11 @@ interface UpdateInfo {
     totalBytes: number | null;
     attempt: number;
     message: string | null;
+    timings?: { downloadMs?: number; extractedInline?: boolean; supervisorMs?: number; supervisorPath?: "install" | "install-archive" };
   } | null;
   downloadFailure?: { tag: string; count: number; nextRetryAt: string; message: string } | null;
   activation?: { releaseId: string; tag: string | null; phase: "draining" | "backing-up" | "handing-off" | "failed"; detail: string; busy: string[]; auto: boolean } | null;
-  lastActivation?: { releaseId: string; tag: string | null; outcome?: "activated" | "rolled-back" | "failed"; message?: string; backupFile: string | null; finishedAt?: string } | null;
+  lastActivation?: { releaseId: string; tag: string | null; outcome?: "activated" | "rolled-back" | "failed"; message?: string; backupFile: string | null; startedAt?: string; finishedAt?: string } | null;
   pendingMigrations?: string[] | null;
   busy?: string[];
 }
@@ -225,7 +227,7 @@ export function UpdatesPanel() {
   // (download, verify, drain, backup, handoff). Idle otherwise.
   const busyDownload = !!info.download && ["resolving", "downloading", "verifying"].includes(info.download.phase);
   const busyActivation = !!info.activation && info.activation.phase !== "failed";
-  usePolling(() => { fetchPending(); }, 1500, !!token && (busyDownload || busyActivation || !!awaitingHandoff || (actionLoading?.startsWith("install-") ?? false)));
+  usePolling(() => { fetchPending(); }, pendingPollMs(!!awaitingHandoff || (!!info.activation && info.activation.phase === "handing-off")), !!token && (busyDownload || busyActivation || !!awaitingHandoff || (actionLoading?.startsWith("install-") ?? false)));
 
   // Drive the stepper from the backend's activation progress.
   React.useEffect(() => {
@@ -257,7 +259,7 @@ export function UpdatesPanel() {
       setStepMessage(`Downloading ${formatMb(d.receivedBytes)} / ${formatMb(d.totalBytes)}${d.attempt > 1 ? ` (attempt ${d.attempt})` : ""}…`);
     } else if (d.phase === "verifying") {
       setDownloadProgress(100);
-      setStepMessage("Supervisor is extracting and verifying the checksum…");
+      setStepMessage(d.timings?.extractedInline ? "Unpacked while downloading — supervisor is verifying the checksum…" : "Supervisor is extracting and verifying the checksum…");
     }
   }, [info.download, currentStep]);
 
@@ -377,10 +379,7 @@ export function UpdatesPanel() {
       setTimeout(() => window.location.reload(), 400);
     }
 
-    function backoffDelay(n: number): number {
-      const base = Math.min(800 * Math.pow(1.4, n), 4000);
-      return Math.round(base + base * 0.2 * Math.random());
-    }
+    const backoffDelay = (n: number) => reconnectDelayMs(n);
 
     function poll() {
       attempt++;
@@ -695,7 +694,7 @@ export function UpdatesPanel() {
                   Update <span className="font-mono text-emerald-400">{pending.tag}</span> is downloaded &amp; verified
                 </h3>
                 <p className="text-muted-foreground text-xs mt-0.5">
-                  The new build is staged on disk. Activating briefly restarts ShowFlow — you can do it now or later.
+                  Ready — the new build is staged on disk. {applyEstimateLabel(info.lastActivation, !!info.pendingMigrations?.length)}; ShowFlow restarts briefly. Do it now or later.
                 </p>
                 <p className="text-[11px] text-muted-foreground/70 mt-1 font-mono">
                   releaseId {pending.releaseId.slice(0, 12)} · staged {new Date(pending.stagedAt).toLocaleString()}
@@ -742,7 +741,7 @@ export function UpdatesPanel() {
             {info.busy && info.busy.length > 0 && (
               <li>Activating waits (up to 2 min) for: {info.busy.join(", ")}.</li>
             )}
-            <li>Downtime is usually 5–20s while the supervisor swaps builds; TorBox downloads resume after the restart. A failed health check rolls back automatically.</li>
+            <li>Nothing is downloaded when you click Activate — it's just the restart. TorBox downloads resume afterwards, and a failed health check rolls back automatically.</li>
           </ul>
           {pending.notes && (
             <details open className="rounded bg-black/30 border border-white/5">

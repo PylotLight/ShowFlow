@@ -1,7 +1,7 @@
 // Shared types, paths, and the atomic state-file write used by both the
 // daemon and the CLI side of the supervisor binary.
 
-import { rename } from "node:fs/promises";
+import { rename, stat } from "node:fs/promises";
 
 export const DATA_DIR = process.env.SHOWFLOW_DATA_DIR ?? "/data";
 export const RELEASES_DIR = `${DATA_DIR}/releases`;
@@ -153,10 +153,55 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export async function verifyArtifact(dir: string, manifest: Manifest): Promise<boolean> {
-  const appFile = Bun.file(`${dir}/${manifest.artifact.name}`);
-  if (!(await appFile.exists())) return false;
+/**
+ * Streams a file through sha256 (constant memory — the old version pulled the
+ * whole ~96MB binary into an ArrayBuffer, twice per update).
+ */
+export async function sha256File(path: string): Promise<string> {
   const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(await appFile.arrayBuffer());
-  return hasher.digest("hex") === manifest.artifact.sha256;
+  for await (const chunk of Bun.file(path).stream()) hasher.update(chunk);
+  return hasher.digest("hex");
+}
+
+/**
+ * Files this supervisor process already hashed, keyed by path, with the stat
+ * fingerprint they had at the time. /data/releases is written only by the
+ * supervisor, so if size+mtime+inode are unchanged since we hashed it, hashing
+ * again on activate is pure overhead (~1-2s per update on a NAS). Process
+ * memory only: a restart re-verifies everything.
+ */
+const verifiedFiles = new Map<string, { sha256: string; size: number; mtimeMs: number; ino: number }>();
+
+async function fingerprint(path: string): Promise<{ size: number; mtimeMs: number; ino: number } | null> {
+  try {
+    const s = await stat(path);
+    return { size: s.size, mtimeMs: s.mtimeMs, ino: s.ino };
+  } catch {
+    return null;
+  }
+}
+
+/** Remember that `path` (as it is on disk right now) hashes to `sha256`. */
+export async function rememberVerified(path: string, sha256: string): Promise<void> {
+  const fp = await fingerprint(path);
+  if (fp) verifiedFiles.set(path, { sha256, ...fp });
+}
+
+/** Test hook. */
+export function forgetVerified(): void {
+  verifiedFiles.clear();
+}
+
+export async function verifyArtifact(dir: string, manifest: Manifest): Promise<boolean> {
+  const path = `${dir}/${manifest.artifact.name}`;
+  const fp = await fingerprint(path);
+  if (!fp) return false;
+  const known = verifiedFiles.get(path);
+  if (known && known.sha256 === manifest.artifact.sha256 && known.size === fp.size && known.mtimeMs === fp.mtimeMs && known.ino === fp.ino) {
+    return true;
+  }
+  const sha = await sha256File(path);
+  if (sha !== manifest.artifact.sha256) return false;
+  verifiedFiles.set(path, { sha256: sha, ...fp });
+  return true;
 }

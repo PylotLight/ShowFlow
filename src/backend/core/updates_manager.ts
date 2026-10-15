@@ -23,6 +23,7 @@
 
 import { mkdir, rename, unlink } from "node:fs/promises";
 import { isPrereleaseTag, releaseRelation, type ReleaseRelation } from "./update_policy";
+import { createTarGzExtractor, type TarExtractor, type ExtractedEntry } from "./tar_stream";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 
@@ -291,7 +292,18 @@ export interface DownloadProgress {
   totalBytes: number | null;
   attempt: number;
   message: string | null;
+  /** Per-stage wall time (ms) of the last stage run, for the UI + logs. */
+  timings?: StageTimings;
   updatedAt: string;
+}
+
+export interface StageTimings {
+  downloadMs?: number;
+  /** true when the tarball was unpacked while downloading (no separate gunzip pass). */
+  extractedInline?: boolean;
+  supervisorMs?: number;
+  /** "install" = supervisor installed from the pre-extracted dir; "install-archive" = legacy path. */
+  supervisorPath?: "install" | "install-archive";
 }
 
 let downloadProgress: DownloadProgress | null = null;
@@ -324,7 +336,9 @@ async function downloadAssetToFile(
   repo: string,
   destFile: string,
   onProgress?: (received: number, total: number | null, attempt: number) => void,
-): Promise<void> {
+  /** Per-attempt consumer fed the same bytes as they arrive (e.g. inline tar extraction). */
+  makeTap?: () => TarExtractor,
+): Promise<{ extracted: ExtractedEntry[] | null; extractError: string | null }> {
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
     try {
@@ -343,10 +357,23 @@ async function downloadAssetToFile(
       const sink = Bun.file(`${destFile}.part`).writer();
       let received = 0;
       let lastTick = 0;
+      // Inline extraction is best-effort: if it trips (odd tar, disk error)
+      // we stop feeding it and fall back to the supervisor's install-archive.
+      let tap: TarExtractor | null = makeTap ? makeTap() : null;
+      let extractError: string | null = null;
+      const dropTap = (err: unknown) => {
+        extractError = err instanceof Error ? err.message : String(err);
+        const t = tap;
+        tap = null;
+        t?.end().catch(() => {});
+      };
       try {
         for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
           sink.write(chunk);
           hasher.update(chunk);
+          if (tap) {
+            try { await tap.write(chunk); } catch (err) { dropTap(err); }
+          }
           received += chunk.byteLength;
           if (onProgress && Date.now() - lastTick > 250) {
             lastTick = Date.now();
@@ -366,7 +393,11 @@ async function downloadAssetToFile(
         if (got !== digest) throw new Error(`sha256 mismatch: got ${got.slice(0, 12)}…, expected ${digest.slice(0, 12)}…`);
       }
       await rename(`${destFile}.part`, destFile);
-      return;
+      let extracted: ExtractedEntry[] | null = null;
+      if (tap) {
+        try { extracted = await tap.end(); } catch (err) { extractError = err instanceof Error ? err.message : String(err); }
+      }
+      return { extracted, extractError };
     } catch (err) {
       lastErr = err;
       await unlink(`${destFile}.part`).catch(() => {});
@@ -396,21 +427,61 @@ async function stageRelease(
     downloadProgress = null;
     return { ok: false, alreadyActive: true, message, releaseId };
   }
-  setProgress({ tag, releaseId, phase: "downloading", receivedBytes: 0, totalBytes: tarballAsset.size ?? null, attempt: 1, message: null });
+  setProgress({ tag, releaseId, phase: "downloading", receivedBytes: 0, totalBytes: tarballAsset.size ?? null, attempt: 1, message: null, timings: undefined });
   try {
-    await installTarball(tarballAsset, token, repo, (received, total, attempt) => {
+    const t0 = performance.now();
+    const dl = await installTarball(tarballAsset, token, repo, (received, total, attempt) => {
       setProgress({ receivedBytes: received, totalBytes: total, attempt });
       onProgress?.(received, total);
     });
-    setProgress({ phase: "verifying", message: "Supervisor is extracting and verifying the build…" });
-    const result = await callSupervisor("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` });
-    setProgress(result.ok ? { phase: "staged", message: result.message } : { phase: "error", message: result.message });
-    return { ...result, releaseId };
+    const timings: StageTimings = { downloadMs: Math.round(performance.now() - t0), extractedInline: dl.preExtracted };
+    setProgress({ phase: "verifying", timings, message: dl.preExtracted ? "Supervisor is verifying the build…" : "Supervisor is extracting and verifying the build…" });
+
+    const t1 = performance.now();
+    const result = await handOffToSupervisor(releaseId, dl.preExtracted, callSupervisorRaw);
+    timings.supervisorMs = Math.round(performance.now() - t1);
+    timings.supervisorPath = result.path;
+    console.log(`[updates] staged ${tag}: download ${timings.downloadMs}ms (${dl.preExtracted ? "extracted inline" : "not extracted"}), supervisor ${result.path} ${timings.supervisorMs}ms → ${result.ok ? "ok" : result.message}`);
+    setProgress(result.ok ? { phase: "staged", message: result.message, timings } : { phase: "error", message: result.message, timings });
+    return { ok: result.ok, message: result.message, releaseId };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     setProgress({ phase: "error", message });
     return { ok: false, message, releaseId };
   }
+}
+
+type SupervisorCall = (pathname: string, body: unknown) => Promise<{ ok: boolean; message: string; status: number }>;
+
+/**
+ * Picks the cheapest supervisor install path. When the app already unpacked
+ * and checked the tarball while downloading, /admin/install (present since the
+ * first supervisor) only has to hash + copy the binary. Otherwise — or when a
+ * supervisor somehow lacks /admin/install — use /admin/install-archive, which
+ * re-reads and gunzips the tarball itself. Exported for tests.
+ */
+export async function handOffToSupervisor(
+  releaseId: string,
+  preExtracted: boolean,
+  call: SupervisorCall,
+): Promise<{ ok: boolean; message: string; path: "install" | "install-archive" }> {
+  if (preExtracted) {
+    const r = await call("/admin/install", { releaseId });
+    if (r.status !== 404) return { ok: r.ok, message: r.message, path: "install" };
+  }
+  const r = await call("/admin/install-archive", { releaseId, tarball: `${DOWNLOADS_DIR}/${releaseId}/release.tar.gz` });
+  return { ok: r.ok, message: r.message, path: "install-archive" };
+}
+
+/**
+ * True when the inline-extracted dir holds a manifest whose artifact we saw
+ * (and hashed) in the stream with a matching sha256. Exported for tests.
+ */
+export function inlineExtractUsable(entries: ExtractedEntry[] | null, manifest: { artifact?: { name?: string; sha256?: string } } | null): boolean {
+  if (!entries || !manifest?.artifact?.name || !manifest.artifact.sha256) return false;
+  const bin = entries.find((e) => e.path === manifest.artifact!.name);
+  if (!bin?.sha256) return false;
+  return bin.sha256 === manifest.artifact.sha256.toLowerCase() && entries.some((e) => e.path === "manifest.json");
 }
 
 function releaseIdFromAsset(name: string): string {
@@ -486,30 +557,41 @@ export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok:
   return stageRelease(release.tag_name, tarballAsset, token, repo);
 }
 
-/** Shared tarball download + stage-to-disk used by both id- and tag-based install. */
+/** Shared tarball download + stage-to-disk used by both id- and tag-based install.
+ *  Unpacks the tarball into the same dir while it streams in, so the
+ *  supervisor can skip its own buffer-and-gunzip pass. */
 async function installTarball(
   tarballAsset: { id: number; name: string; size?: number; digest?: string | null },
   token: string | undefined,
   repo: string,
   onProgress?: (received: number, total: number | null, attempt: number) => void,
-): Promise<string> {
+): Promise<{ releaseId: string; preExtracted: boolean }> {
   const releaseId = releaseIdFromAsset(tarballAsset.name);
   const dest = `${DOWNLOADS_DIR}/${releaseId}`;
   await mkdir(dest, { recursive: true });
-  await downloadAssetToFile(tarballAsset, token, repo, `${dest}/release.tar.gz`, onProgress);
-  return releaseId;
+  const { extracted, extractError } = await downloadAssetToFile(
+    tarballAsset, token, repo, `${dest}/release.tar.gz`, onProgress,
+    () => createTarGzExtractor(dest, { hashFiles: ["showflow"] }),
+  );
+  let manifest: { artifact?: { name?: string; sha256?: string } } | null = null;
+  try { manifest = await Bun.file(`${dest}/manifest.json`).json(); } catch { manifest = null; }
+  const preExtracted = inlineExtractUsable(extracted, manifest);
+  if (!preExtracted) {
+    console.warn(`[updates] inline extract not usable (${extractError ?? "manifest/sha mismatch"}) — supervisor will extract the tarball`);
+  }
+  return { releaseId, preExtracted };
 }
 
 // ---- Supervisor admin bridge -------------------------------------------
 
-async function callSupervisor(pathname: string, body: unknown): Promise<{ ok: boolean; message: string }> {
+async function callSupervisorRaw(pathname: string, body: unknown): Promise<{ ok: boolean; message: string; status: number }> {
   const res = await fetch(`${ADMIN_BASE}${pathname}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const parsed = await res.json().catch(() => ({}));
-  return { ok: res.ok && parsed.ok === true, message: parsed.message ?? `Supervisor returned ${res.status}` };
+  const parsed = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+  return { ok: res.ok && parsed.ok === true, message: parsed.message ?? `Supervisor returned ${res.status}`, status: res.status };
 }
 
 /**
