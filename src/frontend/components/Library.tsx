@@ -203,7 +203,7 @@ export function Library({
 
   return (
     <>
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-0 py-2 sm:px-6 sm:py-8">
         <div className="flex-1 flex flex-col min-w-0">
           {filtered === null ? (
             <div className="text-muted-foreground flex items-center justify-center gap-2 py-24 text-sm">
@@ -211,7 +211,8 @@ export function Library({
             </div>
           ) : (
             <>
-              <div className="flex items-center flex-wrap gap-x-6 gap-y-3 mb-5 shrink-0">
+              {/* Mobile: one horizontally scrollable row; md+: wraps as before. */}
+              <div className="flex items-center gap-x-6 gap-y-3 mb-5 shrink-0 overflow-x-auto whitespace-nowrap pb-1 md:flex-wrap md:overflow-visible md:pb-0">
                 {/* Provider filter */}
                 {shows && (() => {
                   const pts = Array.from(new Set(shows.map(s => s.providerType))).sort();
