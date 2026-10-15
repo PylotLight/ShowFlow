@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Release groups are yours now**: the hardcoded group chips (SubsPlease, Erai-raws, Judas etc) are gone. Each profile has a Release groups row where you type any group or pick from "seen in your library" (groups from your own grabs + files, most common first), each with the usual Prefer / Strong prefer / Avoid / Strong avoid / Must have / Never. Matches the actual group only: leading `[Group]` or trailing `-GROUP`, case-insensitive, so `-x265`/`-DL`/`- 01` don't count. Profiles using the old chips convert on boot with the same mode and weight. The test box shows the parsed group and whether it hit. Anime preset no longer has a group bias.
 
 ## [v0.1.84] - 2026-10-15
 - **Quality, reworked**: one Quality screen per profile instead of the qualities list + custom formats + per-profile formats juggle. Pick a target/min resolution (plus accept-unknown for anime), skip sources you don't want, and click grouped terms (HEVC, HDR/DV, 10-bit, audio, dual audio, languages like VOSTFR, release groups) as Prefer / Strong prefer / Avoid / Strong avoid / Must have / Never. Custom regex + numeric weights live under Advanced. Presets: 1080p web, 4K HDR, Anime (SubsPlease). "Keep upgrading until" replaces cutoff, and off really means off (no upgrade searches and imports won't replace files).
