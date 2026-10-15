@@ -23,6 +23,7 @@ import * as mappings from './mappings';
 import * as episodeFiles from './episode_files';
 import * as episodeStatus from './episode_status';
 import { resolveImagesDir } from '../core/image_store';
+import { emitConnectSignal } from '../core/connect/bus';
 
 export type { Config, ProwlarrConfig, SonarrConfig, JellyfinConfig, NativeIndexerConfig } from './schemas';
 export {
@@ -424,7 +425,12 @@ export class DatabaseManager {
 
   // ---- Pipeline event log -------------------------------------------------
 
-  logPipelineEvent(event: Parameters<typeof pipeline.logPipelineEvent>[1]) { return pipeline.logPipelineEvent(this, event); }
+  logPipelineEvent(event: Parameters<typeof pipeline.logPipelineEvent>[1]) {
+    const res = pipeline.logPipelineEvent(this, event);
+    // In-app notifications are derived from these rows; fan out to connect targets.
+    emitConnectSignal({ source: 'pipeline', ...event });
+    return res;
+  }
   listPipelineEvents(filter: Parameters<typeof pipeline.listPipelineEvents>[1]) { return pipeline.listPipelineEvents(this, filter); }
   getLatestPipelineEvent(showId: string, seasonNumber?: number, episodeNumber?: number) { return pipeline.getLatestPipelineEvent(this, showId, seasonNumber, episodeNumber); }
   hasRecentPipelineEvent(showId: string, seasonNumber: number | null, episodeNumber: number | null, eventType: string, sinceIso: string) { return pipeline.hasRecentPipelineEvent(this, showId, seasonNumber, episodeNumber, eventType, sinceIso); }
@@ -444,7 +450,11 @@ export class DatabaseManager {
 
   // ---- System health snapshot ---------------------------------------------
 
-  upsertHealthStatus(input: Parameters<typeof health.upsertHealthStatus>[1]) { return health.upsertHealthStatus(this, input); }
+  upsertHealthStatus(input: Parameters<typeof health.upsertHealthStatus>[1]) {
+    const res = health.upsertHealthStatus(this, input);
+    emitConnectSignal({ source: 'health', ...input });
+    return res;
+  }
   removeHealthComponent(componentType: Parameters<typeof health.removeHealthComponent>[1], componentId: string) { return health.removeHealthComponent(this, componentType, componentId); }
   getHealthSnapshot() { return health.getHealthSnapshot(this); }
 

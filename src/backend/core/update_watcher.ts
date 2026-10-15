@@ -16,6 +16,7 @@
 import { db } from "../db";
 import { backgroundJobs } from "./background_jobs";
 import { downloadAndInstallByTag } from "./updates_manager";
+import { emitConnectSignal } from "./connect/bus";
 
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
 
@@ -259,6 +260,7 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       stagedAt: new Date().toISOString(),
     };
     db.setSetting(PENDING_KEY, record);
+    emitConnectSignal({ source: 'update', tag: record.tag, title: record.title, releaseId: record.releaseId });
     db.logEvent({ type: "update", entityType: "system", entityId: latest.tag, message: `Release ${latest.tag} downloaded & verified — ready to activate` });
     console.log(`[updates] release ${latest.tag} staged (releaseId ${result.releaseId}) — awaiting activation`);
 

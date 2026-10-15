@@ -85,6 +85,46 @@ export class JellyfinClient {
     return response.json() as Promise<T>;
   }
 
+  private async post(path: string, body?: unknown): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `MediaBrowser Token="${this.apiKey}"`,
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      throw new Error(
+        `Could not reach Jellyfin at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    if (response.status === 401) throw new Error('Jellyfin rejected the API key (401 Unauthorized).');
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Jellyfin request failed: ${response.status}${text ? ` - ${text}` : ''}`);
+    }
+  }
+
+  /**
+   * Targeted scan: tell Jellyfin these paths changed so it only rescans them
+   * (POST /Library/Media/Updated). Needs an admin API key.
+   */
+  async notifyMediaUpdated(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    await this.post('/Library/Media/Updated', {
+      Updates: paths.map(Path => ({ Path, UpdateType: 'Created' })),
+    });
+  }
+
+  /** Full library scan (POST /Library/Refresh) — the fallback when targeted fails. */
+  async refreshLibrary(): Promise<void> {
+    await this.post('/Library/Refresh');
+  }
+
   async test(): Promise<{ ok: boolean; version?: string; serverName?: string; message?: string }> {
     try {
       const info = await this.request<JellyfinSystemInfo>('/System/Info');

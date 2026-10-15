@@ -6,6 +6,7 @@ import { DebugSettings } from "../DebugSettings";
 import { NamingTab } from "../NamingTab";
 import { QualityProfilesTab } from "../QualityProfiles";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { ConnectSettings } from "./ConnectSettings";
 import { DownloadsSettings } from "./DownloadsSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { IndexersSettings } from "./IndexersSettings";
@@ -30,6 +31,7 @@ export function SettingsTabContent({ id, scrollToSection, onReRunWizard }: {
     case "providers": return <ProvidersSettings />;
     case "indexers": return <IndexersSettings />;
     case "integrations": return <IntegrationsSettings />;
+    case "connect": return <ConnectSettings />;
     case "appearance": return <AppearanceSettings />;
     case "quality": return <QualityProfilesTab />;
     case "naming": return <NamingSettings />;
