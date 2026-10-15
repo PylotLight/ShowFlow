@@ -761,6 +761,162 @@ function ProfilesPanel({ profiles, qualities, formats, onChange }: {
   );
 }
 
+// ---- Test a release name ----------------------------------------------------
+
+interface FormatHit {
+  id: string;
+  name: string;
+  type: "bonus" | "required" | "forbidden";
+  score: number;
+  matched: boolean;
+  deduped: boolean;
+  countedAs?: string;
+}
+
+interface ReleaseTestResult {
+  resolution: number | null;
+  source: string | null;
+  tier: { id: string; name: string; rank: number } | null;
+  tierVia: string;
+  formats: FormatHit[];
+  formatScore: number;
+  totalScore: number;
+  allowed: boolean;
+  rejectReason: string | null;
+  cutoff: { name: string; rank: number; met: boolean } | null;
+}
+
+function signed(n: number) {
+  return n > 0 ? `+${n}` : String(n);
+}
+
+function ReleaseTestPanel({ profiles }: { profiles: Profile[] }) {
+  const [name, setName] = React.useState("");
+  const [profileId, setProfileId] = React.useState(profiles[0]?.id ?? "");
+  const [result, setResult] = React.useState<ReleaseTestResult | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!profiles.some(p => p.id === profileId)) setProfileId(profiles[0]?.id ?? "");
+  }, [profiles, profileId]);
+
+  function run(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!name.trim() || !profileId) return;
+    setBusy(true);
+    setError(null);
+    post("/api/quality/test", { name: name.trim(), profileId })
+      .then(async r => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) { setResult(null); setError(body?.error ?? `HTTP ${r.status}`); return; }
+        setResult(body as ReleaseTestResult);
+      })
+      .catch(err => setError(String(err)))
+      .finally(() => setBusy(false));
+  }
+
+  const matched = result?.formats.filter(f => f.matched) ?? [];
+
+  return (
+    <GlassPanel className="p-6 space-y-4">
+      <div>
+        <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Test a release name</h3>
+        <p className="text-muted-foreground text-[12px] mt-0.5">
+          Paste a title to see how a profile parses and scores it. Nothing is grabbed.
+        </p>
+      </div>
+
+      <form onSubmit={run} className="flex flex-wrap items-center gap-2">
+        <Input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Show.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb"
+          aria-label="Release name"
+          className="min-w-64 flex-1 font-mono text-[13px]"
+        />
+        <Select value={profileId} onValueChange={setProfileId} disabled={profiles.length === 0}>
+          <SelectTrigger size="sm" className="w-40" aria-label="Profile">
+            <SelectValue placeholder="Profile" />
+          </SelectTrigger>
+          <SelectContent>
+            {profiles.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button type="submit" size="sm" disabled={busy || !name.trim() || !profileId}>
+          {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : "Test"}
+        </Button>
+      </form>
+
+      {error && <p role="alert" className="text-destructive text-[12px]">{error}</p>}
+
+      {result && (
+        <div className="space-y-2.5 rounded-lg bg-white/[0.03] px-4 py-3" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
+            <span className={cn("font-mono font-semibold", result.allowed ? "text-emerald-300" : "text-red-300")}>
+              {result.allowed ? "Allowed" : "Rejected"}
+            </span>
+            <span className="font-mono text-foreground/90">score {result.totalScore}</span>
+            <span className="text-muted-foreground">
+              tier <span className="font-mono text-foreground/90">{result.tier?.name ?? "unknown"}</span>
+              {result.tier && <span className="font-mono"> (rank {result.tier.rank})</span>}
+            </span>
+            {result.cutoff ? (
+              <span className={cn("font-mono text-[12px]", result.cutoff.met ? "text-emerald-300" : "text-amber-300")}>
+                cutoff {result.cutoff.name}: {result.cutoff.met ? "met" : "not met"}
+              </span>
+            ) : (
+              <span className="text-muted-foreground font-mono text-[12px]">no cutoff</span>
+            )}
+          </div>
+
+          {!result.allowed && result.rejectReason && (
+            <p className="text-red-300 text-[12px]">{result.rejectReason}</p>
+          )}
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
+            <span>resolution <span className="font-mono text-foreground/90">{result.resolution ? `${result.resolution}p` : "?"}</span></span>
+            <span>source <span className="font-mono text-foreground/90">{result.source ?? "?"}</span></span>
+            <span>matched via <span className="font-mono text-foreground/90">{result.tierVia}</span></span>
+            <span>formats <span className="font-mono text-foreground/90">{signed(result.formatScore)}</span></span>
+          </div>
+
+          {matched.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {matched.map(f => (
+                <Badge
+                  key={f.id}
+                  variant="outline"
+                  title={f.deduped ? `Same concept as ${f.countedAs} - counted once` : undefined}
+                  className={cn(
+                    "font-mono text-[11px]",
+                    f.deduped && "text-muted-foreground",
+                    f.type === "forbidden" && "border-red-400/50 text-red-300",
+                    f.type === "required" && "border-emerald-400/50 text-emerald-300",
+                  )}
+                >
+                  <span className={cn(f.deduped && "line-through")}>
+                    {f.name}
+                    {f.type === "bonus" ? ` ${signed(f.score)}` : ` (${f.type})`}
+                  </span>
+                  {f.deduped && <span>· dup</span>}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-[12px]">No custom formats on this profile matched.</p>
+          )}
+          {matched.some(f => f.deduped) && (
+            <p className="text-muted-foreground text-[11px]">
+              Struck-through formats spell the same thing as another match, so only the highest score counts.
+            </p>
+          )}
+        </div>
+      )}
+    </GlassPanel>
+  );
+}
+
 // ---- Root -------------------------------------------------------------------
 
 function QualityProfilesTab() {
@@ -795,6 +951,7 @@ function QualityProfilesTab() {
   return (
     <>
       <ProfilesPanel profiles={profiles} qualities={qualities} formats={formats} onChange={load} />
+      <ReleaseTestPanel profiles={profiles} />
       <QualitiesPanel qualities={qualities} onChange={load} onQualitiesChange={setQualities} />
       <CustomFormatsPanel formats={formats} onChange={load} />
     </>

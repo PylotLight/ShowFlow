@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { DatabaseManager } from '../db';
 import type { EpisodeWithFileRow } from '../db/grabs';
-import { qualityEngine, type ReleaseScore } from './quality_engine';
+import { qualityEngine, mergeProbeWithRelease, type ReleaseScore } from './quality_engine';
 import { mediaFromStoredRow } from './media_probe';
 
 /**
@@ -154,7 +154,10 @@ export function scoreExistingEpisodeFile(
     const quality = releaseScore && releaseScore.rank > 0 && releaseRes != null && releaseRes === probedRes
       ? { rank: releaseScore.rank, qualityName: releaseScore.qualityName ?? null }
       : { rank: probed.rank, qualityName: probed.qualityName ?? null };
-    return { compareScore: scoreValue(probed), quality, via: 'probe' };
+    // Same basis as the import check (shouldUpgradeWithMedia with the stored
+    // release title): a known source at the probed resolution sets the bar,
+    // otherwise the probe's assume-best-source total does.
+    return { compareScore: scoreValue(mergeProbeWithRelease(probed, releaseScore)), quality, via: 'probe' };
   }
 
   const fileScore = scorer.byName(path.basename(filePath), profileId);

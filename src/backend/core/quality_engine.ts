@@ -2,6 +2,7 @@ import { db } from '../db';
 import type { ReasonCode } from './pipeline/reason_codes';
 import type { MediaProbeInfo } from './media_probe';
 import { isSampleFile } from './sample_filter';
+import { matchTier, topTierAtResolution, SOURCE_LABELS, type ReleaseSource, type TierMatch } from './release_quality';
 
 /**
  * Known technical "format families" - a single canonical concept that a
@@ -115,6 +116,52 @@ export interface ReleaseScore {
   rejectCode?: ReasonCode;
   /** All tags detected from the filename (qualities + matched formats) */
   matchedTags: string[];
+  /** Parsed vertical resolution (1080, 2160, ...) or null. */
+  resolution?: number | null;
+  /** Parsed source (remux, bluray, webdl, ...) or null when the name doesn't say. */
+  source?: ReleaseSource | null;
+}
+
+/** One profile format's outcome for a release (test box breakdown). */
+export interface FormatHit {
+  id: string;
+  name: string;
+  type: 'bonus' | 'required' | 'forbidden';
+  score: number;
+  matched: boolean;
+  /** Concept key used for de-duplication (family label or normalised regex). */
+  group: string;
+  /** True when this bonus hit was dropped because another format in the same group already counted. */
+  deduped: boolean;
+  /** Name of the format whose score counted for this group, when deduped. */
+  countedAs?: string;
+}
+
+export interface FormatScoreResult {
+  score: number;
+  isForbidden: boolean;
+  forbiddenName?: string;
+  missingRequired: string[];
+  /** Bonus formats that counted toward the score (after de-dup). */
+  matchedFormats: string[];
+  /** Every attached format, matched or not, with its de-dup outcome. */
+  hits: FormatHit[];
+}
+
+/**
+ * Concept key for a custom format, used to stop aliases stacking.
+ *
+ * Rule: a format that belongs to a known family (H.265, HDR, DV, 10-bit, ...)
+ * is keyed by the family label, so x265 / HEVC / H265 / 265 / H.265 are one
+ * concept. Anything else is keyed by its lowercased regex, so two formats with
+ * the identical pattern are one concept too. Each concept counts ONCE per
+ * release: the highest score among its matching bonus formats wins and the
+ * rest are reported as deduped. Required/forbidden are checked per format,
+ * before de-dup, so their semantics are unchanged.
+ */
+export function formatGroupKey(f: { name: string; regex: string }): string {
+  const family = FORMAT_FAMILIES.find(fam => fam.detect.test(`${f.name} ${f.regex}`));
+  return family ? `family:${family.label}` : `regex:${f.regex.trim().toLowerCase()}`;
 }
 
 export class QualityEngine {
@@ -122,24 +169,16 @@ export class QualityEngine {
    * Detects the quality of a release based on its filename.
    * Returns the rank and the quality ID if found.
    */
-  detectQuality(filename: string): { rank: number; qualityId?: string; matchedQualities: string[] } {
-    const qualities = db.listQualities();
-    let bestRank = 0;
-    let bestId: string | undefined;
-    const matchedQualities: string[] = [];
-    const lower = filename.toLowerCase();
-
-    for (const q of qualities) {
-      if (lower.includes(q.name.toLowerCase())) {
-        matchedQualities.push(q.name);
-        if ((q.rank ?? 0) > bestRank) {
-          bestRank = q.rank ?? 0;
-          bestId = q.id;
-        }
-      }
-    }
-
-    return { rank: bestRank, qualityId: bestId, matchedQualities };
+  detectQuality(filename: string): { rank: number; qualityId?: string; matchedQualities: string[]; resolution: number | null; source: ReleaseSource | null; via: TierMatch['via'] } {
+    const m = matchTier(filename, db.listQualities() as any[]);
+    return {
+      rank: m.tier?.rank ?? 0,
+      qualityId: m.tier?.id,
+      matchedQualities: m.tier ? [m.tier.name] : [],
+      resolution: m.resolution,
+      source: m.source,
+      via: m.via,
+    };
   }
 
   /**
@@ -156,47 +195,58 @@ export class QualityEngine {
   }
 
   /**
-   * Calculates the sum of scores for custom formats that match the filename
-   * and are associated with the given profile.
+   * Sum of scores for the profile's custom formats that match the filename.
+   * Aliases of one concept count once - see formatGroupKey for the rule.
    */
-  calculateFormatScore(filename: string, profileId: string): { score: number; isForbidden: boolean; forbiddenName?: string; missingRequired: string[]; matchedFormats: string[] } {
+  calculateFormatScore(filename: string, profileId: string): FormatScoreResult {
     const formats = db.getProfileFormats(profileId);
-    let totalScore = 0;
     const missingRequired: string[] = [];
-    const matchedFormats: string[] = [];
+    const hits: FormatHit[] = [];
+    let forbiddenName: string | undefined;
 
     for (const f of formats) {
-      const regex = new RegExp(f.regex, 'i');
-      const userMatches = regex.test(filename);
+      let userMatches = false;
+      try { userMatches = new RegExp(f.regex, 'i').test(filename); } catch { userMatches = false; }
 
       // Auto-expand: if this format is a member of a known family (H.265,
       // H.264, HDR, ...) it also matches any of the family's aliases, so one
       // format catches every way the release spells the same thing.
       const family = FORMAT_FAMILIES.find(fam => fam.detect.test(`${f.name} ${f.regex}`));
       const familyMatches = family ? family.match.test(filename) : false;
+      const matched = userMatches || familyMatches;
+      const type = (f.profile_format_type ?? 'bonus') as FormatHit['type'];
 
-      const matches = userMatches || familyMatches;
+      if (type === 'forbidden' && matched && !forbiddenName) forbiddenName = f.name;
+      if (type === 'required' && !matched) missingRequired.push(f.name);
+      hits.push({ id: f.id, name: f.name, type, score: f.score ?? 0, matched, group: formatGroupKey(f), deduped: false });
+    }
 
-      if (f.profile_format_type === 'forbidden' && matches) {
-        return { score: 0, isForbidden: true, forbiddenName: f.name, missingRequired: [], matchedFormats: [] };
-      }
+    if (forbiddenName) {
+      return { score: 0, isForbidden: true, forbiddenName, missingRequired: [], matchedFormats: [], hits };
+    }
 
-      if (f.profile_format_type === 'required' && !matches) {
-        missingRequired.push(f.name);
-      }
-
-      if (f.profile_format_type === 'bonus' && matches) {
-        totalScore += f.score ?? 0;
-        matchedFormats.push(f.name);
+    // De-dup: per concept group keep the highest-scoring matched bonus format.
+    const winner = new Map<string, FormatHit>();
+    for (const h of hits) {
+      if (h.type !== 'bonus' || !h.matched) continue;
+      const cur = winner.get(h.group);
+      if (!cur || h.score > cur.score) winner.set(h.group, h);
+    }
+    let totalScore = 0;
+    const matchedFormats: string[] = [];
+    for (const h of hits) {
+      if (h.type !== 'bonus' || !h.matched) continue;
+      const w = winner.get(h.group)!;
+      if (w === h) {
+        totalScore += h.score;
+        matchedFormats.push(h.name);
+      } else {
+        h.deduped = true;
+        h.countedAs = w.name;
       }
     }
 
-    return {
-      score: totalScore,
-      isForbidden: false,
-      missingRequired,
-      matchedFormats,
-    };
+    return { score: totalScore, isForbidden: false, missingRequired, matchedFormats, hits };
   }
 
   /**
@@ -212,17 +262,18 @@ export class QualityEngine {
   }
 
   getReleaseScore(filename: string, profileId: string): ReleaseScore {
-    const { rank, qualityId, matchedQualities } = this.detectQuality(filename);
+    const { rank, qualityId, matchedQualities, resolution, source } = this.detectQuality(filename);
     const qualityName = this.resolveQualityName(qualityId);
     const formatResult = this.calculateFormatScore(filename, profileId);
     const matchedTags = [...new Set([...matchedQualities, ...formatResult.matchedFormats, ...scanCommonTags(filename)])];
+    const parsed = { resolution, source };
 
     if (formatResult.isForbidden) {
-      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Forbidden format matched: ${formatResult.forbiddenName}`, rejectCode: 'FORBIDDEN_FORMAT_MATCHED', matchedTags };
+      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Forbidden format matched: ${formatResult.forbiddenName}`, rejectCode: 'FORBIDDEN_FORMAT_MATCHED', matchedTags, ...parsed };
     }
 
     if (formatResult.missingRequired.length > 0) {
-      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Missing required format(s): ${formatResult.missingRequired.join(', ')}`, rejectCode: 'MISSING_REQUIRED_FORMAT', matchedTags };
+      return { rank, formatScore: -1, totalScore: -1, qualityId, qualityName, rejected: true, rejectReason: `Missing required format(s): ${formatResult.missingRequired.join(', ')}`, rejectCode: 'MISSING_REQUIRED_FORMAT', matchedTags, ...parsed };
     }
 
     const qualityCheck = this.isQualityAllowed(qualityId, profileId);
@@ -237,6 +288,7 @@ export class QualityEngine {
         rejectReason: qualityId ? 'Quality not in this profile\'s allow-list' : 'Could not identify a quality for this release',
         rejectCode: qualityId ? 'QUALITY_NOT_ALLOWED' : 'QUALITY_UNKNOWN',
         matchedTags,
+        ...parsed,
       };
     }
 
@@ -250,6 +302,7 @@ export class QualityEngine {
       qualityName,
       rejected: false,
       matchedTags,
+      ...parsed,
     };
   }
 
@@ -282,9 +335,16 @@ export class QualityEngine {
     existingFilename: string,
     newFilename: string,
     profileId: string,
+    /** The stored file's original release title, when known. Lets a real
+     *  source upgrade (WEBRip -> WEB-DL at the same resolution) through;
+     *  without it the probed file's source is unknown and assumed best. */
+    existingReleaseName?: string | null,
   ): boolean {
     const existing = existingProbe
-      ? this.getReleaseScoreFromMedia(existingProbe, profileId)
+      ? mergeProbeWithRelease(
+          this.getReleaseScoreFromMedia(existingProbe, profileId),
+          existingReleaseName ? this.getReleaseScore(existingReleaseName, profileId) : null,
+        )
       : this.getReleaseScore(existingFilename, profileId);
     const newcomer = this.getReleaseScore(newFilename, profileId);
 
@@ -293,11 +353,10 @@ export class QualityEngine {
     // file it can out-score it on name alone. Never upgrade to one.
     if (isSampleFile(newFilename)) return false;
 
-    // Media probing is lossy (no source-type knowledge like WEB vs Remux in
-    // the file's own streams) but resolution + bitrate are the dominant
-    // terms; require a strict tie-break win so we never replace an
-    // equivalent-resolution file just because its bitrate read slightly
-    // higher or lower.
+    // Media probing can't see WEB vs Remux, so getReleaseScoreFromMedia
+    // scores an unknown-source file as the best source at its resolution:
+    // a same-resolution release only wins on formats, never on source alone
+    // (unless the stored release title tells us the real source).
     return newcomer.totalScore > existing.totalScore;
   }
 
@@ -354,8 +413,45 @@ export class QualityEngine {
 
     const syntheticName = `Synthetic Release ${tags.join(' ')}`.trim();
     const score = this.getReleaseScore(syntheticName, profileId);
+    // A probe can't tell WEB-DL from Remux. Rank/qualityName stay the bare
+    // resolution tier (that's what the cutoff check and UI show), but the
+    // comparison total assumes the best source at that resolution, so an
+    // equal-resolution release can't "upgrade" it on source alone. Before
+    // source tiers matched, every 1080p release scored as bare 1080p, so this
+    // keeps probe comparisons exactly where they were.
+    if (!score.rejected && !score.source) {
+      const top = topTierAtResolution(score.resolution ?? null, db.listQualities() as any[]);
+      if (top && (top.rank ?? 0) > score.rank) score.totalScore = (top.rank ?? 0) * 1000 + score.formatScore;
+    }
     return score;
   }
+}
+
+/**
+ * Combine a probed file's score with its original release title's score.
+ * When the title names a source (WEB-DL, BluRay, ...) at the same resolution
+ * the probe saw, use the title's tier for the comparison total - the probe
+ * still supplies the format score. Otherwise the probe score stands.
+ * Shared by the import check and the cutoff upgrade search so both agree.
+ */
+export function mergeProbeWithRelease(probed: ReleaseScore, release: ReleaseScore | null): ReleaseScore {
+  if (!release || probed.rejected || !release.source || release.rank <= 0) return probed;
+  const probedRes = probed.resolution ?? null;
+  const releaseRes = release.resolution ?? null;
+  if (probedRes == null || releaseRes == null || probedRes !== releaseRes) return probed;
+  return {
+    ...probed,
+    rank: release.rank,
+    qualityId: release.qualityId,
+    qualityName: release.qualityName,
+    source: release.source,
+    totalScore: release.rank * 1000 + probed.formatScore,
+  };
+}
+
+/** Human label for a parsed source ("webdl" -> "WEB-DL"). */
+export function sourceLabel(source: ReleaseSource | null | undefined): string | null {
+  return source ? SOURCE_LABELS[source] : null;
 }
 
 export const qualityEngine = new QualityEngine();
