@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Safer updates**: activating an update now waits (up to 2 min) for running scans/imports/backups to finish, takes a DB backup first when the new release has migrations, and the app notices on boot whether the swap took or got rolled back (no more endless reconnect spinner or re-downloading the same release every cycle). Downloads stream to disk with size + sha256 checks, real progress and retries; a release whose tarball isn't uploaded yet is retried with backoff instead of hammering the API. Updates panel shows release notes, migration count, what it's waiting on and expected downtime. New optional auto-activate (off / when idle / nightly at an hour, idle only), off by default.
+- **Fix**: the updater ignores prereleases (`v1.2.3-foo`), and versions compare per semver.
+- **Fix**: the notifications dropdown stays pinned to the right of the header on every page instead of opening under the sidebar; full width on mobile.
+- **Dev**: releases build the binary once and reuse it for the tarball and a copy-only image (`Dockerfile.release`), no gha cache export, supervisor actually cross-compiled for linux-x64. New `Release` workflow cuts a release from the Actions tab (`bun run release -- patch --remote` triggers it). CI dropped the bun cache (install is ~5s) and runs on GitHub-hosted by default, `RUNNER_LABELS` repo var opts into self-hosted. Removed the self-recursive `check` script.
 
 ## [v0.1.80] - 2026-10-15
 - **Pipeline explains itself**: new per-episode status (`episode_status`) + `explainEpisode()` sharing the exact auto-grab gates, so the Pipeline opens on a "Needs attention" list with a plain-english reason per episode (waiting for air, release delay, manual only, searched Nx nothing matched + next retry, downloading %, stuck/failed) and one-click fixes. Lanes view is a second tab and drops AVAILABLE. Episode rows get a "why?" popover. `GET /api/pipeline/attention`, `GET /api/episodes/:id/explain`.
