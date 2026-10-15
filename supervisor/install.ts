@@ -3,7 +3,7 @@
 
 import { mkdir, chmod, cp, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { DOWNLOADS_DIR, BOOTSTRAP_MIGRATIONS, readManifest, verifyArtifact, releasePath } from "./state";
+import { DOWNLOADS_DIR, BOOTSTRAP_MIGRATIONS, readManifest, releasePath, sha256File, rememberVerified } from "./state";
 
 export async function installRelease(releaseId: string, activeReleaseId: string | null): Promise<{ ok: boolean; message: string }> {
   if (!releaseId) return { ok: false, message: "releaseId is required." };
@@ -17,10 +17,6 @@ export async function installRelease(releaseId: string, activeReleaseId: string 
   if (!manifest) {
     return { ok: false, message: `No manifest.json found under ${src}. Place the extracted release there first (e.g. via kubectl cp), then retry install.` };
   }
-  if (!(await verifyArtifact(src, manifest))) {
-    return { ok: false, message: `Artifact checksum mismatch for release "${releaseId}" in ${src} — refusing to install.` };
-  }
-
   // Stage into a temp dir and rename it into place, so an existing release
   // dir is swapped whole and its binary is never opened for write.
   const dest = releasePath(releaseId);
@@ -36,9 +32,24 @@ export async function installRelease(releaseId: string, activeReleaseId: string 
   // for a root-owned /data/downloads/<id>. Copying only needs read access
   // to the source file and write access to the destination, both of which
   // the supervisor already has.
-  await Bun.write(`${tmp}/${manifest.artifact.name}`, Bun.file(`${src}/${manifest.artifact.name}`));
+  //
+  // Verify the *copy*, not the source: one kernel-side copy + one streaming
+  // hash from page cache, instead of hashing the ~96MB source into memory,
+  // copying, then hashing the copy again on activate. Checking the copy also
+  // closes the window where the app-writable downloads dir could change
+  // between a check and the copy. The hash is remembered (see
+  // rememberVerified) so the activate that follows skips re-hashing.
+  const t0 = performance.now();
+  const tmpBin = `${tmp}/${manifest.artifact.name}`;
+  await Bun.write(tmpBin, Bun.file(`${src}/${manifest.artifact.name}`));
+  const sha = await sha256File(tmpBin);
+  if (sha !== manifest.artifact.sha256) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    return { ok: false, message: `Artifact checksum mismatch for release "${releaseId}" in ${src} — refusing to install.` };
+  }
   await Bun.write(`${tmp}/manifest.json`, Bun.file(`${src}/manifest.json`));
-  await chmod(`${tmp}/${manifest.artifact.name}`, 0o755);
+  await chmod(tmpBin, 0o755);
+  console.log(`[supervisor] install ${releaseId}: copied+verified binary in ${Math.round(performance.now() - t0)}ms`);
 
   // Copy the migrations folder alongside the binary — the compiled app
   // resolves migrations relative to process.execPath (db/index.ts), so an
@@ -60,6 +71,9 @@ export async function installRelease(releaseId: string, activeReleaseId: string 
   } else {
     await rename(tmp, dest);
   }
+  // Renaming the parent dir keeps the file's inode + mtime, so the
+  // fingerprint taken now is what activate will see.
+  await rememberVerified(`${dest}/${manifest.artifact.name}`, sha);
 
   return { ok: true, message: `Installed release "${releaseId}". Run "activate ${releaseId}" to switch to it.` };
 }
@@ -78,8 +92,10 @@ export async function installArchive(releaseId: string, tarballPath: string, act
   const src = `${DOWNLOADS_DIR}/${releaseId}`;
   await mkdir(src, { recursive: true });
 
+  const t0 = performance.now();
   const archive = new Bun.Archive(await tarballFile.arrayBuffer());
   const entryCount = await archive.extract(src);
+  console.log(`[supervisor] install-archive ${releaseId}: extracted ${entryCount} entries in ${Math.round(performance.now() - t0)}ms`);
   if (entryCount === 0) {
     return { ok: false, message: `Archive "${tarballPath}" extracted 0 entries — nothing to install.` };
   }

@@ -166,7 +166,9 @@ export async function waitForQuiet(
 ): Promise<DrainResult> {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
-  const pollMs = opts.pollMs ?? 2000;
+  // 500ms: the handoff starts within half a second of the last job finishing
+  // (was 2s). An idle server never sleeps at all — the loop is skipped.
+  const pollMs = opts.pollMs ?? 500;
   const start = now();
   const probe = () => {
     try { return getBusy(); } catch { return []; }
