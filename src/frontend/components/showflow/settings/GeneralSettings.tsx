@@ -65,7 +65,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
       <GlassPanel className="p-6 space-y-5">
         <FieldRow
           label="Upgrade until cutoff"
-          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Profiles with no cutoff are never upgraded."
+          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Global switch; each quality profile also has its own Keep upgrading toggle and upgrade-until target."
         >
           <Switch
             aria-label="Upgrade until cutoff"
