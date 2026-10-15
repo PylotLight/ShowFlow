@@ -344,6 +344,7 @@ export async function runRssSyncCycle(
       if (eps.length === 0) continue;
       const s = score(release.title, show.profileId);
       if (s.rejected) continue;
+      if (dbm.isBlocklisted(show.id, release)) continue;
       const scored: ScoredRelease = { ...release, score: s, indexer: source.indexer };
       for (const ep of eps) {
         const k = epKey(show.id, ep.season, ep.episode);
@@ -374,6 +375,7 @@ export async function runRssSyncCycle(
         dbm.recordGrabbedRelease({
           showId: show.id, season: ep.season, episode: ep.episode,
           releaseTitle: best.title, indexerName: best.indexer.name, publishDate: best.publishDate ?? null,
+          infoHash: best.infoHash || best.magnetUrl || null,
         });
       } catch { /* non-fatal */ }
       continue;

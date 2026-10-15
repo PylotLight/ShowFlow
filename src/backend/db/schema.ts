@@ -362,9 +362,44 @@ export const grabbedReleases = sqliteTable('grabbed_releases', {
    */
   publish_date: text('publish_date'),
   grabbed_at: text('grabbed_at').default(sql`(datetime('now'))`),
+  /**
+   * Lifecycle: grabbed -> downloading -> completed -> imported, or failed.
+   * A failed grab no longer holds the auto-grab 12h in-flight cooldown, so
+   * the episode is re-searched right away (and its release is blocklisted).
+   */
+  status: text('status').notNull().default('grabbed'),
+  /** Lowercased torrent info hash when the indexer gave one. */
+  info_hash: text('info_hash'),
+  /** `indexer::guid` — stable identity for releases without a hash. */
+  release_key: text('release_key'),
+  failure_reason: text('failure_reason'),
+  failed_at: text('failed_at'),
 }, (table) => ({
   releaseTitleIndex: index('idx_grabbed_releases_title').on(table.normalized_title),
   showIndex: index('idx_grabbed_releases_show').on(table.show_id),
+}));
+
+// ---- Release blocklist ---------------------------------------------------
+//
+// Releases that failed (dead/stalled/errored on TorBox, bad import, or marked
+// failed by hand). Search + RSS candidate selection skip any release whose
+// info hash or normalized title is here for the same show.
+export const releaseBlocklist = sqliteTable('release_blocklist', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  show_id: text('show_id').notNull(),
+  season_number: integer('season_number'),
+  /** JSON array of episode numbers the release covered (null = pack/movie). */
+  episode_numbers: text('episode_numbers'),
+  release_title: text('release_title').notNull(),
+  normalized_title: text('normalized_title').notNull(),
+  info_hash: text('info_hash'),
+  indexer_name: text('indexer_name'),
+  reason: text('reason'),
+  created_at: text('created_at').notNull(),
+}, (table) => ({
+  showIndex: index('idx_release_blocklist_show').on(table.show_id),
+  titleIndex: index('idx_release_blocklist_title').on(table.normalized_title),
+  hashIndex: index('idx_release_blocklist_hash').on(table.info_hash),
 }));
 
 // ---- On-disk files (provenance) ------------------------------------------

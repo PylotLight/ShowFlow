@@ -10,6 +10,7 @@ import { debugLog, logDebug } from './debug';
 import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
 import type { DownloadManager } from './download_manager';
 import { reconcileShowAirWindows } from './air_window';
+import { dropBlocklisted } from './release_failures';
 
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'is', 'it', 'its']);
 
@@ -428,9 +429,9 @@ export class GrabberService {
     // can produce dozens of rejects and this table is written to often.
     const scored = filtered.map((r): ScoredRelease => ({ ...r, score: qualityEngine.getReleaseScore(r.title, profileId) }));
     const rejected = scored.filter(r => r.score.rejected);
-    const releases = scored
+    const releases = dropBlocklisted(showId, scored
       .filter(r => !r.score.rejected)
-      .sort((a, b) => b.score.totalScore - a.score.totalScore);
+      .sort((a, b) => b.score.totalScore - a.score.totalScore), { season, episode });
 
     if (rejected.length > 0) {
       const breakdown: Record<string, number> = {};
@@ -620,6 +621,8 @@ export class GrabberService {
           releaseTitle: release.title,
           indexerName: release.indexer.name,
           publishDate: release.publishDate ?? null,
+          infoHash: release.infoHash || release.magnetUrl || null,
+          releaseKey: release.guid ? `${release.indexer.name}::${release.guid}` : null,
         });
         // Observe the real publish date -> tighten this show's air-window
         // forecast. Non-fatal: the grab itself already succeeded.
@@ -792,9 +795,9 @@ export class GrabberService {
 
     const scored = filtered.map((r): ScoredRelease => ({ ...r, score: qualityEngine.getReleaseScore(r.title, profileId) }));
     const rejected = scored.filter(r => r.score.rejected);
-    const releases = scored
+    const releases = dropBlocklisted(showId, scored
       .filter(r => !r.score.rejected)
-      .sort((a, b) => b.score.totalScore - a.score.totalScore);
+      .sort((a, b) => b.score.totalScore - a.score.totalScore), {});
 
     if (rejected.length > 0) {
       const breakdown: Record<string, number> = {};

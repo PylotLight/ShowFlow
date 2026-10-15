@@ -57,6 +57,13 @@
       "when": 1792023776042,
       "tag": "0007_monitor_new_episodes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792025092796,
+      "tag": "0008_release_status_and_blocklist",
+      "breakpoints": true
     }
   ]
 }

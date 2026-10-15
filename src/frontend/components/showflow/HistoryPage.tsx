@@ -5,6 +5,7 @@ import {
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
+import { BlocklistPanel } from "@frontend/components/showflow/BlocklistPanel";
 import { HeaderActions } from "@frontend/lib/header-actions";
 import { formatImportDate } from "@frontend/lib/airtime";
 import { cn } from "@frontend/lib/utils";
@@ -263,6 +264,7 @@ export function HistoryPage() {
           )}
         </div>
       </GlassPanel>
+      <BlocklistPanel />
     </div>
   );
 }
