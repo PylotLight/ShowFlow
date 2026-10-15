@@ -224,7 +224,9 @@ export const SEARCH_BACKOFF_MINUTES = [15, 60, 360, 1440] as const;
 /**
  * Episodes the auto-grabber should consider this cycle: tracked, in
  * auto-search mode, missing from disk, past their expected release time,
- * without an in-flight grab already recorded within `grabCooldownIso`, and
+ * without an in-flight grab already recorded within `grabCooldownIso` (an
+ * episode grab, or a season-pack grab for its season - episode_number
+ * NULL), and
  * outside their search backoff (see SEARCH_BACKOFF_MINUTES).
  *
  * The deadline check trusts `expected_release_at` when the air-window
@@ -279,7 +281,7 @@ export function listEpisodesDueForGrab(
         SELECT 1 FROM grabbed_releases g
         WHERE g.show_id = e.show_id
           AND g.season_number = e.season_number
-          AND g.episode_number = e.episode_number
+          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
           AND replace(g.grabbed_at, ' ', 'T') >= ?
           AND g.status != 'failed'
       )
@@ -384,4 +386,115 @@ export function listRecentGrabs(self: DatabaseManager, limit = 100): GrabListRow
     FROM grabbed_releases g LEFT JOIN shows s ON s.id = g.show_id
     ORDER BY g.id DESC LIMIT ?
   `).all(Math.max(1, Math.min(500, limit))) as GrabListRow[];
+}
+
+// ---------- cutoff upgrades + season packs ----------
+
+export interface EpisodeWithFileRow {
+  show_id: string;
+  show_title: string;
+  series_type: string | null;
+  profile: string | null;
+  library_type_id: string | null;
+  season_number: number;
+  episode_number: number;
+  file_path: string;
+  last_searched_at: string | null;
+  search_attempts: number;
+}
+
+/**
+ * Tracked, auto-mode episodes that HAVE a file on disk and no in-flight
+ * grab since `grabCooldownIso` - the raw pool core/cutoff.ts filters down to
+ * "cutoff unmet" (the quality check needs the quality engine, so it runs in
+ * JS). Upgrade-search backoff is applied by the caller too.
+ */
+export function listEpisodesWithFiles(
+  self: DatabaseManager,
+  grabCooldownIso: string,
+): EpisodeWithFileRow[] {
+  return self.db.query(`
+    SELECT
+      e.show_id,
+      s.title AS show_title,
+      s.series_type,
+      s.profile,
+      s.library_type_id,
+      e.season_number,
+      e.episode_number,
+      e.file_path,
+      e.last_searched_at,
+      e.search_attempts
+    FROM episodes e
+    JOIN shows s ON s.id = e.show_id
+    WHERE e.is_tracked = 1
+      AND (e.search_mode IS NULL OR e.search_mode = 'auto')
+      AND e.file_path IS NOT NULL AND e.file_path != ''
+      AND COALESCE(s.series_type, 'standard') != 'movie'
+      AND NOT EXISTS (
+        SELECT 1 FROM grabbed_releases g
+        WHERE g.show_id = e.show_id
+          AND g.season_number = e.season_number
+          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
+          AND replace(g.grabbed_at, ' ', 'T') >= ?
+          AND g.status != 'failed'
+      )
+  `).all(grabCooldownIso) as EpisodeWithFileRow[];
+}
+
+export interface SeasonAirStats {
+  /** Episode rows in the season. */
+  total: number;
+  /** Rows with no air date or an air date after `nowIso`. */
+  unaired: number;
+  /** Latest air_date in the season (null when none). */
+  lastAirDate: string | null;
+  /** Tracked rows with a file on disk. */
+  trackedWithFile: number;
+  /** Tracked, auto-mode rows with no file - what a season pack would fill. */
+  missingTracked: number;
+  /** Highest season number of the show that has any episode row. */
+  maxSeason: number;
+}
+
+export function getSeasonAirStats(
+  self: DatabaseManager,
+  showId: string,
+  season: number,
+  nowIso: string,
+): SeasonAirStats {
+  const row = self.db.query(`
+    SELECT
+      COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN air_date IS NULL OR air_date = '' OR air_date > ? THEN 1 ELSE 0 END), 0) AS unaired,
+      MAX(NULLIF(air_date, '')) AS lastAirDate,
+      COALESCE(SUM(CASE WHEN is_tracked = 1 AND file_path IS NOT NULL AND file_path != '' THEN 1 ELSE 0 END), 0) AS trackedWithFile,
+      COALESCE(SUM(CASE WHEN is_tracked = 1 AND (search_mode IS NULL OR search_mode = 'auto')
+                         AND (file_path IS NULL OR file_path = '') THEN 1 ELSE 0 END), 0) AS missingTracked,
+      (SELECT COALESCE(MAX(season_number), 0) FROM episodes WHERE show_id = ?) AS maxSeason
+    FROM episodes
+    WHERE show_id = ? AND season_number = ?
+  `).get(nowIso, showId, showId, season) as SeasonAirStats;
+  return row;
+}
+
+/** Tracked, auto-mode, fileless episode numbers of one season. */
+export function listMissingEpisodeNumbers(self: DatabaseManager, showId: string, season: number): number[] {
+  const rows = self.db.query(`
+    SELECT episode_number FROM episodes
+    WHERE show_id = ? AND season_number = ? AND is_tracked = 1
+      AND (search_mode IS NULL OR search_mode = 'auto')
+      AND (file_path IS NULL OR file_path = '')
+    ORDER BY episode_number
+  `).all(showId, season) as { episode_number: number }[];
+  return rows.map(r => r.episode_number);
+}
+
+/** Normalized titles already grabbed for one episode (or its season as a pack). */
+export function listGrabbedTitlesForEpisode(self: DatabaseManager, showId: string, season: number, episode: number): Set<string> {
+  const rows = self.db.query(`
+    SELECT normalized_title FROM grabbed_releases
+    WHERE show_id = ? AND season_number = ? AND (episode_number = ? OR episode_number IS NULL)
+  `).all(showId, season, episode) as { normalized_title: string }[];
+  return new Set(rows.map(r => r.normalized_title));
 }

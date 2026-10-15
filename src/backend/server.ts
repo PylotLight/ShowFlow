@@ -74,6 +74,7 @@ import { pipelineRoutes } from "./routes/pipeline";
 import { backgroundJobRoutes } from "./routes/background-jobs";
 import { notificationRoutes } from "./routes/notifications";
 import { blocklistRoutes } from "./routes/blocklist";
+import { wantedRoutes } from "./routes/wanted";
 import { loadConfig, invalidateConfigCache, ADMIN_TOKEN } from "./routes/_shared";
 import type { RouteReq } from "./routes/_shared";
 
@@ -136,6 +137,7 @@ const routeDefinitions: Record<string, any> = {
   ...backgroundJobRoutes(),
   ...notificationRoutes(),
   ...blocklistRoutes(),
+  ...wantedRoutes(),
 };
 
 // ---- Lazy route definitions (depend on scheduler / systemManager) ----------

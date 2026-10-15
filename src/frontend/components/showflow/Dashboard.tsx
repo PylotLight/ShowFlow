@@ -10,6 +10,7 @@ import { HeaderActions } from "@frontend/lib/header-actions";
 import type { ActivityEvent } from "@frontend/components/showflow/WatcherPanel";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
+import { CutoffUnmetBanner } from "@frontend/components/showflow/CutoffUnmetBanner";
 import { cn } from "@frontend/lib/utils";
 import { usePolling, setIfChanged } from "@frontend/lib/usePolling";
 import { expectedReleaseTime } from "@frontend/lib/airtime";
@@ -478,6 +479,10 @@ function Dashboard({
           <span className="font-mono text-[11px] text-signal font-bold uppercase tracking-widest">// LIVE</span>
         </div>
       )}
+
+      <CutoffUnmetBanner
+        onOpenShow={(id) => { const s = shows?.find((x) => x.id === id); if (s) onSelectShow(s); }}
+      />
 
       <div className="flex flex-row gap-6 flex-1 min-h-0 overflow-hidden">
 
