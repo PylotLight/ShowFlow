@@ -62,7 +62,7 @@ export function listRssCandidateEpisodes(
         SELECT 1 FROM grabbed_releases g
         WHERE g.show_id = e.show_id
           AND g.season_number = e.season_number
-          AND g.episode_number = e.episode_number
+          AND (g.episode_number = e.episode_number OR g.episode_number IS NULL)
           AND replace(g.grabbed_at, ' ', 'T') >= ?
           AND g.status != 'failed'
       )

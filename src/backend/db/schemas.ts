@@ -41,6 +41,19 @@ export const ConfigSchema = z.object({
    * TVDBProvider.COUNTRY_TIMEZONE).
    */
   fallbackTimeZone: z.string().default('America/New_York'),
+  /**
+   * Auto-grab / RSS: keep searching for a better release while an episode's
+   * file is below its quality profile's cutoff (profiles with no cutoff are
+   * never upgraded). See core/cutoff.ts.
+   */
+  upgradeUntilCutoff: z.boolean().default(true),
+  /**
+   * Auto-grab / RSS: for a fully aired season with several missing episodes,
+   * try one season pack before searching episode by episode.
+   */
+  preferSeasonPacks: z.boolean().default(true),
+  /** Missing episodes a season needs before a pack is tried. */
+  seasonPackMinMissing: z.number().int().min(1).max(100).default(2).catch(2),
   downloadClient: z.object({
     type: z.enum(['blackhole', 'torbox', 'sabnzbd', 'none']).optional(),
     blackhole: z.object({

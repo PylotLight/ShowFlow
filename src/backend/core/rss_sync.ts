@@ -2,9 +2,11 @@ import { db as defaultDb, ProwlarrConfigSchema, type Config, type DatabaseManage
 import { IndexerFactory } from '../providers/indexers/factory';
 import type { Indexer, IndexerResult, RecentFeed } from '../providers/indexers/types';
 import type { NativeIndexerConfig } from '../providers/indexers/native/types';
-import { GrabberService, isRelevantMatch, type GrabResult, type ScoredRelease } from './grabber_service';
+import { GrabberService, isRelevantMatch, isSeasonPackTitle, recordPackGrabForEpisodes, type GrabResult, type ScoredRelease } from './grabber_service';
 import { qualityEngine, type ReleaseScore } from './quality_engine';
-import { GRAB_INFLIGHT_HOURS, MAX_GRABS_PER_CYCLE, isDueForSearch } from './auto_grabber';
+import { GRAB_INFLIGHT_HOURS, MAX_GRABS_PER_CYCLE, isDueForSearch, shouldTrySeasonPack } from './auto_grabber';
+import { listCutoffUnmetEpisodes, type CutoffUnmetEpisode } from './cutoff';
+import { normalizeReleaseTitle } from '../db/grabs';
 import { FilenameParser } from '../parser';
 import { listRssCandidateEpisodes, loadRssCursors, saveRssCursors, type RssCandidateEpisode, type RssCursor } from '../db/rss';
 import { debugLog } from './debug';
@@ -25,8 +27,13 @@ import type { DownloadManager } from './download_manager';
  * RSS didn't see (feed gaps, old episodes, indexers with no feed). A grab
  * here records grabbed_releases, so auto-grab's in-flight guard skips it.
  *
- * Upgrades are out of scope: only episodes with no file on disk are
- * candidates (same as auto-grab).
+ * Upgrades: episodes whose file is below their profile cutoff (core/cutoff.ts)
+ * are candidates too, but only for a release that strictly beats the stored
+ * file and wasn't grabbed for it before (config.upgradeUntilCutoff).
+ *
+ * Season packs: a whole-season pack in a feed is grabbed for a finished,
+ * entirely-missing season (config.preferSeasonPacks) and recorded against
+ * every episode it covers; per-episode matching then skips those episodes.
  */
 
 /** Cap on remembered guids per feed - comfortably above a feed page (~100). */
@@ -48,6 +55,11 @@ export interface RssSyncResult {
   failed: number;
   /** Episodes whose best release was already grabbed for a sibling episode (multi-ep release). */
   coveredByOther: number;
+  /** Season packs grabbed / episodes they covered. */
+  packs: number;
+  packEpisodes: number;
+  /** Of `grabbed`, how many were cutoff upgrades. */
+  upgrades: number;
   deferred: number;
 }
 
@@ -56,8 +68,10 @@ export interface RssSyncDeps {
   /** Override indexer discovery (tests). */
   sources?: RssSource[];
   score?: (title: string, profileId: string) => ReleaseScore;
-  grab?: (release: ScoredRelease, ctx: { showId: string; season: number; episode: number }) => Promise<GrabResult>;
+  grab?: (release: ScoredRelease, ctx: { showId: string; season: number; episode?: number }) => Promise<GrabResult>;
   nowMs?: number;
+  /** Override the cutoff-unmet pool (tests). */
+  upgradeCandidates?: () => CutoffUnmetEpisode[];
 }
 
 // ---------- cursor ----------
@@ -120,6 +134,8 @@ export interface CandidateEpisode {
   sceneEpisode?: number | null;
   /** Scene absolute number (absolute-numbered series). */
   sceneAbsolute?: number | null;
+  /** Set for cutoff-upgrade candidates: the stored file's score a release must beat. */
+  existingScore?: number;
 }
 
 export interface CandidateShow {
@@ -171,7 +187,7 @@ function epKey(showId: string, season: number, episode: number) {
   return `${showId}::${season}::${episode}`;
 }
 
-function buildCandidateShows(dbm: DatabaseManager, rows: RssCandidateEpisode[]): CandidateShow[] {
+function buildCandidateShows(dbm: DatabaseManager, rows: (RssCandidateEpisode & { existing_score?: number })[]): CandidateShow[] {
   const shows = new Map<string, CandidateShow>();
   for (const row of rows) {
     let show = shows.get(row.show_id);
@@ -190,6 +206,7 @@ function buildCandidateShows(dbm: DatabaseManager, rows: RssCandidateEpisode[]):
       shows.set(row.show_id, show);
     }
     const ep: CandidateEpisode = { season: row.season_number, episode: row.episode_number };
+    if (row.existing_score != null) ep.existingScore = row.existing_score;
     try {
       if (dbm.isEpisodeMappingEnabled(row.show_id)) {
         if (show.seriesType === 'absolute') {
@@ -252,7 +269,7 @@ export async function runRssSyncCycle(
   deps: RssSyncDeps = {},
 ): Promise<RssSyncResult> {
   const dbm = deps.db ?? defaultDb;
-  const result: RssSyncResult = { feeds: 0, feedErrors: 0, newReleases: 0, matchedEpisodes: 0, grabbed: 0, failed: 0, coveredByOther: 0, deferred: 0 };
+  const result: RssSyncResult = { feeds: 0, feedErrors: 0, newReleases: 0, matchedEpisodes: 0, grabbed: 0, failed: 0, coveredByOther: 0, packs: 0, packEpisodes: 0, upgrades: 0, deferred: 0 };
 
   const sources = deps.sources ?? listRssSources(dbm);
   if (sources.length === 0) {
@@ -331,9 +348,85 @@ export async function runRssSyncCycle(
 
   // 2. Match fresh releases to wanted episodes.
   const cooldownIso = new Date(nowMs - GRAB_INFLIGHT_HOURS * 3_600_000).toISOString();
-  const rows = listRssCandidateEpisodes(dbm, nowIso, cooldownIso).filter(e => isDueForSearch(e, nowMs));
+  const missingRows = listRssCandidateEpisodes(dbm, nowIso, cooldownIso).filter(e => isDueForSearch(e, nowMs));
+  let upgradeRows: (RssCandidateEpisode & { existing_score: number })[] = [];
+  if (config?.upgradeUntilCutoff !== false) {
+    try {
+      const pool = deps.upgradeCandidates
+        ? deps.upgradeCandidates()
+        : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: false });
+      upgradeRows = pool.map(u => ({
+        show_id: u.showId, show_title: u.showTitle, series_type: u.seriesType, profile: u.profile,
+        library_type_id: u.libraryTypeId, season_number: u.season, episode_number: u.episode,
+        air_date: null, air_time: null, expected_release_at: null, release_delay_minutes: null,
+        existing_score: u.existingScore,
+      }));
+    } catch (e) {
+      debugLog(`RSS sync: cutoff-unmet lookup failed: ${e}`);
+    }
+  }
+  const rows = [...missingRows, ...upgradeRows];
   if (rows.length === 0) return finish(dbm, result);
   const shows = buildCandidateShows(dbm, rows);
+  let attempts = 0;
+
+  // 2a. Season packs for finished, entirely-missing seasons. Episodes a pack
+  // covers are skipped by the per-episode pass below.
+  const packCovered = new Set<string>();
+  if (config?.preferSeasonPacks !== false) {
+    const minMissing = config?.seasonPackMinMissing ?? 2;
+    const bestPack = new Map<string, { show: CandidateShow; season: number; episodes: number[]; releases: ScoredRelease[] }>();
+    const seasonOk = new Map<string, number[] | null>();
+    for (const { source, release } of fresh) {
+      if (!isTvCategory(release)) continue;
+      for (const show of shows) {
+        if (show.allowedIndexers && !show.allowedIndexers.includes(source.id)) continue;
+        if (show.seriesType === 'absolute') continue;
+        const seasons = [...new Set(show.episodes.filter(e => e.existingScore == null && e.sceneSeason == null).map(e => e.season))];
+        for (const season of seasons) {
+          if (!isSeasonPackTitle(release.title, season)) continue;
+          if (!isRelevantMatch(release.title, show.title, season)) continue;
+          const key = `${show.id}::${season}`;
+          if (!seasonOk.has(key)) seasonOk.set(key, packableSeason(dbm, show, season, minMissing, nowMs, nowIso));
+          const episodes = seasonOk.get(key);
+          if (!episodes) continue;
+          const s = score(release.title, show.profileId);
+          if (s.rejected) continue;
+          if (dbm.isBlocklisted(show.id, release)) continue;
+          const slot = bestPack.get(key) ?? { show, season, episodes, releases: [] };
+          slot.releases.push({ ...release, score: s, indexer: source.indexer });
+          bestPack.set(key, slot);
+        }
+      }
+    }
+    for (const { show, season, episodes, releases } of bestPack.values()) {
+      if (attempts >= MAX_GRABS_PER_CYCLE) { result.deferred++; continue; }
+      attempts++;
+      releases.sort((a, b) => b.score.totalScore - a.score.totalScore || (b.seeders ?? 0) - (a.seeders ?? 0));
+      const best = releases[0]!;
+      dbm.logPipelineEvent({
+        showId: show.id, seasonNumber: season, episodeNumber: null,
+        stage: 'SEARCHING', eventType: 'rss_release_matched',
+        message: `RSS: season pack "${best.title}" (score: ${best.score.totalScore}) for ${episodes.length} missing episode(s)`,
+        releaseTitle: best.title, indexerName: best.indexer.name,
+      });
+      try {
+        const res = await grab(best, { showId: show.id, season });
+        if (res.success) {
+          result.grabbed++;
+          result.packs++;
+          result.packEpisodes += episodes.length;
+          recordPackGrabForEpisodes(best, show.id, season, episodes, dbm);
+          for (const n of episodes) packCovered.add(epKey(show.id, season, n));
+        } else {
+          result.failed++;
+        }
+      } catch (e) {
+        result.failed++;
+        debugLog(`RSS sync: season pack grab error for ${show.title} S${season}: ${e}`);
+      }
+    }
+  }
 
   const perEpisode = new Map<string, { show: CandidateShow; ep: CandidateEpisode; releases: ScoredRelease[] }>();
   for (const { source, release } of fresh) {
@@ -348,6 +441,7 @@ export async function runRssSyncCycle(
       const scored: ScoredRelease = { ...release, score: s, indexer: source.indexer };
       for (const ep of eps) {
         const k = epKey(show.id, ep.season, ep.episode);
+        if (packCovered.has(k)) continue;
         const slot = perEpisode.get(k) ?? { show, ep, releases: [] };
         slot.releases.push(scored);
         perEpisode.set(k, slot);
@@ -360,8 +454,15 @@ export async function runRssSyncCycle(
   // episode covers its siblings: record the grab for them too so the
   // in-flight guard holds them instead of grabbing the same release twice.
   const grabbedKeys = new Map<string, true>();
-  let attempts = 0;
-  for (const { show, ep, releases } of perEpisode.values()) {
+  for (const { show, ep, releases: matched } of perEpisode.values()) {
+    let releases = matched;
+    if (ep.existingScore != null) {
+      // Cutoff upgrade: only a strictly better release we haven't sent before.
+      let already = new Set<string>();
+      try { already = dbm.listGrabbedTitlesForEpisode(show.id, ep.season, ep.episode); } catch {}
+      releases = matched.filter(r => r.score.totalScore > ep.existingScore! && !already.has(normalizeReleaseTitle(r.title)));
+      if (releases.length === 0) continue;
+    }
     releases.sort((a, b) =>
       b.score.totalScore - a.score.totalScore
       || (b.seeders ?? 0) - (a.seeders ?? 0)
@@ -386,10 +487,13 @@ export async function runRssSyncCycle(
     }
     attempts++;
 
+    const isUpgrade = ep.existingScore != null;
     dbm.logPipelineEvent({
       showId: show.id, seasonNumber: ep.season, episodeNumber: ep.episode,
-      stage: 'SEARCHING', eventType: 'rss_release_matched',
-      message: `RSS: ${releases.length} new release(s) from feeds, top pick "${best.title}" (score: ${best.score.totalScore})`,
+      stage: 'SEARCHING', eventType: isUpgrade ? 'rss_upgrade_matched' : 'rss_release_matched',
+      message: isUpgrade
+        ? `RSS: cutoff unmet, upgrade "${best.title}" (score: ${best.score.totalScore} > ${ep.existingScore})`
+        : `RSS: ${releases.length} new release(s) from feeds, top pick "${best.title}" (score: ${best.score.totalScore})`,
       releaseTitle: best.title, indexerName: best.indexer.name,
       metadata: { candidates: releases.slice(0, 10).map(r => ({ title: r.title, score: r.score.totalScore, indexer: r.indexerName })) },
     });
@@ -398,6 +502,7 @@ export async function runRssSyncCycle(
       const res = await grab(best, { showId: show.id, season: ep.season, episode: ep.episode });
       if (res.success) {
         result.grabbed++;
+        if (isUpgrade) result.upgrades++;
         grabbedKeys.set(bestKey, true);
       } else {
         result.failed++;
@@ -409,6 +514,35 @@ export async function runRssSyncCycle(
   }
 
   return finish(dbm, result);
+}
+
+/**
+ * Missing episode numbers to cover when `season` qualifies for a pack from
+ * RSS: same finished-airing rule as auto-grab, plus "entirely missing" -
+ * no tracked episode of the season has a file yet. Null when it doesn't.
+ */
+function packableSeason(
+  dbm: DatabaseManager,
+  show: CandidateShow,
+  season: number,
+  minMissing: number,
+  nowMs: number,
+  nowIso: string,
+): number[] | null {
+  try {
+    let mapped = false;
+    try { mapped = dbm.isEpisodeMappingEnabled(show.id); } catch {}
+    const stats = dbm.getSeasonAirStats(show.id, season, nowIso);
+    if (stats.trackedWithFile > 0) return null;
+    if (!shouldTrySeasonPack({ season, seriesType: show.seriesType, mapped, stats, minMissing, nowMs })) return null;
+    const wanted = new Set(show.episodes.filter(e => e.season === season && e.existingScore == null).map(e => e.episode));
+    const missing = dbm.listMissingEpisodeNumbers(show.id, season);
+    // Every missing episode must be a live candidate (none in flight).
+    if (missing.length === 0 || missing.some(n => !wanted.has(n))) return null;
+    return missing;
+  } catch {
+    return null;
+  }
 }
 
 /** Drop health rows for RSS feeds that no longer exist (indexer disabled/removed). */
@@ -426,6 +560,8 @@ function finish(dbm: DatabaseManager, result: RssSyncResult): RssSyncResult {
   const line = `RSS sync: ${result.feeds} feed(s) (${result.feedErrors} failed), ${result.newReleases} new release(s), `
     + `${result.matchedEpisodes} wanted episode(s) matched, ${result.grabbed} grabbed, ${result.failed} failed`
     + (result.coveredByOther ? `, ${result.coveredByOther} covered by multi-ep release` : '')
+    + (result.packs ? `, ${result.packs} season pack(s) covering ${result.packEpisodes} ep(s)` : '')
+    + (result.upgrades ? `, ${result.upgrades} cutoff upgrade(s)` : '')
     + (result.deferred ? `, ${result.deferred} deferred` : '');
   debugLog(line);
   if (result.matchedEpisodes > 0 || result.feedErrors > 0) {

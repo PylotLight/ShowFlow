@@ -350,6 +350,10 @@ export class DatabaseManager {
   listBlocklist(limit?: number) { return blocklist.listBlocklist(this, limit); }
   removeFromBlocklist(id: number) { return blocklist.removeFromBlocklist(this, id); }
   clearBlocklist() { return blocklist.clearBlocklist(this); }
+  listEpisodesWithFiles(grabCooldownIso: string) { return grabs.listEpisodesWithFiles(this, grabCooldownIso); }
+  getSeasonAirStats(showId: string, season: number, nowIso: string) { return grabs.getSeasonAirStats(this, showId, season, nowIso); }
+  listMissingEpisodeNumbers(showId: string, season: number) { return grabs.listMissingEpisodeNumbers(this, showId, season); }
+  listGrabbedTitlesForEpisode(showId: string, season: number, episode: number) { return grabs.listGrabbedTitlesForEpisode(this, showId, season, episode); }
 
   // ---- Episode files (provenance) ----------------------------------------
 

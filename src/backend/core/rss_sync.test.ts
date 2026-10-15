@@ -284,3 +284,83 @@ describe('runRssSyncCycle', () => {
     db.close();
   });
 });
+
+describe('runRssSyncCycle: season packs + cutoff upgrades', () => {
+  function seedFinishedSeason(withFile = false) {
+    const db = new DatabaseManager(':memory:');
+    db.saveShow({ uuid: 'pk', providerId: 'p9', type: 'tmdb', title: 'Pack Show', config: {} });
+    for (let n = 1; n <= 4; n++) {
+      const air = new Date(Date.now() - (60 - n * 7) * 24 * HOUR).toISOString();
+      const file = withFile && n === 1 ? { filePath: '/m/pack/e1.mkv' } : {};
+      db.saveEpisode({ showId: 'pk', seasonNumber: 1, episodeNumber: n, title: `E${n}`, airDate: air, ...file });
+      db.updateEpisodeAirWindow('pk', 1, n, { expectedReleaseAt: air });
+      db.setTracked('pk', 1, n, true);
+    }
+    return db;
+  }
+  const page = [
+    rel('Pack Show S01 1080p WEB-DL x265-GRP', 'pk1', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),
+    rel('Pack.Show.S01.720p.HDTV', 'pk2', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),
+    rel('Pack Show S01E02 2160p', 'pk3', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),
+  ];
+
+  test('a pack for a finished, entirely missing season covers every episode', async () => {
+    const db = seedFinishedSeason();
+    const grabs: string[] = [];
+    const res = await runRssSyncCycle({} as any, null, {
+      db, score: fakeScore, upgradeCandidates: () => [],
+      sources: [fakeSource(async () => [{ key: 'k', name: 'feed', results: page }])],
+      grab: async (r: any, ctx: any) => { grabs.push(`${r.title}|${ctx.episode ?? 'season'}`); return { success: true, message: 'ok' }; },
+    });
+    expect(grabs).toEqual(['Pack Show S01 1080p WEB-DL x265-GRP|season']);
+    expect(res.packs).toBe(1);
+    expect(res.packEpisodes).toBe(4);
+    // per-episode grab + event rows for each covered episode
+    for (let n = 1; n <= 4; n++) expect(db.findGrabbedReleaseForShowEpisode('pk', 1, n)?.release_title).toBe('Pack Show S01 1080p WEB-DL x265-GRP');
+    db.close();
+  });
+
+  test('no pack when part of the season is already on disk; episodes still match', async () => {
+    const db = seedFinishedSeason(true);
+    const grabs: string[] = [];
+    await runRssSyncCycle({} as any, null, {
+      db, score: fakeScore, upgradeCandidates: () => [],
+      sources: [fakeSource(async () => [{ key: 'k', name: 'feed', results: page }])],
+      grab: async (r: any, ctx: any) => { grabs.push(`${r.title}|${ctx.episode ?? 'season'}`); return { success: true, message: 'ok' }; },
+    });
+    expect(grabs).toEqual(['Pack Show S01E02 2160p|2']);
+    db.close();
+  });
+
+  test('cutoff-unmet episode is grabbed only for a strictly better, new release', async () => {
+    const db = seed();
+    const upgrade = (existingScore: number) => [{
+      showId: 'due', showTitle: 'Due Show', seriesType: 'standard', profile: null, libraryTypeId: null,
+      season: 1, episode: 2, filePath: '/media/due/e2.mkv', profileId: 'standard', profileName: 'Standard',
+      cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore, lastSearchedAt: null, searchAttempts: 0,
+    }];
+    const items = [
+      rel('Due Show S01E02 720p', 'x1', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),
+      rel('Due Show S01E02 1080p', 'x2', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),
+    ];
+    const grabs: string[] = [];
+    const mk = (existingScore: number) => ({
+      db, score: fakeScore, upgradeCandidates: () => upgrade(existingScore),
+      sources: [fakeSource(async () => [{ key: `k${existingScore}`, name: 'feed', results: items }])],
+      grab: async (r: any) => { grabs.push(r.title); return { success: true, message: 'ok' }; },
+    });
+    const r1 = await runRssSyncCycle({} as any, null, mk(1000));
+    expect(grabs).toEqual(['Due Show S01E02 1080p']);
+    expect(r1.upgrades).toBe(1);
+
+    // already at 1080p-equivalent: nothing beats it
+    const r2 = await runRssSyncCycle({} as any, null, mk(2000));
+    expect(r2.upgrades).toBe(0);
+    expect(grabs).toHaveLength(1);
+
+    // upgrades off
+    const r3 = await runRssSyncCycle({ upgradeUntilCutoff: false } as any, null, mk(500));
+    expect(r3.upgrades).toBe(0);
+    db.close();
+  });
+});

@@ -11,6 +11,9 @@ import { TorboxDownloadClient, resolveTorboxConfig } from './download_clients';
 import type { DownloadManager } from './download_manager';
 import { reconcileShowAirWindows } from './air_window';
 import { dropBlocklisted } from './release_failures';
+import { scoreExistingEpisodeFile } from './cutoff';
+import { isSampleFile } from './sample_filter';
+import { normalizeReleaseTitle } from '../db/grabs';
 
 const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'is', 'it', 'its']);
 
@@ -169,6 +172,59 @@ export function isRelevantMatch(title: string, showTitle: string, season: number
   // title-words-only behavior.
   if (opts?.absolute) return enoughTitleWords;
   return enoughTitleWords && seasonIdentifier(season).test(norm);
+}
+
+/**
+ * True when `title` is a single-season pack for `season`: it names exactly
+ * one season (S03 / "Season 3") and no episode marker. Episode releases,
+ * episode ranges (S03E01-E05) and multi-season packs (S01-S03) are not -
+ * auto mode only swaps a run of per-episode searches for a whole-season
+ * pack, never a partial or multi-season one.
+ */
+export function isSeasonPackTitle(title: string, season: number): boolean {
+  const norm = title.replace(/[._]+/g, ' ');
+  if (/\bs\d{1,3}\s?e\d{1,4}/i.test(norm)) return false;
+  if (/\b\d{1,2}x\d{2,3}\b/i.test(norm)) return false;
+  if (/\bs\d{1,3}\s?-\s?s?\d{1,3}\b/i.test(norm)) return false;
+  if (/\bseasons?\s*\d{1,3}\s?(?:-|to|&)\s?\d{1,3}\b/i.test(norm)) return false;
+  const seasons = new Set<number>();
+  for (const m of norm.matchAll(/\bs(\d{1,3})\b/gi)) seasons.add(Number(m[1]));
+  for (const m of norm.matchAll(/\bseason\s*(\d{1,3})\b/gi)) seasons.add(Number(m[1]));
+  return seasons.size === 1 && seasons.has(season);
+}
+
+/**
+ * A season pack covers several episodes: record the grab and a grab_sent
+ * pipeline event per episode so each one's trace / in-flight guard / import
+ * provenance sees it (grabRelease itself only logs the season-level row).
+ */
+export function recordPackGrabForEpisodes(
+  release: Pick<ScoredRelease, 'title' | 'publishDate' | 'infoHash' | 'magnetUrl'> & { indexer: { name: string } },
+  showId: string,
+  season: number,
+  episodes: number[],
+  dbm: Pick<typeof db, 'recordGrabbedRelease' | 'logPipelineEvent'> = db,
+) {
+  for (const episode of episodes) {
+    try {
+      dbm.recordGrabbedRelease({
+        showId, season, episode,
+        releaseTitle: release.title, indexerName: release.indexer.name, publishDate: release.publishDate ?? null,
+        infoHash: release.infoHash || release.magnetUrl || null,
+      });
+      dbm.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode,
+        stage: 'GRABBED', eventType: 'grab_sent', reasonCode: 'GRAB_SUCCEEDED',
+        message: `Grabbed as part of season pack "${release.title}"`,
+        releaseTitle: release.title, indexerName: release.indexer.name,
+        metadata: { seasonPack: true },
+      });
+    } catch (err) {
+      debugLog('Failed to record season-pack grab for episode (non-fatal)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 export class GrabberService {
@@ -538,7 +594,11 @@ export class GrabberService {
     const existingEp = db.getEpisode(showId, season, episode);
     if (existingEp && existingEp.file_path) {
       const existingFilename = path.basename(existingEp.file_path);
-      if (!qualityEngine.shouldUpgrade(existingFilename, best.title, profileId)) {
+      // Score the stored file the way the import will (probed media first):
+      // library files are renamed without tags, so a filename-only check
+      // let anything through as an "upgrade" that the import then rejected.
+      const existing = scoreExistingEpisodeFile(db, showId, season, episode, existingEp.file_path, profileId);
+      if (best.score.totalScore <= existing.compareScore || isSampleFile(best.title)) {
         logDebug({
           type: 'grabber', level: 'info', source: 'GrabberService',
           message: `Skipping grab — "${best.title}" is not an upgrade over "${existingFilename}"`,
@@ -588,6 +648,65 @@ export class GrabberService {
     }
 
     return this.grabRelease(releases[0]!, { showId, season });
+  }
+
+  /**
+   * Auto-mode season pack: search the season, keep only whole-season packs
+   * (isSeasonPackTitle), grab the best one and record it against every
+   * missing episode it's meant to fill. A miss returns success=false so the
+   * caller falls back to per-episode searches.
+   */
+  async grabSeasonPack(showId: string, season: number, episodes: number[]): Promise<GrabResult> {
+    const result = await this.searchReleases(showId, season);
+    if ('error' in result) return { success: false, message: result.error };
+    const packs = result.releases.filter(r => isSeasonPackTitle(r.title, season));
+    if (packs.length === 0) {
+      logDebug({
+        type: 'grabber', level: 'info', source: 'GrabberService',
+        message: `No season pack found for show=${showId} S${pad(season)} (${result.releases.length} non-pack result(s)) - falling back to episode search`,
+      });
+      return { success: false, message: 'No season pack found' };
+    }
+    const best = packs[0]!;
+    const res = await this.grabRelease(best, { showId, season });
+    if (res.success) recordPackGrabForEpisodes(best, showId, season, episodes);
+    return res;
+  }
+
+  /**
+   * Cutoff upgrade search for one episode that already has a file. Grabs the
+   * best release only when it strictly beats `existingScore` (probe-aware,
+   * see core/cutoff.ts) and wasn't grabbed for this episode before - a
+   * release the import already turned down would otherwise be re-sent every
+   * time the in-flight cooldown lapses.
+   */
+  async grabUpgradeRelease(showId: string, season: number, episode: number, existingScore: number): Promise<GrabResult> {
+    const result = await this.searchReleases(showId, season, episode);
+    if ('error' in result) return { success: false, message: result.error };
+    if (result.releases.length === 0) return { success: false, message: 'No releases found' };
+
+    const already = db.listGrabbedTitlesForEpisode(showId, season, episode);
+    const fresh = result.releases.filter(r => !already.has(normalizeReleaseTitle(r.title)));
+    const best = fresh[0];
+    if (!best || best.score.totalScore <= existingScore) {
+      const top = best ?? result.releases[0]!;
+      db.logPipelineEvent({
+        showId, seasonNumber: season, episodeNumber: episode,
+        stage: 'WANTED', eventType: 'not_upgrade', reasonCode: 'NOT_AN_UPGRADE',
+        message: best
+          ? `Upgrade search: "${best.title}" (score ${best.score.totalScore}) is not an upgrade over the existing file (score ${existingScore})`
+          : `Upgrade search: every release found was already grabbed for this episode`,
+        releaseTitle: top.title,
+      });
+      return { success: false, message: `Best found release (${top.title}) is not an upgrade over existing file.`, bestRelease: top };
+    }
+    db.logPipelineEvent({
+      showId, seasonNumber: season, episodeNumber: episode,
+      stage: 'SEARCHING', eventType: 'upgrade_selected',
+      message: `Cutoff unmet: upgrading to "${best.title}" (score ${best.score.totalScore} > ${existingScore})`,
+      releaseTitle: best.title,
+    });
+    return this.grabRelease(best, { showId, season, episode });
   }
 
   /**
