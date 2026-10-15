@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.81] - 2026-10-15
 - **Safer updates**: activating an update now waits (up to 2 min) for running scans/imports/backups to finish, takes a DB backup first when the new release has migrations, and the app notices on boot whether the swap took or got rolled back (no more endless reconnect spinner or re-downloading the same release every cycle). Downloads stream to disk with size + sha256 checks, real progress and retries; a release whose tarball isn't uploaded yet is retried with backoff instead of hammering the API. Updates panel shows release notes, migration count, what it's waiting on and expected downtime. New optional auto-activate (off / when idle / nightly at an hour, idle only), off by default.
 - **Fix**: the updater ignores prereleases (`v1.2.3-foo`), and versions compare per semver.
 - **Fix**: the notifications dropdown stays pinned to the right of the header on every page instead of opening under the sidebar; full width on mobile.
