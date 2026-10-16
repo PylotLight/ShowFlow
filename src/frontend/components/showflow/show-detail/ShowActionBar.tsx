@@ -1,11 +1,12 @@
 import { DropdownMenu } from "radix-ui";
 import {
-  FolderArchive, FolderSearch, GitCompareArrows, Link2, Loader2Icon, MoreHorizontal, PencilIcon,
+  BellOff, BellRing, FolderArchive, FolderSearch, GitCompareArrows, Link2, Loader2Icon, MoreHorizontal, PencilIcon,
   RefreshCwIcon, SearchIcon, Trash2, Wand2,
 } from "lucide-react";
 import * as React from "react";
 
 import { Switch } from "@frontend/components/ui/switch";
+import { useCompact } from "@frontend/lib/useCompact";
 
 import { focusRing, pillButton } from "./format";
 
@@ -67,6 +68,96 @@ export function ShowActionBar(props: {
   onMonitorNewEpisodes: (v: boolean) => void;
 }) {
   const monitorId = React.useId();
+  const compact = useCompact();
+  const moreMenu = (
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align={compact ? "end" : "start"}
+            sideOffset={6}
+            className="z-50 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg border border-white/10 bg-[#15181f] p-1.5 shadow-xl"
+          >
+            {compact && (
+              <MenuEntry icon={<Link2 className="size-4 text-signal" />} label="Fix match" hint="Change or add the metadata provider this show is matched to" onSelect={props.onFixMatch} />
+            )}
+            <MenuEntry
+              icon={<GitCompareArrows className="size-4 text-signal" />}
+              label="Episode mapping"
+              hint="Scene ↔ provider numbering overrides for anime and specials"
+              trailing={mappingDot(props.mappingHealth)}
+              onSelect={props.onMapping}
+            />
+            <MenuEntry
+              icon={props.renamingFolder ? <Loader2Icon className="size-4 animate-spin" /> : <FolderSearch className="size-4 text-signal" />}
+              label="Rename folder"
+              hint="Match the show folder to the sanitized title"
+              onSelect={props.onRenameFolder}
+            />
+            <MenuEntry icon={<PencilIcon className="size-4 text-signal" />} label="Rename series" hint="Change the series title itself" onSelect={props.onRenameSeries} />
+            <MenuEntry icon={<FolderArchive className="size-4 text-signal" />} label="Dedupe" hint="Find overlapping and duplicate files" onSelect={props.onDedupe} />
+            <MenuEntry icon={<FolderSearch className="size-4 text-signal" />} label="Rescan folder" hint="Re-read the show folder on disk for new or removed files" onSelect={props.onScan} />
+            <DropdownMenu.Separator className="my-1 h-px bg-white/5" />
+            <MenuEntry icon={<Trash2 className="size-4 text-red-400" />} label="Remove" hint="Remove this show from your library" danger onSelect={props.onRemove} />
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+  );
+
+  if (compact) {
+    // Phone / mini window: one row — primary action stretches, the rest
+    // are icon buttons, Fix match moves into the More menu and the monitor
+    // switch becomes a bell toggle.
+    const iconBtn = `flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.05] text-muted-foreground hover:bg-white/[0.09] hover:text-foreground active:bg-white/[0.12] transition-colors disabled:opacity-60 ${focusRing}`;
+    return (
+      <div className="flex items-center gap-1.5">
+        {!props.isMovie ? (
+          <button
+            type="button"
+            onClick={props.onSearchMissing}
+            disabled={props.searchingMissing}
+            title="Auto-grab every monitored, aired episode that isn't on disk yet"
+            className={`flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full bg-signal/15 px-3 font-mono text-caption uppercase tracking-wider text-signal transition-colors hover:bg-signal/25 active:bg-signal/30 disabled:opacity-60 ${focusRing}`}
+          >
+            {props.searchingMissing ? <Loader2Icon className="size-3.5 shrink-0 animate-spin" /> : <SearchIcon className="size-3.5 shrink-0" />}
+            <span className="truncate">Search missing</span>
+            {props.missingCount > 0 && (
+              <span className="shrink-0 rounded-full bg-signal/20 px-1.5 text-[11px] leading-4">{props.missingCount}</span>
+            )}
+          </button>
+        ) : (
+          <button type="button" onClick={props.onFixMatch} className={`${pillButton} h-9 flex-1 justify-center`}>
+            <Link2 className="size-3.5" /> Fix match
+          </button>
+        )}
+        <button type="button" onClick={props.onRefresh} disabled={props.refreshing} aria-label="Refresh metadata" title="Refresh metadata" className={iconBtn}>
+          {props.refreshing ? <Loader2Icon className="size-4 animate-spin" /> : <RefreshCwIcon className="size-4" />}
+        </button>
+        <button type="button" onClick={props.onOrganize} disabled={props.organizing} aria-label="Organise files" title="Organise files" className={iconBtn}>
+          {props.organizing ? <Loader2Icon className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+        </button>
+        {typeof props.monitorNewEpisodes === "boolean" && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={props.monitorNewEpisodes}
+            aria-label="Monitor new episodes"
+            title={`Monitor new episodes: ${props.monitorNewEpisodes ? "on" : "off"}`}
+            onClick={() => props.onMonitorNewEpisodes(!props.monitorNewEpisodes)}
+            className={`${iconBtn} ${props.monitorNewEpisodes ? "bg-signal/15 text-signal hover:bg-signal/25 hover:text-signal" : ""}`}
+          >
+            {props.monitorNewEpisodes ? <BellRing className="size-4" /> : <BellOff className="size-4" />}
+          </button>
+        )}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" aria-label="More show actions" className={iconBtn}>
+              <MoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenu.Trigger>
+          {moreMenu}
+        </DropdownMenu.Root>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       {!props.isMovie && (
@@ -103,32 +194,7 @@ export function ShowActionBar(props: {
             <span className="hidden sm:inline">More</span>
           </button>
         </DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content
-            align="start"
-            sideOffset={6}
-            className="z-50 w-72 rounded-lg border border-white/10 bg-[#15181f] p-1.5 shadow-xl"
-          >
-            <MenuEntry
-              icon={<GitCompareArrows className="size-4 text-signal" />}
-              label="Episode mapping"
-              hint="Scene ↔ provider numbering overrides for anime and specials"
-              trailing={mappingDot(props.mappingHealth)}
-              onSelect={props.onMapping}
-            />
-            <MenuEntry
-              icon={props.renamingFolder ? <Loader2Icon className="size-4 animate-spin" /> : <FolderSearch className="size-4 text-signal" />}
-              label="Rename folder"
-              hint="Match the show folder to the sanitized title"
-              onSelect={props.onRenameFolder}
-            />
-            <MenuEntry icon={<PencilIcon className="size-4 text-signal" />} label="Rename series" hint="Change the series title itself" onSelect={props.onRenameSeries} />
-            <MenuEntry icon={<FolderArchive className="size-4 text-signal" />} label="Dedupe" hint="Find overlapping and duplicate files" onSelect={props.onDedupe} />
-            <MenuEntry icon={<FolderSearch className="size-4 text-signal" />} label="Rescan folder" hint="Re-read the show folder on disk for new or removed files" onSelect={props.onScan} />
-            <DropdownMenu.Separator className="my-1 h-px bg-white/5" />
-            <MenuEntry icon={<Trash2 className="size-4 text-red-400" />} label="Remove" hint="Remove this show from your library" danger onSelect={props.onRemove} />
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
+        {moreMenu}
       </DropdownMenu.Root>
 
       {typeof props.monitorNewEpisodes === "boolean" && (

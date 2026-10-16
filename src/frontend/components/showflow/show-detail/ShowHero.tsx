@@ -4,6 +4,7 @@ import * as React from "react";
 import { PosterImage } from "@frontend/components/showflow/PosterImage";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { formatDelayMinutes } from "@frontend/lib/airtime";
+import { useCompact } from "@frontend/lib/useCompact";
 
 import { focusRing } from "./format";
 import type { SeasonStat } from "./types";
@@ -53,6 +54,7 @@ export function ShowHero({ show, modal, seasons, releaseDelayMinutes, children }
   children?: React.ReactNode;
 }) {
   const bd = useBackdrops(show.id);
+  const compact = useCompact();
   const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => { e.currentTarget.style.display = "none"; };
   const navBtn = `absolute top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-black/70 hover:text-white ${focusRing}`;
 
@@ -76,7 +78,61 @@ export function ShowHero({ show, modal, seasons, releaseDelayMinutes, children }
         }} />
       </div>
 
-      <section className="group relative z-10 w-full h-[420px] md:h-[540px] shrink-0">
+      {compact ? (
+        /* Phone / mini window: a short backdrop band with the poster
+           overlapping its bottom edge, title + meta beside it, then the
+           action row, so the episode list starts above the fold instead of
+           under a 420px banner. */
+        <section className="relative z-10 w-full shrink-0">
+          <div
+            className="relative h-28 w-full overflow-hidden"
+            style={{
+              maskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
+              WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
+            }}
+          >
+            <img
+              src={`/api/shows/${show.id}/images/backdrop?index=${bd.index}`}
+              alt=""
+              aria-hidden
+              fetchPriority="high"
+              decoding="async"
+              onLoad={() => bd.setLoaded(true)}
+              onError={hideOnError}
+              className={`absolute inset-0 size-full object-cover object-[center_30%] transition-opacity duration-500 ${bd.loaded ? "opacity-90" : "opacity-0"}`}
+            />
+          </div>
+          <div className="-mt-16 flex items-end gap-3 px-3">
+            <div className="w-[76px] shrink-0 overflow-hidden rounded-lg shadow-xl ring-1 ring-white/10">
+              <PosterImage showId={show.id} alt={show.title} size="card" className="w-full aspect-[2/3]" />
+            </div>
+            <div className="min-w-0 flex-1 pb-0.5 [text-shadow:0_1px_8px_rgba(0,0,0,0.8)]">
+              <h1 className="font-display text-xl font-semibold leading-tight tracking-wide text-white line-clamp-2" title={show.title}>
+                {show.title}
+              </h1>
+              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono text-[11px] text-foreground/70">
+                <span className="uppercase tracking-wider">{show.providerType}</span>
+                {seasons && (
+                  <>
+                    <span className="text-white/30" aria-hidden>·</span>
+                    <span>{seasons.length} season{seasons.length !== 1 ? "s" : ""}</span>
+                    <span className="text-white/30" aria-hidden>·</span>
+                    <span>{seasons.reduce((a, s) => a + s.episodeCount, 0)} eps</span>
+                  </>
+                )}
+                {releaseDelayMinutes != null && (
+                  <span className="inline-flex items-center gap-1 text-accent-amber" title="Learned release delay: expected minutes after air time that releases typically appear for this show">
+                    <Clock className="size-3" />
+                    ~{formatDelayMinutes(releaseDelayMinutes)} after air
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          {children && <div className="px-3 pt-3">{children}</div>}
+        </section>
+      ) : (
+      <section className="show-hero-banner group relative z-10 w-full h-[420px] md:h-[540px] shrink-0">
         <div
           className="absolute inset-0"
           style={{
@@ -159,6 +215,7 @@ export function ShowHero({ show, modal, seasons, releaseDelayMinutes, children }
           {children && <div className="md:pl-[164px]">{children}</div>}
         </div>
       </section>
+      )}
     </>
   );
 }

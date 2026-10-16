@@ -61,11 +61,12 @@ function PosterCardInner({
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent opacity-90 transition-opacity group-hover:opacity-100" />
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-3">
-        <span className="font-display text-base leading-tight font-semibold tracking-wide text-white drop-shadow-sm">
+      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-3 max-md:gap-0.5 max-md:p-2">
+        <span className="font-display text-base leading-tight font-semibold tracking-wide text-white drop-shadow-sm max-md:line-clamp-2 max-md:text-[13px]">
           {show.title}
         </span>
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Phones: the 3-up grid is too narrow for the provider / stat chips. */}
+        <div className="flex items-center gap-2 flex-wrap max-md:hidden">
           {showProvider && (
             <span className="font-mono text-caption uppercase tracking-wider text-white/60">{show.providerType}</span>
           )}

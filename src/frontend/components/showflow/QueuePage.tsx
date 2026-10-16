@@ -139,9 +139,9 @@ function QueuePage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-md:space-y-2.5">
       {/* Header + watcher control */}
-      <GlassPanel className="flex flex-wrap items-center justify-between gap-3 p-5">
+      <GlassPanel className="flex flex-wrap items-center justify-between gap-3 p-5 max-md:p-3.5">
         <div className="flex items-center gap-3">
           <div className="relative flex items-center justify-center">
             <RadioIcon className={cn("size-5 z-10", watching ? "text-signal" : "text-muted-foreground")} />
@@ -149,7 +149,7 @@ function QueuePage() {
           </div>
           <div>
             <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-signal">// Queue</span>
-            <h2 className="font-display text-2xl font-bold text-white">
+            <h2 className="font-display text-2xl font-bold text-white max-md:text-xl">
               {watching === null ? "Checking status…" : watching ? "Watching for drops" : "Watcher idle"}
             </h2>
           </div>
@@ -167,7 +167,7 @@ function QueuePage() {
       </GlassPanel>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 max-md:gap-2 sm:grid-cols-4">
         <StatTile label="Currently Processing" value={processing === null ? "—" : processing.length} accent="signal" />
         <StatTile label="Recent Successes" value={successCount} accent="amber" />
         <StatTile label="Recent Failures" value={errorCount} />

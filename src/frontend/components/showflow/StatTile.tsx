@@ -13,11 +13,11 @@ function StatTile({
   accent?: "signal" | "amber";
 }) {
   return (
-    <GlassPanel className="flex flex-col gap-1 p-5">
-      <span className="text-muted-foreground font-mono text-caption tracking-wider uppercase">{label}</span>
+    <GlassPanel className="flex flex-col gap-1 p-5 max-md:gap-0.5 max-md:px-3.5 max-md:py-2.5">
+      <span className="text-muted-foreground font-mono text-caption tracking-wider uppercase max-md:truncate max-md:text-[10px]">{label}</span>
       <span
         className={cn(
-          "font-display text-3xl font-semibold tracking-wide",
+          "font-display text-3xl font-semibold tracking-wide max-md:text-2xl",
           accent === "signal" && "text-signal",
           accent === "amber" && "text-accent-amber",
         )}

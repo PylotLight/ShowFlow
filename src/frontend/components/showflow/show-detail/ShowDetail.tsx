@@ -163,15 +163,20 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
         />
       </ShowHero>
 
-      <div className="relative z-10 flex-1 px-4 md:px-8 pt-3 pb-4 md:pb-8 flex flex-col min-h-0">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="min-h-0 flex-1">
-          <TabsList className="self-start">
+      {/* Phones: the whole page scrolls (hero scrolls away, tabs stick)
+          instead of squeezing the episode list into a short inner scroller. */}
+      <div className="relative z-10 flex-1 px-3 md:px-8 pt-1.5 md:pt-3 pb-4 md:pb-8 flex flex-col min-h-0 max-md:flex-none">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="min-h-0 flex-1 max-md:flex-none max-md:gap-3">
+          {/* Phones: full-width segmented control on a band that sticks under the top bar. */}
+          <div className="self-start max-md:sticky max-md:top-11 max-md:z-10 max-md:-mx-3 max-md:self-stretch max-md:bg-[rgba(13,16,21,.82)] max-md:px-3 max-md:py-1.5 max-md:backdrop-blur-md">
+          <TabsList className="max-md:grid max-md:w-full max-md:auto-cols-fr max-md:grid-flow-col">
             <TabsTrigger value="episodes" className="text-xs focus-visible:ring-2 focus-visible:ring-signal/70">{isMovie ? "Movie" : "Episodes"}</TabsTrigger>
             {!isMovie && <TabsTrigger value="files" className="text-xs focus-visible:ring-2 focus-visible:ring-signal/70">Files</TabsTrigger>}
             <TabsTrigger value="settings" className="text-xs focus-visible:ring-2 focus-visible:ring-signal/70">Settings</TabsTrigger>
           </TabsList>
+          </div>
 
-          <TabsContent value="episodes" className="flex flex-col min-h-0 gap-4">
+          <TabsContent value="episodes" className="flex flex-col min-h-0 gap-4 max-md:flex-none max-md:gap-2">
             {isMovie ? (
               <MoviePanel
                 key={movieRefresh}
@@ -197,7 +202,7 @@ export function ShowDetail({ show, onBack, modal = false, onToggleExpand, expand
                   columns={columnConfig}
                   onToggleColumn={toggleColumn}
                 />
-                <GlassPanel className="flex-1 overflow-hidden min-h-0 flex flex-col">{episodeListBody}</GlassPanel>
+                <GlassPanel className="flex-1 overflow-hidden min-h-0 flex flex-col max-md:-mx-3 max-md:flex-none max-md:overflow-visible max-md:rounded-none max-md:border-x-0">{episodeListBody}</GlassPanel>
               </>
             )}
           </TabsContent>

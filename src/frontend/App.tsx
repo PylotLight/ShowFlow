@@ -18,7 +18,7 @@ import { Toaster } from "@frontend/components/ui/sonner";
 import { ConfirmHost } from "@frontend/components/ui/confirm";
 import { Input } from "@frontend/components/ui/input";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
-import { MenuIcon, SearchIcon } from "lucide-react";
+import { SearchIcon } from "lucide-react";
 import { FeedbackButton } from "@frontend/components/showflow/FeedbackButton";
 import { loadTheme, applyTheme } from "@frontend/lib/theme";
 import { HeaderActions, HeaderActionsProvider } from "@frontend/lib/header-actions";
@@ -232,29 +232,25 @@ export function App() {
         {/* Main Content Header — single persistent row for every page: title,
             page-specific actions (portaled in via <HeaderActions>), and the
             global notification / background-activity controls. */}
-        <header className="flex min-h-14 flex-wrap items-center gap-x-2 gap-y-2 border-b border-white/5 px-3 py-2 sm:px-6 md:h-16 md:flex-nowrap md:gap-4 md:py-4">
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            aria-label="Open menu"
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/70 md:hidden"
-          >
-            <MenuIcon className="size-5" />
-          </button>
-          <h1 className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight text-white sm:text-2xl md:flex-none md:shrink-0">
+        <header className="flex min-h-12 flex-wrap items-center gap-x-1.5 gap-y-1.5 border-b border-white/5 px-3 py-1.5 sm:px-6 md:h-16 md:flex-nowrap md:gap-4 md:py-4">
+          {/* No hamburger on phones: the bottom tab bar's "More" opens the
+              same menu sheet, so a second menu button was just noise. */}
+          <h1 className="min-w-0 flex-1 truncate font-display text-xl font-bold tracking-tight text-white sm:text-2xl md:flex-none md:shrink-0">
             {PAGE_LABELS[activeNav]}
           </h1>
 
-          {/* Page actions slot. On mobile it drops to its own full-width row
-              under the title bar so it never collides with the bell. */}
+          {/* Page actions slot. On phones it sits inline in the title bar
+              (pages render icon-only actions there); a page that needs a
+              full-width control (Library's search) marks it data-header-row
+              and the slot drops to its own row under the title instead. */}
           <div
             ref={setHeaderActionsEl}
-            className="order-last flex w-full min-w-0 items-center gap-2 empty:hidden md:order-none md:w-auto md:flex-1 md:gap-4"
+            className="flex min-w-0 shrink-0 items-center gap-1 empty:hidden max-md:has-[[data-header-row]]:order-last max-md:has-[[data-header-row]]:w-full max-md:has-[[data-header-row]]:pb-1 md:flex-1 md:shrink md:gap-4"
           />
 
           {/* ml-auto keeps the global controls pinned right even when the
               page-actions slot is empty (it's empty:hidden, so it can't push). */}
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0.5 md:ml-auto md:gap-1">
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
@@ -276,7 +272,7 @@ export function App() {
         </header>
 
         {/* Dynamic Content Views */}
-        <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 animate-page-enter">
+        <div key={activeNav} className="flex-1 min-h-0 overflow-y-auto max-md:overflow-x-hidden px-3 py-2 sm:p-6 animate-page-enter">
           {activeNav === "dashboard" ? (
             <div className="h-full flex flex-col overflow-hidden">
               <Dashboard
@@ -294,7 +290,7 @@ export function App() {
           ) : activeNav === "library" ? (
             <>
               <HeaderActions>
-                <div className="flex w-full items-center gap-2 sm:gap-4 md:ml-auto md:w-auto">
+                <div data-header-row className="flex w-full items-center gap-2 sm:gap-4 md:ml-auto md:w-auto">
                   <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
                     <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2" />
                     <Input
@@ -304,7 +300,7 @@ export function App() {
                       className="pl-8 h-8 text-xs bg-white/5 border-white/5 focus:border-signal/50 focus:ring-1 focus:ring-signal/30"
                     />
                   </div>
-                  <AddShowDialog onAdded={() => setRefreshKey((k) => k + 1)} />
+                  <AddShowDialog compactTrigger onAdded={() => setRefreshKey((k) => k + 1)} />
                 </div>
               </HeaderActions>
               <Library

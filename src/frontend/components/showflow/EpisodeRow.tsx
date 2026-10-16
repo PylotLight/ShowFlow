@@ -344,13 +344,12 @@ function EpisodeRow({
             {available ? "Available" : "Missing"}
           </span>
           {!available && showId && <WhyPopover showId={showId} episode={episode} />}
-          <span
-            role="img"
-            aria-label={available ? "Available" : "Missing"}
-            title={available ? "Available" : "Missing"}
-            className={`sm:hidden size-2 rounded-full ${available ? "bg-signal" : "border border-white/40"}`}
-          />
-          <InfoPopover episode={episode} />
+          {/* Phones: the filled check toggle already shows availability, so
+              no extra dot; missing rows keep "why?" and drop the info glyph
+              to leave the title its width. */}
+          <span className={available ? "inline-flex" : "hidden sm:inline-flex"}>
+            <InfoPopover episode={episode} />
+          </span>
         </span>
       )}
 

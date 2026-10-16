@@ -43,8 +43,9 @@ function ShowDetailDialog({
         className={cn(
           "relative z-10 flex flex-col overflow-hidden glass-panel shadow-2xl transition-all duration-300 ease-out",
           expanded
-            ? "fixed inset-3 md:inset-6 rounded-2xl"
-            : "w-[92vw] max-w-6xl h-[80vh] max-h-[85vh] rounded-2xl"
+            // Phones / mini windows: always a full-screen page, no inset frame.
+            ? "fixed inset-0 rounded-none border-0 md:inset-6 md:rounded-2xl md:border"
+            : "fixed inset-0 rounded-none border-0 md:relative md:w-[92vw] md:max-w-6xl md:h-[80vh] md:max-h-[85vh] md:rounded-2xl md:border"
         )}
       >
         <div className="flex-1 flex flex-col min-h-0">
