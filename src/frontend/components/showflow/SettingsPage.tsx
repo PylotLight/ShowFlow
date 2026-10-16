@@ -64,7 +64,7 @@ function MobileSectionInner({ id, onClose, children }: { id: string; onClose: ()
       <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label={def.label}>
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]" onClick={onClose} />
         <div
-          className="safe-x absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] pb-[env(safe-area-inset-bottom)] shadow-2xl"
+          className="pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] pb-[env(safe-area-inset-bottom)] shadow-2xl"
           style={{ animation: "slideUp 0.25s ease-out" }}
         >
           <div className="flex justify-center pt-2 pb-1"><div className="h-1 w-8 rounded-full bg-white/20" /></div>
@@ -83,7 +83,7 @@ function MobileSectionInner({ id, onClose, children }: { id: string; onClose: ()
 
   return (
     <div
-      className="safe-x fixed inset-0 z-[60] flex flex-col bg-[#1c2028]"
+      className="pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] fixed inset-0 z-[60] flex flex-col bg-[#1c2028]"
       role="dialog"
       aria-modal="true"
       aria-label={def?.label}

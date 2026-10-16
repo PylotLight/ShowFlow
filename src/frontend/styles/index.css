@@ -64,13 +64,11 @@ body::before {
 
 /* Notch / rounded-corner insets (viewport-fit=cover): the shell keeps its
    content out from under the status bar in standalone mode and the side
-   notch in landscape; fixed bars and sheets pad their own sides. */
+   notch in landscape. Fixed bars and sheets pad their own sides with
+   pl-/pr-[env(safe-area-inset-*)] utilities (an unlayered class here would
+   beat their p-* utilities). */
 .safe-shell {
   padding-top: env(safe-area-inset-top, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
-}
-.safe-x {
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
 }
