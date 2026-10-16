@@ -72,9 +72,12 @@ export function FilesTab({ sections, loading, organizing, renamingFolder, onOrga
                           <div className="truncate font-mono text-[11px] text-muted-foreground" title={ep.file.releaseTitle}>{ep.file.releaseTitle}</div>
                         )}
                       </div>
-                      <MediaBadges media={ep.file?.media} max={3} />
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground sm:w-20 sm:text-right">{formatFileSize(ep.file?.size)}</span>
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground sm:w-20 sm:text-right">{formatImportDate(ep.file?.importedAt ?? null)}</span>
+                      {/* Phones: badges, size and date share one meta line; sm+ they're columns. */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:contents">
+                        <MediaBadges media={ep.file?.media} max={3} />
+                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground sm:w-20 sm:text-right">{formatFileSize(ep.file?.size)}</span>
+                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground sm:w-20 sm:text-right">{formatImportDate(ep.file?.importedAt ?? null)}</span>
+                      </div>
                     </li>
                   );
                 })}

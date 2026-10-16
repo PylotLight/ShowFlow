@@ -232,10 +232,10 @@ export function Library({
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Provider</span>
                       <button onClick={() => setFilter(f => ({ ...f, providerType: null }))}
-                        className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.providerType === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                        className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${filter.providerType === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {pts.map(pt => (
                         <button key={pt} onClick={() => setFilter(f => ({ ...f, providerType: pt }))}
-                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.providerType === pt ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{pt}</button>
+                          className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${filter.providerType === pt ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{pt}</button>
                       ))}
                     </div>
                   );
@@ -249,10 +249,10 @@ export function Library({
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Profile</span>
                       <button onClick={() => setFilter(f => ({ ...f, profile: null }))}
-                        className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.profile === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                        className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${filter.profile === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {profiles.map(p => (
                         <button key={p} onClick={() => setFilter(f => ({ ...f, profile: p }))}
-                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${filter.profile === p ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{p}</button>
+                          className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${filter.profile === p ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{p}</button>
                       ))}
                     </div>
                   );
@@ -266,10 +266,10 @@ export function Library({
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Type</span>
                       <button onClick={() => setSeriesTypeFilter(null)}
-                        className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                        className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === null ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                       {seriesTypes.map(st => (
                         <button key={st} onClick={() => setSeriesTypeFilter(st)}
-                          className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === st ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{st.charAt(0).toUpperCase() + st.slice(1)}</button>
+                          className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${seriesTypeFilter === st ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>{st.charAt(0).toUpperCase() + st.slice(1)}</button>
                       ))}
                     </div>
                   );
@@ -279,11 +279,11 @@ export function Library({
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-caption uppercase tracking-wider text-white/60 mr-1">Tracking</span>
                   <button onClick={() => setTrackingFilter('all')}
-                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'all' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
+                    className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'all' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>All</button>
                   <button onClick={() => setTrackingFilter('tracked')}
-                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'tracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Tracked</button>
+                    className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'tracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Tracked</button>
                   <button onClick={() => setTrackingFilter('untracked')}
-                    className={`rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'untracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Untracked</button>
+                    className={`rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${trackingFilter === 'untracked' ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}>Untracked</button>
                 </div>
 
                 {/* Sort dropdown */}
@@ -292,7 +292,7 @@ export function Library({
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as any)}
-                    className="rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border-0 cursor-pointer"
+                    className="rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border-0 cursor-pointer"
                   >
                     <option value="title">Title</option>
                     <option value="added">Added</option>
@@ -302,7 +302,7 @@ export function Library({
                   </select>
                   <button aria-label="Toggle sort order"
                     onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                    className="rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                    className="rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
                   >
                     <ArrowUpDown className="size-3" />
                   </button>
@@ -314,14 +314,14 @@ export function Library({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setShowProvider(prev => !prev)}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${showProvider ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${showProvider ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
                     >
                       {showProvider ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
                       Provider
                     </button>
                     <button
                       onClick={() => setShowStats(prev => !prev)}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors ${showStats ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors ${showStats ? 'bg-signal text-signal-foreground' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'}`}
                     >
                       {showStats ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
                       Stats
@@ -331,7 +331,7 @@ export function Library({
                   {/* Select all */}
                   <button
                     onClick={handleSelectAll}
-                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
                   >
                     <Check className="size-3" />
                     {filtered && filtered.length > 0 && filtered.every(s => selectedIds.has(s.id)) ? 'Deselect All' : 'Select All'}
@@ -340,7 +340,7 @@ export function Library({
                   {/* Duplicates */}
                   <button
                     onClick={() => setDuplicatesOpen(true)}
-                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                    className="flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:py-2 font-mono text-sub font-medium tracking-wide transition-colors bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
                   >
                     <ListFilter className="size-3" />
                     Overlaps
