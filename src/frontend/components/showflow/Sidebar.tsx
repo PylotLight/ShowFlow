@@ -402,7 +402,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="mobile-nav-safe absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-white/10 bg-[#1c2028] p-4 pb-6 shadow-2xl"
+            className="safe-x absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-white/10 bg-[#1c2028] p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl"
             style={{ animation: "slideUp 0.25s ease-out" }}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -458,7 +458,7 @@ export function Sidebar({ activeItem, onChange, onSettingsTab, mobileMenuOpen, o
       )}
 
       {/* Mobile Bottom Navigation (visible on screens < 768px) */}
-      <nav className="mobile-nav-safe fixed bottom-0 left-0 right-0 z-30 flex h-14 items-stretch border-t border-white/10 md:hidden"
+      <nav className="mobile-nav-safe safe-x fixed bottom-0 left-0 right-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] items-stretch border-t border-white/10 md:hidden"
         style={{ backdropFilter: "blur(18px) saturate(115%)", WebkitBackdropFilter: "blur(18px) saturate(115%)", background: "rgb(28 32 40 / 62%)" }}>
         {mobilePrimary.map((nav) => (
           <button

@@ -37,6 +37,17 @@ body::before {
   }
 }
 
+/* Touch screens: iOS Safari (and some Android browsers) zoom the page when a
+   focused field's text is under 16px. Unlayered, so it beats the text-xs /
+   text-sm utilities on inputs without touching desktop mice. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
 /* Short desktop-width windows (e.g. a resized mini window): the show hero
    banner would otherwise eat most of the viewport before any episodes. */
 @media (min-width: 768px) and (max-height: 720px) {
@@ -49,6 +60,19 @@ body::before {
   .app-shell-height {
     height: 100dvh;
   }
+}
+
+/* Notch / rounded-corner insets (viewport-fit=cover): the shell keeps its
+   content out from under the status bar in standalone mode and the side
+   notch in landscape; fixed bars and sheets pad their own sides. */
+.safe-shell {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 @supports (padding-bottom: env(safe-area-inset-bottom)) {

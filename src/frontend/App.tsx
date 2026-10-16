@@ -203,7 +203,7 @@ export function App() {
 
   return (
     <HeaderActionsProvider container={headerActionsEl}>
-    <div className={`app-background app-shell-height flex h-screen text-foreground pb-mobile-nav md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
+    <div className={`app-background app-shell-height safe-shell flex h-screen text-foreground pb-mobile-nav md:pb-0 ${wizardOpen ? 'pointer-events-none' : ''}`}>
       {/* Global backdrop for library view */}
       {activeNav === "library" && backdropUrl && (
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">

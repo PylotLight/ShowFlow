@@ -1,4 +1,5 @@
 import { Check, CircleAlert, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchIcon, Info, Clock } from "lucide-react";
+import { touchHit } from "@frontend/components/ui/pill";
 import * as React from "react";
 import { createPortal } from "react-dom";
 
@@ -165,7 +166,7 @@ function EpisodeDetails({ showId, episode, compact }: { showId: string | null; e
         aria-haspopup="dialog"
         title={label}
         className={cn(
-          "rounded-md p-1 max-md:p-1.5 transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal",
+          touchHit, "rounded-md p-1 max-md:p-1.5 transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal",
           open ? "text-white/90 bg-white/[0.06]" : !available && !upcoming ? "text-accent-amber/70 hover:text-accent-amber" : "text-muted-foreground hover:text-white/85",
         )}
       >
@@ -338,7 +339,7 @@ function EpisodeRow({
       })()
     : null;
 
-  const actionBtn = "rounded-md p-1 max-md:p-1.5 text-muted-foreground hover:text-signal hover:bg-white/[0.06] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal";
+  const actionBtn = touchHit + " rounded-md p-1 max-md:p-1.5 text-muted-foreground hover:text-signal hover:bg-white/[0.06] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal";
   const actions = showActions && (
     <>
       <button
@@ -373,7 +374,7 @@ function EpisodeRow({
         type="button"
         onClick={() => onToggleTracked(!episode.tracked)}
         aria-label={episode.tracked ? "Mark untracked" : "Mark tracked"}
-        className={`size-5 rounded-full border-2 transition-all grid place-items-center ${
+        className={`${touchHit} pointer-coarse:after:-inset-2.5 size-5 rounded-full border-2 transition-all grid place-items-center ${
           available
             ? "border-signal bg-signal text-[#051208]"
             : episode.tracked

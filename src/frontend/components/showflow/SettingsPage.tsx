@@ -64,8 +64,8 @@ function MobileSectionInner({ id, onClose, children }: { id: string; onClose: ()
       <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label={def.label}>
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]" onClick={onClose} />
         <div
-          className="mobile-nav-safe absolute inset-x-0 bottom-0 flex flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] shadow-2xl"
-          style={{ maxHeight: "92vh", animation: "slideUp 0.25s ease-out" }}
+          className="safe-x absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col rounded-t-2xl border-t border-white/10 bg-[#1c2028] pb-[env(safe-area-inset-bottom)] shadow-2xl"
+          style={{ animation: "slideUp 0.25s ease-out" }}
         >
           <div className="flex justify-center pt-2 pb-1"><div className="h-1 w-8 rounded-full bg-white/20" /></div>
           <div className="flex items-center justify-between px-4 pb-3">
@@ -83,7 +83,7 @@ function MobileSectionInner({ id, onClose, children }: { id: string; onClose: ()
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex flex-col bg-[#1c2028]"
+      className="safe-x fixed inset-0 z-[60] flex flex-col bg-[#1c2028]"
       role="dialog"
       aria-modal="true"
       aria-label={def?.label}
@@ -94,7 +94,7 @@ function MobileSectionInner({ id, onClose, children }: { id: string; onClose: ()
         {Icon && <Icon className="size-4 text-signal" />}
         <span className="font-mono text-sm font-bold text-white">{def?.label}</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-4"><div className="space-y-6">{children}</div></div>
+      <div className="flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"><div className="space-y-6">{children}</div></div>
     </div>
   );
 }

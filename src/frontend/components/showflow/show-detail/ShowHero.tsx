@@ -56,7 +56,7 @@ export function ShowHero({ show, modal, seasons, releaseDelayMinutes, children }
   const bd = useBackdrops(show.id);
   const compact = useCompact();
   const hideOnError = (e: React.SyntheticEvent<HTMLImageElement>) => { e.currentTarget.style.display = "none"; };
-  const navBtn = `absolute top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-black/70 hover:text-white ${focusRing}`;
+  const navBtn = `absolute top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 pointer-coarse:p-2.5 transition-opacity hover:bg-black/70 hover:text-white ${focusRing}`;
 
   return (
     <>

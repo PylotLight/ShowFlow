@@ -5,7 +5,7 @@ import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 import { formatBitrate, formatDuration, formatImportDate, formatResolution } from "@frontend/lib/airtime";
 
-import { channelsLabel, focusRing, formatMovieBytes, langLabel, pillButton } from "./format";
+import { channelsLabel, focusRing, formatMovieBytes, langLabel, pillButton, pillButtonPrimary } from "./format";
 import type { MovieFileInfo } from "./types";
 
 /** One label/value line inside a media/release spec list. Renders nothing when
@@ -201,7 +201,7 @@ export function MoviePanel({ showId, showTitle, onBrowse, onAutoGrab, grabbing }
               type="button"
               onClick={onAutoGrab}
               disabled={grabbing}
-              className={`flex items-center gap-1.5 rounded-full bg-signal/15 hover:bg-signal/25 text-signal px-3 py-1.5 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-60 ${focusRing}`}
+              className={pillButtonPrimary}
             >
               {grabbing ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {movieFile ? "Upgrade" : "Auto-grab"}

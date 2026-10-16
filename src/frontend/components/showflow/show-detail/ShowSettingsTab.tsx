@@ -4,7 +4,7 @@ import * as React from "react";
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 
-import { pillButton } from "./format";
+import { pillButton, pillButtonDanger } from "./format";
 import type { ShowConfig } from "./hooks/useShowConfig";
 
 function Row({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
@@ -72,7 +72,7 @@ export function ShowSettingsTab({ config, onFixMatch, onMapping, onRemove }: {
 
       <GlassPanel className="px-5 py-2 border-red-500/20">
         <Row label="Remove show" hint="Remove this show from your library. Files on disk are left alone.">
-          <button type="button" onClick={onRemove} className={`${pillButton} text-red-400 hover:text-red-300 hover:bg-red-400/10`}>
+          <button type="button" onClick={onRemove} className={pillButtonDanger}>
             <Trash2 className="size-3.5" /> Remove
           </button>
         </Row>

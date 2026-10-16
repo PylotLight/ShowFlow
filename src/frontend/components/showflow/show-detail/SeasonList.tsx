@@ -7,7 +7,7 @@ import { focusRing, seasonLabel } from "./format";
 import type { EpisodeFilter, GrabTarget, SearchTarget, SeasonSection } from "./types";
 
 const seasonBtn =
-  "flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground px-2.5 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-60 max-sm:size-8 max-sm:justify-center max-sm:px-0 " +
+  "flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground px-2.5 py-1 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-60 max-md:size-9 max-md:justify-center max-md:px-0 max-md:pointer-coarse:size-10 pointer-coarse:min-h-10 " +
   focusRing;
 
 /** One collapsible season: header with Monitor / Browse / Auto, then its episode rows. */
@@ -61,7 +61,7 @@ function SeasonBlock({ section, expanded, filter, columns, grabTarget, onToggleC
               title={seasonTracked ? `Stop monitoring all ${label.toLowerCase()} episodes` : `Monitor all ${label.toLowerCase()} episodes for new releases`}
               className={seasonBtn}
             >
-              <Check className="size-3" /> <span className="max-sm:sr-only">{seasonTracked ? "Unmonitor" : "Monitor"}</span>
+              <Check className="size-3" /> <span className="max-md:sr-only">{seasonTracked ? "Unmonitor" : "Monitor"}</span>
             </button>
           )}
           <button
@@ -70,7 +70,7 @@ function SeasonBlock({ section, expanded, filter, columns, grabTarget, onToggleC
             title={`Browse and manually pick a ${label.toLowerCase()} release`}
             className={seasonBtn}
           >
-            <SearchIcon className="size-3" /> <span className="max-sm:sr-only">Browse</span>
+            <SearchIcon className="size-3" /> <span className="max-md:sr-only">Browse</span>
           </button>
           <button
             type="button"
@@ -80,7 +80,7 @@ function SeasonBlock({ section, expanded, filter, columns, grabTarget, onToggleC
             className={seasonBtn}
           >
             {grabbingSeason ? <Loader2Icon className="size-3 animate-spin" /> : <DownloadIcon className="size-3" />}
-            <span className="max-sm:sr-only">Auto</span>
+            <span className="max-md:sr-only">Auto</span>
           </button>
         </div>
       </div>

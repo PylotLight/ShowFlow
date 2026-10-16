@@ -1,11 +1,12 @@
-import { FolderArchive, FolderSearch, Loader2Icon, Wand2 } from "lucide-react";
+import { FolderArchive, FolderPen, FolderSearch, Loader2Icon, Wand2 } from "lucide-react";
 import * as React from "react";
 
 import { GlassPanel } from "@frontend/components/showflow/GlassPanel";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
+import { ActionRow } from "@frontend/components/ui/action-row";
 import { formatFileSize, formatImportDate } from "@frontend/lib/airtime";
 
-import { pillButton, seasonLabel } from "./format";
+import { seasonLabel } from "./format";
 import type { SeasonSection } from "./types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -32,23 +33,21 @@ export function FilesTab({ sections, loading, organizing, renamingFolder, onOrga
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-xs text-muted-foreground mr-auto">
-          {count} file{count !== 1 ? "s" : ""}{totalBytes > 0 ? ` · ${formatFileSize(totalBytes)}` : ""}
-        </span>
-        <button type="button" onClick={onOrganize} disabled={organizing} className={pillButton}>
-          {organizing ? <Loader2Icon className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />} Organise
-        </button>
-        <button type="button" onClick={onRenameFolder} disabled={renamingFolder} className={pillButton}>
-          {renamingFolder ? <Loader2Icon className="size-3.5 animate-spin" /> : <FolderSearch className="size-3.5" />} Rename folder
-        </button>
-        <button type="button" onClick={onDedupe} className={pillButton}>
-          <FolderArchive className="size-3.5" /> Dedupe
-        </button>
-        <button type="button" onClick={onScan} className={pillButton}>
-          <FolderSearch className="size-3.5" /> Rescan
-        </button>
-      </div>
+      <ActionRow
+        lead={
+          <span className="font-mono text-xs text-muted-foreground">
+            {count} file{count !== 1 ? "s" : ""}{totalBytes > 0 ? ` · ${formatFileSize(totalBytes)}` : ""}
+          </span>
+        }
+        primary="organise"
+        menuLabel="More file actions"
+        actions={[
+          { id: "organise", label: "Organise", icon: Wand2, busy: organizing, onSelect: onOrganize, hint: "Rename episode files to your naming pattern (shows a preview first)" },
+          { id: "rename-folder", label: "Rename folder", icon: FolderPen, busy: renamingFolder, onSelect: onRenameFolder, hint: "Match the show folder to the sanitized title" },
+          { id: "dedupe", label: "Dedupe", icon: FolderArchive, onSelect: onDedupe, hint: "Find overlapping and duplicate files" },
+          { id: "rescan", label: "Rescan", icon: FolderSearch, onSelect: onScan, hint: "Re-read the show folder on disk for new or removed files" },
+        ]}
+      />
 
       <GlassPanel className="overflow-hidden">
         {loading ? (

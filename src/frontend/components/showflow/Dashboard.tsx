@@ -521,7 +521,7 @@ function Dashboard({
                   type="button"
                   aria-label="Previous week"
                   onClick={() => setStripOffset((o) => o - 7)}
-                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08]"
+                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08] pointer-coarse:size-10"
                 >
                   <ChevronRight className="size-4 rotate-180" />
                 </button>
@@ -529,7 +529,7 @@ function Dashboard({
                   type="button"
                   onClick={() => { setStripOffset(0); setSelectedDay(null); }}
                   className={cn(
-                    "rounded-full px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    "rounded-full px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide transition-colors pointer-coarse:py-3",
                     stripOffset === 0 && !selectedDay ? "text-signal" : "text-white/70 hover:text-signal",
                   )}
                 >
@@ -539,7 +539,7 @@ function Dashboard({
                   type="button"
                   aria-label="Next week"
                   onClick={() => setStripOffset((o) => o + 7)}
-                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08]"
+                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08] pointer-coarse:size-10"
                 >
                   <ChevronRight className="size-4" />
                 </button>
@@ -1043,7 +1043,7 @@ function Dashboard({
                                     episode: ep.episode,
                                   });
                                 }}
-                                className="flex items-center justify-center size-5 rounded text-white/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-signal hover:bg-signal/10 transition-all"
+                                className="flex items-center justify-center size-5 rounded text-white/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 hover:text-signal hover:bg-signal/10 transition-all"
                               >
                                 <SearchIcon className="size-3" />
                               </button>
