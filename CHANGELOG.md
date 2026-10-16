@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.86] - 2026-10-16
 - **Compact layout for phones and mini windows**: under 768px wide ShowFlow now gets a proper mobile layout. One top bar (no double hamburger, Add Show is a round + next to a ⋮ menu), the Upcoming week strip shows 7 days with today centred instead of clipping, and episode rows are two dense lines with sticky day headers. Show detail opens full-screen with a short backdrop band, Search missing + icon buttons for refresh/organise/monitor/more (Fix match lives in more), sticky Episodes/Files/Settings tabs and the whole page scrolls. Calendar is a tappable month grid with the day's episodes underneath, Library shows 3 posters across, Add Show is full-screen. Short desktop windows get a smaller show banner. Desktop layout is unchanged.
 
 ## [v0.1.85] - 2026-10-15
