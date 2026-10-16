@@ -40,7 +40,7 @@ function SeasonBlock({ section, expanded, filter, columns, grabTarget, onToggleC
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className={`flex min-w-0 flex-1 items-center gap-2.5 text-left rounded-md ${focusRing}`}
+          className={`flex min-w-0 flex-1 items-center gap-2.5 text-left rounded-md pointer-coarse:min-h-10 ${focusRing}`}
           aria-expanded={expanded}
         >
           <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`} />

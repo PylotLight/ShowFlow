@@ -1,5 +1,5 @@
 import { Check, CircleAlert, DownloadIcon, Loader2Icon, RefreshCw, MousePointerClick, SearchIcon, Info, Clock } from "lucide-react";
-import { touchHit } from "@frontend/components/ui/pill";
+import { touchHit, touchHitRound } from "@frontend/components/ui/pill";
 import * as React from "react";
 import { createPortal } from "react-dom";
 
@@ -374,7 +374,7 @@ function EpisodeRow({
         type="button"
         onClick={() => onToggleTracked(!episode.tracked)}
         aria-label={episode.tracked ? "Mark untracked" : "Mark tracked"}
-        className={`${touchHit} pointer-coarse:after:-inset-2.5 size-5 rounded-full border-2 transition-all grid place-items-center ${
+        className={`${touchHitRound} size-5 rounded-full border-2 transition-all grid place-items-center ${
           available
             ? "border-signal bg-signal text-[#051208]"
             : episode.tracked

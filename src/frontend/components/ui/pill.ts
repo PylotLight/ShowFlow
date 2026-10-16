@@ -40,6 +40,10 @@ export const pillButtonDanger = `${pillBase} bg-white/[0.04] text-red-400 hover:
 export const touchHit =
   "relative pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2 pointer-coarse:after:-inset-x-1 pointer-coarse:after:content-['']";
 
+/** touchHit for a lone small control (e.g. a 20px toggle): a full 40px square. */
+export const touchHitRound =
+  "relative pointer-coarse:after:absolute pointer-coarse:after:-inset-2.5 pointer-coarse:after:content-['']";
+
 /** Round icon-only button matching the pills (36px, 40px on touch). */
 export const pillIconButton =
   "flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.05] text-muted-foreground transition-colors hover:bg-white/[0.09] hover:text-foreground active:bg-white/[0.12] disabled:opacity-60 pointer-coarse:size-10 " +
