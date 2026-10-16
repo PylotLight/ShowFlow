@@ -1,5 +1,5 @@
 import {
-  CheckIcon, Scan, Activity, ChevronRight, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Menu, SearchIcon,
+  CheckIcon, Scan, Activity, ChevronRight, ChevronDown, ChevronUp, RotateCcw, RefreshCw, Menu, MoreVertical, SearchIcon,
 } from "lucide-react";
 import * as React from "react";
 
@@ -17,6 +17,8 @@ import { expectedReleaseTime } from "@frontend/lib/airtime";
 import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
 import { ReleaseSearchDialog } from "@frontend/components/showflow/ReleaseSearchDialog";
+import { CompactEpisodeRow } from "@frontend/components/showflow/CompactEpisodeRow";
+import { useCompact } from "@frontend/lib/useCompact";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -169,9 +171,10 @@ function ActionsMenu({ syncingAll, syncProgress, onScan, onRescan, onUpgrades, o
     <div ref={ref} className="relative">
       <button aria-label="More actions"
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
+        className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all max-md:size-9 max-md:rounded-lg max-md:border-transparent max-md:bg-transparent max-md:text-muted-foreground"
       >
-        <Menu className="size-4" />
+        <Menu className="size-4 max-md:hidden" />
+        <MoreVertical className="size-[18px] md:hidden" />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-white/10 bg-[#181c2e] shadow-xl shadow-black/40 py-1.5 z-50 animate-fade-in [&>*]:px-3 [&>*]:py-2 [&>*]:text-xs [&>*]:font-medium [&>*]:text-white/80 [&>*]:flex [&>*]:items-center [&>*]:gap-2.5 [&>*]:w-full [&>*]:transition-colors">
@@ -264,6 +267,9 @@ function Dashboard({
   const [searchTarget, setSearchTarget] = React.useState<{
     showId: string; showTitle: string; season: number; episode: number;
   } | null>(null);
+  // Phone / mini-window layout: flat full-bleed agenda, 7-day strip,
+  // two-line episode rows (see CompactEpisodeRow).
+  const compact = useCompact();
 
   const POLL_INTERVAL = 30_000;
 
@@ -396,12 +402,13 @@ function Dashboard({
 
   const calendarDays = React.useMemo(() => {
     const today = new Date();
-    return Array.from({ length: 11 }, (_, i) => {
+    // Compact: one week centred on today so all seven days fit the width.
+    return Array.from({ length: compact ? 7 : 11 }, (_, i) => {
       const date = new Date(today);
       date.setDate(today.getDate() + i - 3 + stripOffset);
       return date;
     });
-  }, [stripOffset]);
+  }, [stripOffset, compact]);
 
   // Month(s) spanned by the visible strip window, e.g. "September" or "Sep – Oct".
   const stripMonths = React.useMemo(() => {
@@ -428,9 +435,9 @@ function Dashboard({
   }, [datedUpcoming]);
 
   return (
-    <div className="h-full flex flex-col gap-6">
+    <div className="h-full flex flex-col gap-3 md:gap-6">
       <HeaderActions>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-1 md:gap-3">
           <ActionsMenu
             syncingAll={syncingAll}
             syncProgress={syncProgress}
@@ -460,7 +467,7 @@ function Dashboard({
               }
             }}
           />
-          <AddShowDialog onAdded={onAddShow} />
+          <AddShowDialog compactTrigger onAdded={onAddShow} />
         </div>
       </HeaderActions>
       {processingFiles.length > 0 && (
@@ -484,13 +491,61 @@ function Dashboard({
         onOpenShow={(id) => { const s = shows?.find((x) => x.id === id); if (s) onSelectShow(s); }}
       />
 
-      <div className="flex flex-row gap-6 flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-row gap-6 flex-1 min-h-0 overflow-hidden max-md:-mx-3">
 
         {/* Primary Agenda — the old "Live Events" side panel duplicated the
             notification bell's activity log 1:1, so it's gone; that panel
             now has the full width to itself. */}
-        <GlassPanel className="flex flex-col overflow-hidden flex-1">
+        <GlassPanel className="flex flex-col overflow-hidden flex-1 max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:shadow-none max-md:backdrop-blur-none">
           {/* Header */}
+          {compact ? (
+            <div className="flex items-center gap-2 px-3 pt-1 pb-2">
+              <div className="min-w-0 flex-1">
+                <h2 className="font-display text-lg font-bold leading-tight text-white">Upcoming</h2>
+                {datedUpcoming && (
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    <span className="text-white/85 font-semibold">{datedUpcoming.length}</span> ep{datedUpcoming.length !== 1 && "s"}
+                    <span className="text-white/25 mx-1">·</span>
+                    <span className="text-white/85 font-semibold">{uniqueShowsCount}</span> series
+                    {stripMonths && (
+                      <>
+                        <span className="text-white/25 mx-1">·</span>
+                        {stripMonths}
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center rounded-full border border-white/10 bg-white/[0.03] p-0.5">
+                <button
+                  type="button"
+                  aria-label="Previous week"
+                  onClick={() => setStripOffset((o) => o - 7)}
+                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08]"
+                >
+                  <ChevronRight className="size-4 rotate-180" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setStripOffset(0); setSelectedDay(null); }}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    stripOffset === 0 && !selectedDay ? "text-signal" : "text-white/70 hover:text-signal",
+                  )}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next week"
+                  onClick={() => setStripOffset((o) => o + 7)}
+                  className="flex size-7 items-center justify-center rounded-full text-white/65 hover:text-white active:bg-white/[0.08]"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="border-b border-white/5 px-5 py-3">
             <div className="flex items-center justify-between">
               <div>
@@ -515,10 +570,11 @@ function Dashboard({
               )}
             </div>
           </div>
+          )}
 
           {/* Recently Released — oldest first, latest at the bottom;
               collapsed by default */}
-          {storyGroups.history.length > 0 && (
+          {!compact && storyGroups.history.length > 0 && (
             <div className="border-b border-white/5 px-5 py-1">
               <button
                 onClick={() => setExpandHistory(!expandHistory)}
@@ -630,6 +686,53 @@ function Dashboard({
           )}
 
           {/* Compact Calendar Strip */}
+          {compact ? (
+            <div className="grid grid-cols-7 gap-1 border-b border-white/5 px-2 pb-2">
+              {calendarDays.map((date) => {
+                const dateStr = getDateKeyFor(date);
+                const count = episodesByDate.get(dateStr)?.length ?? 0;
+                const isToday = dateStr === todayKey;
+                const isSelected = selectedDay === dateStr;
+                const fullLabel = date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+                return (
+                  <button
+                    key={dateStr}
+                    type="button"
+                    aria-label={`${fullLabel}, ${count} episodes`}
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedDay(isSelected ? null : dateStr)}
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 rounded-xl py-1.5 transition-colors",
+                      isSelected
+                        ? "bg-signal text-signal-foreground"
+                        : isToday
+                          ? "bg-signal/12 ring-1 ring-signal/40"
+                          : "active:bg-white/[0.06]",
+                    )}
+                  >
+                    <span className={cn(
+                      "font-mono text-[10px] font-semibold uppercase tracking-wider",
+                      isSelected ? "text-signal-foreground/80" : isToday ? "text-signal" : "text-white/50",
+                    )}>
+                      {date.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 3)}
+                    </span>
+                    <span className={cn(
+                      "font-display text-base font-bold leading-none",
+                      isSelected ? "text-signal-foreground" : isToday ? "text-signal" : count > 0 ? "text-white" : "text-white/45",
+                    )}>
+                      {date.getDate()}
+                    </span>
+                    <span className={cn(
+                      "h-3.5 font-mono text-[10px] font-bold leading-none",
+                      isSelected ? "text-signal-foreground" : "text-signal",
+                    )}>
+                      {count > 0 ? count : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
           <div className="border-b border-white/5 px-5 py-2.5 flex items-center gap-2">
             <div className="flex items-center gap-1 shrink-0">
               <button
@@ -710,8 +813,10 @@ function Dashboard({
             </div>
           </div>
 
+          )}
+
           {/* Dense Episode List */}
-          <div className="flex-1 overflow-y-auto px-5 py-3">
+          <div className="flex-1 overflow-y-auto px-5 py-3 max-md:px-2 max-md:py-2">
             {datedUpcoming === null ? (
               <DashboardSkeleton />
             ) : datedUpcoming.length === 0 ? (
@@ -719,6 +824,97 @@ function Dashboard({
                 <p className="text-xs font-mono">NO EPISODES IN THE LAST 3 DAYS OR NEXT 7 DAYS.</p>
                 <p className="font-sans text-sm normal-case">Track a show to see its episodes here.</p>
                 <AddShowDialog onAdded={onAddShow} />
+              </div>
+            ) : compact ? (
+              <div className="space-y-3">
+                {/* Recently released: collapsed by default, sits at the top of
+                    the scrolling list so it never eats fixed header space. */}
+                {!selectedDay && storyGroups.history.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setExpandHistory(!expandHistory)}
+                      className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-left font-mono text-[11px] font-bold uppercase tracking-wider text-white/60 active:bg-white/[0.04]"
+                    >
+                      {expandHistory ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                      Recently released
+                      <span className="ml-auto font-normal normal-case text-white/45">
+                        {storyGroups.history.reduce((n, g) => n + g.items.length, 0)} eps
+                      </span>
+                    </button>
+                    {expandHistory && storyGroups.history.map((group) => (
+                      <div key={group.dateKey}>
+                        <h4 className="px-1.5 pt-2 pb-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white/45">{group.label}</h4>
+                        {group.items.map((ep, i) => {
+                          const showObj = getMatchingShow(ep.showTitle);
+                          return (
+                            <CompactEpisodeRow
+                              key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}
+                              showId={showObj?.id}
+                              showTitle={ep.showTitle}
+                              season={ep.season}
+                              episode={ep.episode}
+                              state={ep.filePath ? "available" : "awaiting"}
+                              timeLabel={formatAirTime(ep.airDate)}
+                              media={ep.file?.media}
+                              dim
+                              onClick={() => { if (showObj) onSelectShow(showObj); }}
+                              onBrowse={!ep.filePath && showObj ? () => setSearchTarget({ showId: showObj.id, showTitle: ep.showTitle, season: ep.season, episode: ep.episode }) : undefined}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {visibleGroups.map((group) => {
+                  const isToday = group.dateKey === todayKey;
+                  const nowLineIdx = isToday ? group.items.findIndex((ep) => !isPast(whenBasis(ep))) : -1;
+                  return (
+                    <section key={group.dateKey} className="animate-fade-in">
+                      <h3 className={cn(
+                        "sticky top-0 z-[1] -mx-2 mb-0.5 flex items-center gap-1.5 px-3.5 py-1.5 font-mono text-[11px] font-bold uppercase tracking-wider backdrop-blur-md bg-background/80",
+                        isToday ? "text-signal" : "text-white/60",
+                      )}>
+                        {isToday && <span className="inline-block size-1.5 rounded-full bg-signal animate-pulse" />}
+                        {group.label}
+                        <span className="ml-auto font-normal normal-case text-white/45">
+                          {group.items.length} ep{group.items.length !== 1 ? "s" : ""}
+                        </span>
+                      </h3>
+                      {group.items.map((ep, i) => {
+                        const showObj = getMatchingShow(ep.showTitle);
+                        const state = acquisition(ep);
+                        return (
+                          <React.Fragment key={`${ep.showTitle}-${ep.season}-${ep.episode}-${i}`}>
+                            {nowLineIdx > 0 && i === nowLineIdx && (
+                              <div className="flex items-center gap-2 px-1.5 py-1" aria-label="Now">
+                                <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-signal">Now · {formatNowTime()}</span>
+                                <span className="h-px flex-1 bg-signal/40" />
+                              </div>
+                            )}
+                            <CompactEpisodeRow
+                              showId={showObj?.id}
+                              showTitle={ep.showTitle}
+                              season={ep.season}
+                              episode={ep.episode}
+                              state={state}
+                              timeLabel={clockLabel(ep) ?? formatAirTime(ep.airDate)}
+                              media={ep.file?.media}
+                              onClick={() => { if (showObj) onSelectShow(showObj); }}
+                              onBrowse={state === "awaiting" && showObj ? () => setSearchTarget({ showId: showObj.id, showTitle: ep.showTitle, season: ep.season, episode: ep.episode }) : undefined}
+                            />
+                          </React.Fragment>
+                        );
+                      })}
+                    </section>
+                  );
+                })}
+                {selectedDay && visibleGroups.length === 0 && (
+                  <div className="py-10 text-center">
+                    <p className="font-mono text-xs text-muted-foreground">No episodes on {new Date(selectedDay + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}.</p>
+                    <button onClick={() => setSelectedDay(null)} className="mt-2 font-mono text-[11px] font-bold uppercase tracking-wider text-signal">Clear filter</button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -883,7 +1079,7 @@ function Dashboard({
           </div>
 
           {/* Calendar View Footer */}
-          {datedUpcoming && datedUpcoming.length > 0 && (
+          {datedUpcoming && datedUpcoming.length > 0 && !compact && (
             <div className="border-t border-white/5 px-5 py-2.5">
               <button
                 onClick={onShowCalendar}

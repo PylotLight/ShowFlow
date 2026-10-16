@@ -10,6 +10,8 @@ import { formatAirtime, expectedReleaseTime } from "@frontend/lib/airtime";
 import { cn } from "@frontend/lib/utils";
 import type { EpisodeFileInfo } from "@frontend/components/showflow/EpisodeRow";
 import { MediaBadges } from "@frontend/components/showflow/MediaBadges";
+import { CompactEpisodeRow } from "@frontend/components/showflow/CompactEpisodeRow";
+import { useCompact } from "@frontend/lib/useCompact";
 
 interface UpcomingEpisode {
   showTitle: string;
@@ -41,6 +43,10 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
   const [expandedDay, setExpandedDay] = React.useState<string | null>(null);
   const [loadedRange, setLoadedRange] = React.useState<{ past: number; future: number }>({ past: 0, future: 0 });
   const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Phone / mini window: month grid of tappable day cells + the selected
+  // day's episode list underneath (no hover popovers on touch).
+  const compact = useCompact();
+  const [selectedDay, setSelectedDay] = React.useState<string>(() => new Date().toISOString().slice(0, 10));
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -189,8 +195,18 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
   }
 
   function goMonth(delta: number) {
-    setCursor(new Date(year, month + delta, 1));
+    const next = new Date(year, month + delta, 1);
+    setCursor(next);
     setExpandedDay(null);
+    // Keep the compact day list on the month being viewed.
+    const nowD = new Date();
+    const sameMonth = next.getFullYear() === nowD.getFullYear() && next.getMonth() === nowD.getMonth();
+    setSelectedDay(sameMonth ? nowD.toISOString().slice(0, 10) : `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`);
+  }
+
+  function goToday() {
+    setCursor(new Date());
+    setSelectedDay(new Date().toISOString().slice(0, 10));
   }
 
   function handleMouseEnter(dateStr: string) {
@@ -217,6 +233,104 @@ function CalendarView({ onSelectShow }: { onSelectShow: (show: ShowSummary) => v
 
   const totalEpisodes = [...monthEpisodes.values()].reduce((sum, eps) => sum + eps.length, 0);
   const totalSeries = new Set([...monthEpisodes.values()].flat().map(e => e.showTitle)).size;
+
+  if (compact) {
+    const dayEps = [...(monthEpisodes.get(selectedDay) ?? [])].sort(
+      (a, b) => new Date(a.airDate ?? "").getTime() - new Date(b.airDate ?? "").getTime(),
+    );
+    const selDate = new Date(`${selectedDay}T12:00:00`);
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1">
+          <button aria-label="Previous month" onClick={() => goMonth(-1)} className="flex size-8 items-center justify-center rounded-full text-muted-foreground active:bg-white/[0.08] hover:text-white">
+            <ChevronLeft className="size-4" />
+          </button>
+          <div className="min-w-0 flex-1 text-center">
+            <h2 className="font-display text-lg font-bold leading-tight text-white">
+              {cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+            </h2>
+            <p className="font-mono text-[11px] text-muted-foreground">
+              <span className="font-semibold text-white/85">{totalEpisodes}</span> eps
+              <span className="mx-1 text-white/25">·</span>
+              <span className="font-semibold text-white/85">{totalSeries}</span> series
+            </p>
+          </div>
+          <button aria-label="Next month" onClick={() => goMonth(1)} className="flex size-8 items-center justify-center rounded-full text-muted-foreground active:bg-white/[0.08] hover:text-white">
+            <ChevronRight className="size-4" />
+          </button>
+          <button onClick={goToday} className="ml-1 rounded-full border border-signal/10 bg-signal/15 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-signal">
+            Today
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-y-0.5">
+          {dayNames.map((d) => (
+            <div key={d} className="py-1 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              {d.slice(0, 2)}
+            </div>
+          ))}
+          {grid.flat().map((day, i) => {
+            if (day === null) return <div key={`e-${i}`} />;
+            const dateStr = `${monthKey}-${String(day).padStart(2, "0")}`;
+            const count = monthEpisodes.get(dateStr)?.length ?? 0;
+            const isToday = dateStr === todayStr;
+            const isSel = dateStr === selectedDay;
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                onClick={() => setSelectedDay(dateStr)}
+                aria-pressed={isSel}
+                aria-label={`${new Date(`${dateStr}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}, ${count} episodes`}
+                className="flex flex-col items-center gap-0.5 py-1"
+              >
+                <span className={cn(
+                  "flex size-8 items-center justify-center rounded-full font-mono text-sm font-bold transition-colors",
+                  isSel ? "bg-signal text-signal-foreground" : isToday ? "text-signal ring-1 ring-signal/50" : dateStr < todayStr ? "text-white/50" : "text-white/85",
+                )}>
+                  {day}
+                </span>
+                <span className="flex h-1.5 items-center gap-0.5" aria-hidden>
+                  {Array.from({ length: Math.min(count, 3) }, (_, k) => (
+                    <span key={k} className={cn("size-1 rounded-full", isSel ? "bg-signal" : "bg-signal/70")} />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <section className="-mx-3 border-t border-white/5 px-2 pt-2">
+          <h3 className="flex items-center px-1.5 pb-1 font-mono text-[11px] font-bold uppercase tracking-wider text-white/70">
+            {selDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+            <span className="ml-auto font-normal normal-case text-white/45">{dayEps.length} ep{dayEps.length !== 1 ? "s" : ""}</span>
+          </h3>
+          {dayEps.length === 0 ? (
+            <p className="py-8 text-center font-mono text-xs text-muted-foreground">Nothing airing this day.</p>
+          ) : (
+            dayEps.map((ep) => {
+              const showObj = getMatchingShow(ep.showId);
+              const aired = !!ep.airDate && new Date(ep.airDate).getTime() <= Date.now();
+              return (
+                <CompactEpisodeRow
+                  key={key(ep)}
+                  showId={showObj?.id ?? ep.showId}
+                  showTitle={ep.showTitle}
+                  season={ep.season}
+                  episode={ep.episode}
+                  episodeTitle={ep.episodeTitle}
+                  state={ep.filePath ? "available" : aired ? "awaiting" : "scheduled"}
+                  timeLabel={clockLabel(ep)}
+                  media={ep.file?.media}
+                  onClick={() => { if (showObj) onSelectShow(showObj); }}
+                />
+              );
+            })
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col gap-4">

@@ -37,6 +37,14 @@ body::before {
   }
 }
 
+/* Short desktop-width windows (e.g. a resized mini window): the show hero
+   banner would otherwise eat most of the viewport before any episodes. */
+@media (min-width: 768px) and (max-height: 720px) {
+  .show-hero-banner {
+    height: 360px;
+  }
+}
+
 @supports (height: 100dvh) {
   .app-shell-height {
     height: 100dvh;

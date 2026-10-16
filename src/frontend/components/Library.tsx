@@ -1,5 +1,6 @@
 import { Check, Loader2, Trash2, ArrowUpDown, Eye, EyeOff, ListFilter, Settings2 } from "lucide-react";
 import * as React from "react";
+import { useCompact } from "@frontend/lib/useCompact";
 
 import type { LibraryFilter } from "@frontend/components/showflow/FilterRail";
 import { PosterCard, type ShowSummary } from "@frontend/components/showflow/PosterCard";
@@ -44,6 +45,7 @@ export function Library({
   const [shows, setShows] = React.useState<ShowSummary[] | null>(null);
   const [filter, setFilter] = React.useState<LibraryFilter>({ providerType: null, profile: null });
   const [posterSize, setPosterSize] = React.useState(loadPosterSize);
+  const compact = useCompact();
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [removing, setRemoving] = React.useState(false);
@@ -382,8 +384,10 @@ export function Library({
                 </div>
               ) : (
               <div
-                className="grid gap-5"
-                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` }}
+                className="grid gap-5 max-md:gap-x-2.5 max-md:gap-y-3"
+                // Phones: the saved desktop poster size (default 300px) would
+                // give a single giant column, so cap it to a 3-up grid.
+                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${compact ? Math.min(posterSize, 108) : posterSize}px, 1fr))` }}
               >
                 {filtered.map((show) => (
                   <div key={show.id} className="relative group" onMouseEnter={() => handleShowHover(show)}>

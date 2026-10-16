@@ -120,12 +120,14 @@ function sortResults(results: SearchResult[], mode: SortMode): SearchResult[] {
   }
 }
 
-function AddShowDialog({ onAdded, open: openProp, onOpenChange, hideTrigger }: {
+function AddShowDialog({ onAdded, open: openProp, onOpenChange, hideTrigger, compactTrigger }: {
   onAdded: () => void;
   /** Controlled open state (command palette opens it without the trigger). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   hideTrigger?: boolean;
+  /** Icon-only round trigger on phone widths (top-bar placement). */
+  compactTrigger?: boolean;
 }) {
   const [localOpen, setLocalOpen] = React.useState(false);
   const open = openProp ?? localOpen;
@@ -345,12 +347,17 @@ function AddShowDialog({ onAdded, open: openProp, onOpenChange, hideTrigger }: {
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setSelectedItems(new Map()); setProcessing({ status: "idle", results: [] }); }}}>
       {!hideTrigger && (
         <DialogTrigger asChild>
-          <Button variant="default" size="sm">
-            <PlusIcon /> Add Show
+          <Button
+            variant="default"
+            size="sm"
+            aria-label="Add Show"
+            className={compactTrigger ? "max-md:size-8 max-md:rounded-full max-md:px-0" : undefined}
+          >
+            <PlusIcon /> <span className={compactTrigger ? "max-md:sr-only" : undefined}>Add Show</span>
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6">
+      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6 max-md:h-dvh max-md:gap-3 max-md:rounded-none max-md:border-0 max-md:p-4">
         <DialogHeader>
           <DialogTitle>Add shows</DialogTitle>
           <DialogDescription>Search a provider, preview shows, select the ones you want, then add them all at once.</DialogDescription>
