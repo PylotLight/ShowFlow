@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.87] - 2026-10-16
 - **Tidier episode rows**: the "why?" text is gone. Each row has one status icon (info when it's on disk, a clock when it hasn't aired, amber when it aired but is missing); tap it for file/release details or why it hasn't been grabbed, as a bottom sheet on small screens and a popover on desktop. TBA titles are greyed, the duplicate status dot is hidden on small screens, and unaired episodes say UPCOMING instead of MISSING.
 - **Compact buttons**: on small screens pills are normal-case and smaller, and button groups collapse into one row with a ⋮ menu. The Files tab is now "files · size · Organise · ⋮" with Rename folder, Dedupe and Rescan in the menu, and file rows fit badges, size and date on one line.
 - **Phones**: landscape phones now get the compact layout instead of desktop, the bottom bar, sheets and Add Show respect safe areas (notches/gesture bar), search fields no longer make iOS zoom, small icons get 40px tap targets, and hover-only buttons show on touch.
