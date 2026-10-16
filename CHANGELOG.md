@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Tidier episode rows**: the "why?" text is gone. Each row has one status icon (info when it's on disk, a clock when it hasn't aired, amber when it aired but is missing); tap it for file/release details or why it hasn't been grabbed, as a bottom sheet on small screens and a popover on desktop. TBA titles are greyed, the duplicate status dot is hidden on small screens, and unaired episodes say UPCOMING instead of MISSING.
+- **Compact buttons**: on small screens pills are normal-case and smaller, and button groups collapse into one row with a ⋮ menu. The Files tab is now "files · size · Organise · ⋮" with Rename folder, Dedupe and Rescan in the menu, and file rows fit badges, size and date on one line.
+- **Phones**: landscape phones now get the compact layout instead of desktop, the bottom bar, sheets and Add Show respect safe areas (notches/gesture bar), search fields no longer make iOS zoom, small icons get 40px tap targets, and hover-only buttons show on touch.
 
 ## [v0.1.86] - 2026-10-16
 - **Compact layout for phones and mini windows**: under 768px wide ShowFlow now gets a proper mobile layout. One top bar (no double hamburger, Add Show is a round + next to a ⋮ menu), the Upcoming week strip shows 7 days with today centred instead of clipping, and episode rows are two dense lines with sticky day headers. Show detail opens full-screen with a short backdrop band, Search missing + icon buttons for refresh/organise/monitor/more (Fix match lives in more), sticky Episodes/Files/Settings tabs and the whole page scrolls. Calendar is a tappable month grid with the day's episodes underneath, Library shows 3 posters across, Add Show is full-screen. Short desktop windows get a smaller show banner. Desktop layout is unchanged.
