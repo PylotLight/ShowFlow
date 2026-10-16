@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Compact layout for phones and mini windows**: under 768px wide ShowFlow now gets a proper mobile layout. One top bar (no double hamburger, Add Show is a round + next to a ⋮ menu), the Upcoming week strip shows 7 days with today centred instead of clipping, and episode rows are two dense lines with sticky day headers. Show detail opens full-screen with a short backdrop band, Search missing + icon buttons for refresh/organise/monitor/more (Fix match lives in more), sticky Episodes/Files/Settings tabs and the whole page scrolls. Calendar is a tappable month grid with the day's episodes underneath, Library shows 3 posters across, Add Show is full-screen. Short desktop windows get a smaller show banner. Desktop layout is unchanged.
 
 ## [v0.1.85] - 2026-10-15
 - **Release groups are yours now**: the hardcoded group chips (SubsPlease, Erai-raws, Judas etc) are gone. Each profile has a Release groups row where you type any group or pick from "seen in your library" (groups from your own grabs + files, most common first), each with the usual Prefer / Strong prefer / Avoid / Strong avoid / Must have / Never. Matches the actual group only: leading `[Group]` or trailing `-GROUP`, case-insensitive, so `-x265`/`-DL`/`- 01` don't count. Profiles using the old chips convert on boot with the same mode and weight. The test box shows the parsed group and whether it hit. Anime preset no longer has a group bias.
