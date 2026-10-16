@@ -6,34 +6,12 @@ import {
 import * as React from "react";
 
 import { Switch } from "@frontend/components/ui/switch";
+import { ActionMenuEntry } from "@frontend/components/ui/action-row";
 import { useCompact } from "@frontend/lib/useCompact";
 
-import { focusRing, pillButton } from "./format";
+import { pillButton, pillButtonPrimary, pillIconButton } from "./format";
 
-const menuItem =
-  "flex w-full cursor-pointer select-none items-start gap-2.5 rounded-md px-2 py-2 text-left outline-none data-[highlighted]:bg-white/[0.06]";
-
-function MenuEntry({ icon, label, hint, onSelect, danger, trailing }: {
-  icon: React.ReactNode;
-  label: string;
-  hint: string;
-  onSelect: () => void;
-  danger?: boolean;
-  trailing?: React.ReactNode;
-}) {
-  return (
-    <DropdownMenu.Item className={`${menuItem} ${danger ? "data-[highlighted]:bg-red-400/10" : ""}`} onSelect={onSelect}>
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className={`flex items-center gap-2 text-sm ${danger ? "text-red-400" : "text-foreground/90"}`}>
-          {label}
-          {trailing}
-        </span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </DropdownMenu.Item>
-  );
-}
+const MenuEntry = ActionMenuEntry;
 
 function mappingDot(health: string) {
   const color = health === "ok" ? "bg-emerald-400" : health === "conflicts" ? "bg-amber-400" : health === "error" ? "bg-red-400" : "bg-slate-500";
@@ -74,6 +52,7 @@ export function ShowActionBar(props: {
           <DropdownMenu.Content
             align={compact ? "end" : "start"}
             sideOffset={6}
+            collisionPadding={8}
             className="z-50 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg border border-white/10 bg-[#15181f] p-1.5 shadow-xl"
           >
             {compact && (
@@ -105,7 +84,7 @@ export function ShowActionBar(props: {
     // Phone / mini window: one row — primary action stretches, the rest
     // are icon buttons, Fix match moves into the More menu and the monitor
     // switch becomes a bell toggle.
-    const iconBtn = `flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.05] text-muted-foreground hover:bg-white/[0.09] hover:text-foreground active:bg-white/[0.12] transition-colors disabled:opacity-60 ${focusRing}`;
+    const iconBtn = pillIconButton;
     return (
       <div className="flex items-center gap-1.5">
         {!props.isMovie ? (
@@ -114,7 +93,7 @@ export function ShowActionBar(props: {
             onClick={props.onSearchMissing}
             disabled={props.searchingMissing}
             title="Auto-grab every monitored, aired episode that isn't on disk yet"
-            className={`flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full bg-signal/15 px-3 font-mono text-caption uppercase tracking-wider text-signal transition-colors hover:bg-signal/25 active:bg-signal/30 disabled:opacity-60 ${focusRing}`}
+            className={`${pillButtonPrimary} min-w-0 flex-1 justify-center`}
           >
             {props.searchingMissing ? <Loader2Icon className="size-3.5 shrink-0 animate-spin" /> : <SearchIcon className="size-3.5 shrink-0" />}
             <span className="truncate">Search missing</span>
@@ -123,7 +102,7 @@ export function ShowActionBar(props: {
             )}
           </button>
         ) : (
-          <button type="button" onClick={props.onFixMatch} className={`${pillButton} h-9 flex-1 justify-center`}>
+          <button type="button" onClick={props.onFixMatch} className={`${pillButton} flex-1 justify-center`}>
             <Link2 className="size-3.5" /> Fix match
           </button>
         )}
@@ -166,7 +145,7 @@ export function ShowActionBar(props: {
           onClick={props.onSearchMissing}
           disabled={props.searchingMissing}
           title="Auto-grab every monitored, aired episode that isn't on disk yet"
-          className={`flex items-center gap-1.5 rounded-full bg-signal/15 hover:bg-signal/25 text-signal px-3 py-1.5 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-60 ${focusRing}`}
+          className={pillButtonPrimary}
         >
           {props.searchingMissing ? <Loader2Icon className="size-3.5 animate-spin" /> : <SearchIcon className="size-3.5" />}
           Search missing

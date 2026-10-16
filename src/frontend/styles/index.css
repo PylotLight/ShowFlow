@@ -31,9 +31,22 @@ body::before {
   }
 }
 
-@media (max-width: 767px) {
+/* Same switch as the md / max-md variants (globals.css): narrow, or a short
+   touch screen such as a phone in landscape. */
+@media (max-width: 767.98px), (pointer: coarse) and (max-height: 31.2rem) {
   .pb-mobile-nav {
     padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Touch screens: iOS Safari (and some Android browsers) zoom the page when a
+   focused field's text is under 16px. Unlayered, so it beats the text-xs /
+   text-sm utilities on inputs without touching desktop mice. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
   }
 }
 
@@ -49,6 +62,17 @@ body::before {
   .app-shell-height {
     height: 100dvh;
   }
+}
+
+/* Notch / rounded-corner insets (viewport-fit=cover): the shell keeps its
+   content out from under the status bar in standalone mode and the side
+   notch in landscape. Fixed bars and sheets pad their own sides with
+   pl-/pr-[env(safe-area-inset-*)] utilities (an unlayered class here would
+   beat their p-* utilities). */
+.safe-shell {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 @supports (padding-bottom: env(safe-area-inset-bottom)) {

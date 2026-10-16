@@ -122,14 +122,15 @@ export function HistoryPage() {
   return (
     <div className="h-full flex flex-col gap-6">
       <HeaderActions>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1">
+        {/* Phones: its own full-width row under the title (data-header-row). */}
+        <div data-header-row className="flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto">
+          <div className="flex shrink-0 items-center gap-1">
             {KIND_TABS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setKind(t.id)}
                 className={cn(
-                  "rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-all",
+                  "rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-all pointer-coarse:py-2 max-md:px-2",
                   kind === t.id
                     ? "bg-signal/15 text-signal font-semibold"
                     : "text-muted-foreground hover:text-foreground bg-white/[0.03] hover:bg-white/[0.06]",
@@ -139,19 +140,19 @@ export function HistoryPage() {
               </button>
             ))}
           </div>
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 md:flex-none">
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
             <input
               placeholder="Filter history..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="h-8 w-44 sm:w-56 rounded-md bg-white/5 border border-white/5 pl-8 pr-2 text-xs placeholder:text-muted-foreground/80 focus:border-signal/50 focus:outline-none focus:ring-1 focus:ring-signal/30"
+              className="h-8 w-full md:w-56 rounded-md bg-white/5 border border-white/5 pl-8 pr-2 text-xs placeholder:text-muted-foreground/80 focus:border-signal/50 focus:outline-none focus:ring-1 focus:ring-signal/30"
             />
           </div>
           <button aria-label="Refresh history"
             onClick={() => { setLoading(true); refresh(); }}
             title="Refresh history"
-            className="flex items-center justify-center size-8 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
+            className="flex shrink-0 items-center justify-center size-8 pointer-coarse:size-10 rounded-md border border-white/5 bg-white/[0.02] text-white/70 hover:text-white hover:bg-white/[0.06] transition-all"
           >
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </button>

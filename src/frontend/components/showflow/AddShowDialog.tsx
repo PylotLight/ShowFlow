@@ -357,7 +357,7 @@ function AddShowDialog({ onAdded, open: openProp, onOpenChange, hideTrigger, com
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6 max-md:h-dvh max-md:gap-3 max-md:rounded-none max-md:border-0 max-md:p-4">
+      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-4 p-6 max-md:h-dvh max-md:gap-3 max-md:rounded-none max-md:border-0 max-md:p-4 max-md:pt-[max(1rem,env(safe-area-inset-top))] max-md:pb-[max(1rem,env(safe-area-inset-bottom))]">
         <DialogHeader>
           <DialogTitle>Add shows</DialogTitle>
           <DialogDescription>Search a provider, preview shows, select the ones you want, then add them all at once.</DialogDescription>

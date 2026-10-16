@@ -40,11 +40,5 @@ export function seasonLabel(n: number): string {
   return n === 0 ? "Specials" : `Season ${n}`;
 }
 
-/** Shared focus ring for the bare (non-<Button>) buttons in this folder. */
-export const focusRing =
-  "outline-none focus-visible:ring-2 focus-visible:ring-signal/70 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent";
-
-/** Small pill button used in the action bar, season rows and panels. */
-export const pillButton =
-  "flex items-center gap-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-muted-foreground hover:text-foreground px-3 py-1.5 font-mono text-caption uppercase tracking-wider transition-colors disabled:opacity-60 " +
-  focusRing;
+// Pill / focus styles live in components/ui/pill so every page shares them.
+export { focusRing, pillButton, pillButtonDanger, pillButtonPrimary, pillIconButton } from "@frontend/components/ui/pill";

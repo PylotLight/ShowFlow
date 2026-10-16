@@ -3,6 +3,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* The compact (phone) layout is "narrow OR a short touch screen", so a phone
+   turned to landscape (e.g. 915x412) keeps the phone UI instead of getting the
+   desktop sidebar with a viewport-filling hero. Keep in sync with
+   COMPACT_QUERY in lib/useCompact.ts and the raw media queries in index.css. */
+@custom-variant md {
+  @media (min-width: 48rem) and (not ((pointer: coarse) and (max-height: 31.2rem))) {
+    @slot;
+  }
+}
+@custom-variant max-md {
+  @media not ((min-width: 48rem) and (not ((pointer: coarse) and (max-height: 31.2rem)))) {
+    @slot;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

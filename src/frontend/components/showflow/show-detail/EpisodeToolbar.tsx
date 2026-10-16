@@ -37,7 +37,7 @@ export function EpisodeToolbar({ available, total, filter, onFilter, columns, on
               role="radio"
               aria-checked={filter === f}
               onClick={() => onFilter(f)}
-              className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wider transition-all ${focusRing} ${
+              className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wider transition-all pointer-coarse:px-3 pointer-coarse:py-2 ${focusRing} ${
                 filter === f ? "bg-signal/15 text-signal font-semibold" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -47,7 +47,7 @@ export function EpisodeToolbar({ available, total, filter, onFilter, columns, on
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button type="button" aria-label="Column settings" className={`rounded-md p-1.5 text-muted-foreground hover:text-foreground transition-colors ${focusRing}`}>
+            <button type="button" aria-label="Column settings" className={`rounded-md p-1.5 text-muted-foreground hover:text-foreground transition-colors pointer-coarse:p-2.5 ${focusRing}`}>
               <Columns2 className="size-4" />
             </button>
           </DropdownMenu.Trigger>
