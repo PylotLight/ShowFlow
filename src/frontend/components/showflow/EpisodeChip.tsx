@@ -20,11 +20,14 @@ function EpisodeChip({
   episode,
   state = "none",
   className,
+  dotClassName,
 }: {
   season: number;
   episode: number;
   state?: EpisodeChipState;
   className?: string;
+  /** Extra classes for the tally dot (e.g. hide it where another control already shows the state). */
+  dotClassName?: string;
 }) {
   const code = `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
   return (
@@ -32,7 +35,7 @@ function EpisodeChip({
       data-slot="episode-chip"
       className={cn("inline-flex items-center gap-1.5 font-mono text-xs tabular-nums", className)}
     >
-      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full transition-colors", DOT_STYLES[state])} />
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full transition-colors", DOT_STYLES[state], dotClassName)} />
       {code}
     </span>
   );
