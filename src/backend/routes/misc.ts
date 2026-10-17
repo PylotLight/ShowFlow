@@ -23,11 +23,41 @@ export function miscRoutes(systemManager: SystemManager) {
             return errorResponse("Message is required");
           }
 
+          // Preferred path: hand the report to the shared feedback gateway (a
+          // Cloudflare Worker) which owns the GitHub credentials, so this app
+          // never needs a token.
+          const feedbackUrl = process.env.FEEDBACK_URL;
+          if (feedbackUrl) {
+            const res = await fetch(`${feedbackUrl.replace(/\/+$/, "")}/feedback/showflow`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                app: "showflow",
+                message: body.message,
+                screenshot: body.screenshot,
+                url: body.url,
+                userAgent: body.userAgent,
+                logs: body.includeDebugLogs
+                  ? JSON.stringify(getDebugLogs({ limit: 50 }), null, 2).slice(0, 8000)
+                  : undefined,
+              }),
+            });
+
+            if (!res.ok) {
+              const detail = await res.text().catch(() => "");
+              console.error("[feedback] gateway error:", res.status, detail.slice(0, 200));
+              return errorResponse(`Feedback gateway error: ${res.status}`, 502);
+            }
+
+            const issue = (await res.json()) as { url: string; number?: number };
+            return json({ url: issue.url, number: issue.number });
+          }
+
           const token = process.env.GITHUB_TOKEN;
           const repo = process.env.GITHUB_REPO;
 
           if (!token || !repo) {
-            return errorResponse("Feedback is not configured — set GITHUB_TOKEN and GITHUB_REPO environment variables", 501);
+            return errorResponse("Feedback is not configured — set FEEDBACK_URL, or GITHUB_TOKEN and GITHUB_REPO", 501);
           }
 
           const lines = [
