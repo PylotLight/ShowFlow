@@ -23,6 +23,8 @@ let watchRoot = "";
 let libraryRoot = "";
 let showId = "";
 const restores: Array<() => void> = [];
+// Audit log is shared across runs/files: only count events from this test.
+let eventBaseline = 0;
 
 function patch<T extends object, K extends keyof T>(obj: T, key: K, impl: T[K]) {
   const orig = obj[key];
@@ -31,6 +33,7 @@ function patch<T extends object, K extends keyof T>(obj: T, key: K, impl: T[K]) 
 }
 
 beforeEach(() => {
+  eventBaseline = (db.listRecentEvents(1)[0] as any)?.id ?? 0;
   watchRoot = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-bhio-watch-"));
   libraryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-bhio-lib-"));
   showId = `${RUN_ID}-${Math.random().toString(36).slice(2, 6)}`;
@@ -91,7 +94,7 @@ function drop(name: string, content = `NEW-${RUN_ID}-${name}`): string {
 }
 
 const importEventsFor = (name: string) =>
-  db.listRecentEvents(200).filter((e: any) =>
+  db.listRecentEvents(200).filter((e: any) => e.id > eventBaseline &&
     (e.event_type === "grab" || e.event_type === "manual-import") && String(e.message).includes(name));
 
 const artifactsUnder = (dir: string): string[] => {
