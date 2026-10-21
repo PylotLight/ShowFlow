@@ -279,9 +279,14 @@ button[data-glass]:hover::before {
   }
 }
 [data-setting].setting-flash {
+  /* Colours via custom properties: the CSS minifier lowers color-mix() inside
+     box-shadow to a solid var(--signal) fallback with no override, which
+     painted a solid teal ring. Custom properties are passed through as-is. */
+  --setting-flash-ring: color-mix(in oklab, var(--signal) 85%, transparent);
+  --setting-flash-halo: color-mix(in oklab, var(--signal) 14%, transparent);
   border-radius: 0.625rem;
-  outline: 2px solid color-mix(in oklab, var(--signal) 85%, transparent);
+  outline: 2px solid var(--setting-flash-ring);
   outline-offset: 6px;
-  box-shadow: 0 0 0 10px color-mix(in oklab, var(--signal) 12%, transparent);
+  box-shadow: 0 0 0 8px var(--setting-flash-halo);
   transition: outline-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
