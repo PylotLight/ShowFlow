@@ -36,7 +36,7 @@ function AlertDialogContent({ className, ...props }: React.ComponentProps<typeof
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         className={cn(
-          "glass-panel data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out fixed top-[50%] left-[50%] z-50 grid w-[calc(100%-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl p-6 shadow-2xl",
+          "glass-panel data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md translate-x-[-50%] translate-y-[-50%] grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto rounded-xl p-6 shadow-2xl",
           className,
         )}
         {...props}
@@ -46,14 +46,14 @@ function AlertDialogContent({ className, ...props }: React.ComponentProps<typeof
 }
 
 function AlertDialogHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="alert-dialog-header" className={cn("flex flex-col gap-1.5 text-left", className)} {...props} />;
+  return <div data-slot="alert-dialog-header" className={cn("flex min-w-0 flex-col gap-1.5 text-left", className)} {...props} />;
 }
 
 function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-dialog-footer"
-      className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
+      className={cn("flex min-w-0 flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
       {...props}
     />
   );
@@ -63,7 +63,7 @@ function AlertDialogTitle({ className, ...props }: React.ComponentProps<typeof A
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("font-display text-lg font-semibold tracking-wide", className)}
+      className={cn("font-display text-lg font-semibold tracking-wide wrap-anywhere", className)}
       {...props}
     />
   );
@@ -73,7 +73,7 @@ function AlertDialogDescription({ className, ...props }: React.ComponentProps<ty
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-muted-foreground text-sm wrap-anywhere", className)}
       {...props}
     />
   );

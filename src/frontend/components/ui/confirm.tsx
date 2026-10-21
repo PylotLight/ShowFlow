@@ -43,6 +43,15 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   });
 }
 
+/**
+ * A description that is one long whitespace-free token (a release name or
+ * filename like "Show.S01E01.2160p.WEB-DL...mkv") reads better in mono and
+ * has to wrap at any character, otherwise it can't break at all.
+ */
+export function isFilenameLike(d: React.ReactNode): d is string {
+  return typeof d === "string" && d.length > 24 && !/\s/.test(d.trim());
+}
+
 export function ConfirmHost() {
   const [pending, setPending] = React.useState<Pending | null>(null);
   const [open, setOpen] = React.useState(false);
@@ -70,7 +79,14 @@ export function ConfirmHost() {
         <AlertDialogHeader>
           <AlertDialogTitle className="text-white">{pending?.title}</AlertDialogTitle>
           {pending?.description && (
-            <AlertDialogDescription className="whitespace-pre-line">{pending.description}</AlertDialogDescription>
+            <AlertDialogDescription
+              className={cn(
+                "whitespace-pre-line",
+                isFilenameLike(pending.description) && "font-mono text-xs break-all text-white/70",
+              )}
+            >
+              {pending.description}
+            </AlertDialogDescription>
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
