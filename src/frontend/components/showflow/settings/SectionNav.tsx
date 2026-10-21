@@ -45,10 +45,11 @@ export function SectionNav({ items, label }: { items: SectionNavItem[]; label: s
       const barRect = bar.getBoundingClientRect();
       setStuck(scroller.scrollTop > 0 && barRect.top <= viewTop + 0.5);
       if (performance.now() < lockUntil.current) return;
-      // Active = last section whose heading has reached the bar's bottom edge
-      // (+ slack). At the very bottom the last visible section wins even if
-      // its heading can never scroll that high.
-      const line = barRect.bottom + 24;
+      // Active = last section whose heading has crossed a reading line a bit
+      // below the bar (so a heading just under the bar counts as "in view").
+      // At the very bottom the last visible section wins even if its heading
+      // can never scroll that high.
+      const line = barRect.bottom + Math.max(64, (viewBottom - barRect.bottom) * 0.2);
       let current = items[0]?.id ?? "";
       for (const it of items) {
         const el = document.getElementById(it.id);

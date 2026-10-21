@@ -94,12 +94,13 @@ export function scrollToSettingElement(el: HTMLElement, behavior: ScrollBehavior
   scroller.scrollTo({ top: Math.max(0, top - stickyOffset(scroller) - 16), behavior: reduce ? "auto" : behavior });
 }
 
+const flashTimers = new WeakMap<HTMLElement, number>();
+
 export function flashSettingElement(el: HTMLElement) {
-  el.classList.remove("setting-flash");
-  // Restart the animation if the same row is picked twice.
-  void el.offsetWidth;
+  const prev = flashTimers.get(el);
+  if (prev) window.clearTimeout(prev);
   el.classList.add("setting-flash");
-  window.setTimeout(() => el.classList.remove("setting-flash"), 1800);
+  flashTimers.set(el, window.setTimeout(() => { el.classList.remove("setting-flash"); flashTimers.delete(el); }, 1400));
 }
 
 /**
