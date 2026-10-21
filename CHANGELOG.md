@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.89] - 2026-10-21
 - **Fix**: a watch-folder file skipped as a Duplicate is now held like other skips, so the 3-minute rescan stops re-hashing it. It stays on Manual Import with its Duplicate reason. Holds are now keyed by path + size + mtime, so if a different file lands under the same name (re-download, replaced release) it gets checked again instead of staying stuck.
 - **Fix**: Force Import no longer says `Imported` when it failed. Errors (metadata lookup, disk/DB failures, name collisions, dry-run, missing root folder/profile) come back as a failed result with the real message, nothing is logged to History and no file row is recorded. Any failure after the file is placed (not just the DB write) now rolls back, so the existing library file is restored, for movies too. A force import over a Duplicate also keeps the old dedupe record if it fails, and the Force-imported history entry is only written once the import actually lands.
 
