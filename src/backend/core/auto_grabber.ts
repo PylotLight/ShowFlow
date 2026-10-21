@@ -1,6 +1,6 @@
 import { db as defaultDb, type Config, type DatabaseManager } from '../db';
 import { GrabberService, type GrabResult } from './grabber_service';
-import { listCutoffUnmetEpisodes, MAX_UPGRADES_PER_CYCLE, type CutoffUnmetEpisode } from './cutoff';
+import { listCutoffUnmetEpisodes, giveUpPolicy, MAX_UPGRADES_PER_CYCLE, type CutoffUnmetEpisode } from './cutoff';
 import type { SeasonAirStats } from '../db/grabs';
 import { buildAirDateTime, DEFAULT_RELEASE_DELAY_MINUTES } from './air_window';
 import { debugLog } from './debug';
@@ -41,7 +41,8 @@ import type { DownloadManager } from './download_manager';
  *
  * Cutoff upgrades (config.upgradeUntilCutoff): after the missing batch, up
  * to MAX_UPGRADES_PER_CYCLE cutoff-unmet episodes (core/cutoff.ts) get an
- * upgrade search with their own longer backoff.
+ * upgrade search with their own longer backoff, until the give-up policy
+ * (config.upgradeGiveUpMisses / upgradeGiveUpAfterDays) stops them.
  *
  * Movies are excluded: they have no episode rows to track and no monitor
  * concept, so they stay on the manual per-title grab.
@@ -265,14 +266,15 @@ export async function runAutoGrabCycle(
 
   // Lower-priority slice: a few cutoff-unmet upgrade searches, only with
   // budget left after the missing batch. Each miss backs the episode off
-  // 6h -> 1d -> 3d -> 7d (core/cutoff.ts); a grab clears it, and once the
-  // upgraded file imports at/above cutoff the episode leaves the pool.
+  // 6h -> 1d -> 3d -> 7d (core/cutoff.ts) and, after
+  // config.upgradeGiveUpMisses of them, gives up on it; a new file resets
+  // that, and once the upgraded file is at/above cutoff it leaves the pool.
   if (upgrades && Date.now() <= deadline) {
     let pool: CutoffUnmetEpisode[] = [];
     try {
       pool = deps.listUpgrades
         ? deps.listUpgrades(nowMs, cooldownIso)
-        : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: true });
+        : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: true, giveUp: giveUpPolicy(config) });
     } catch (err) {
       debugLog(`Auto-grab: cutoff-unmet lookup failed: ${err}`);
     }
@@ -288,7 +290,10 @@ export async function runAutoGrabCycle(
       if (res?.success) {
         result.upgradeGrabbed++;
       } else {
-        try { dbm.recordEpisodeSearchMiss(up.showId, up.season, up.episode); } catch {}
+        // Only a search that ran and found nothing better counts toward
+        // giving up; an indexer error / failed grab call just backs off.
+        const counted = !!res && classifyMiss(res.message ?? '') !== 'failed';
+        try { dbm.recordUpgradeSearchMiss(up.showId, up.season, up.episode, up.cutoffKey, counted); } catch {}
       }
     }
   }

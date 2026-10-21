@@ -354,7 +354,9 @@ export async function runRssSyncCycle(
     try {
       const pool = deps.upgradeCandidates
         ? deps.upgradeCandidates()
-        : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: false });
+        // Given-up episodes included: no search is spent, a better release
+        // that shows up on a feed is still taken.
+        : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: false, includeGivenUp: true });
       upgradeRows = pool.map(u => ({
         show_id: u.showId, show_title: u.showTitle, series_type: u.seriesType, profile: u.profile,
         library_type_id: u.libraryTypeId, season_number: u.season, episode_number: u.episode,

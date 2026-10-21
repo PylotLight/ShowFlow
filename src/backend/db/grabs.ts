@@ -381,6 +381,52 @@ export function recordEpisodeSearchMiss(
   try { setEpisodeStatus(self, { showId, season, episode }, { state: 'not_found' }, nowIso); } catch {}
 }
 
+/**
+ * Record a scheduled cutoff-upgrade search that ended without a grab.
+ * Counts against `cutoffKey` (core/cutoff.ts cutoffKey): a count recorded
+ * against a different cutoff restarts at 1. Unlike recordEpisodeSearchMiss
+ * it leaves search_attempts (the missing-episode streak) and the pipeline
+ * status alone - the episode is on disk, not "not found".
+ */
+export function recordUpgradeSearchMiss(
+  self: DatabaseManager,
+  showId: string,
+  season: number,
+  episode: number,
+  cutoffKey: string,
+  count = true,
+  nowIso = new Date().toISOString(),
+) {
+  if (!count) {
+    // The search itself failed (indexer error, grab call failed): back off
+    // at the current step, but don't let an outage count toward giving up.
+    self.db.query(`
+      UPDATE episodes SET last_searched_at = ?
+      WHERE show_id = ? AND season_number = ? AND episode_number = ?
+    `).run(nowIso, showId, season, episode);
+    return;
+  }
+  self.db.query(`
+    UPDATE episodes SET
+      upgrade_misses = CASE WHEN upgrade_cutoff_key IS ? THEN upgrade_misses + 1 ELSE 1 END,
+      upgrade_cutoff_key = ?,
+      last_searched_at = ?
+    WHERE show_id = ? AND season_number = ? AND episode_number = ?
+  `).run(cutoffKey, cutoffKey, nowIso, showId, season, episode);
+}
+
+/**
+ * Forget an episode's upgrade-search misses (and so any give-up): a new
+ * file landed, or the user searched it by hand.
+ */
+export function resetUpgradeSearch(self: DatabaseManager, showId: string, season: number, episode: number) {
+  self.db.query(`
+    UPDATE episodes SET upgrade_misses = 0, upgrade_cutoff_key = NULL
+    WHERE show_id = ? AND season_number = ? AND episode_number = ?
+      AND (upgrade_misses != 0 OR upgrade_cutoff_key IS NOT NULL)
+  `).run(showId, season, episode);
+}
+
 export function getGrab(self: DatabaseManager, id: number): GrabbedReleaseRow | null {
   return (self.drizz.select().from(schema.grabbedReleases)
     .where(eq(schema.grabbedReleases.id, id)).get() as GrabbedReleaseRow | undefined) ?? null;
@@ -454,8 +500,11 @@ export interface EpisodeWithFileRow {
   season_number: number;
   episode_number: number;
   file_path: string;
+  air_date: string | null;
   last_searched_at: string | null;
   search_attempts: number;
+  upgrade_misses: number;
+  upgrade_cutoff_key: string | null;
 }
 
 /**
@@ -478,8 +527,11 @@ export function listEpisodesWithFiles(
       e.season_number,
       e.episode_number,
       e.file_path,
+      e.air_date,
       e.last_searched_at,
-      e.search_attempts
+      e.search_attempts,
+      e.upgrade_misses,
+      e.upgrade_cutoff_key
     FROM episodes e
     JOIN shows s ON s.id = e.show_id
     WHERE e.is_tracked = 1

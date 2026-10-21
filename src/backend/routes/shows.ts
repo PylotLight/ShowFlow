@@ -1284,6 +1284,8 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const episode = parseInt(req.params.episode!, 10);
+          // A manual search is a fresh start for cutoff upgrades too.
+          try { db.resetUpgradeSearch(req.params.id!, season, episode); } catch {}
           const result = await grabber.grabBestRelease(req.params.id!, season, episode);
           return json({ ...result, bestRelease: result.bestRelease ? serializeRelease(result.bestRelease) : undefined, release: result.release ? serializeRelease(result.release) : undefined });
         } catch (err) {
@@ -1434,6 +1436,7 @@ export function showRoutes(scheduler: Scheduler, systemManager: SystemManager) {
           const grabber = new GrabberService(config, systemManager.getWatcher() ?? undefined);
           const season = parseInt(req.params.season!, 10);
           const episode = parseInt(req.params.episode!, 10);
+          try { db.resetUpgradeSearch(req.params.id!, season, episode); } catch {}
           const result = await grabber.searchReleases(req.params.id!, season, episode);
           if ("error" in result) return errorResponse(result.error, 400);
           return json({ profileId: result.profileId, releases: result.releases.map(serializeRelease), sceneSeason: result.sceneSeason, sceneEpisode: result.sceneEpisode, sceneSeasons: result.sceneSeasons });

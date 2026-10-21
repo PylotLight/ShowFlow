@@ -140,6 +140,9 @@ export function backfillEpisodeFiles(self: DatabaseManager) {
  * A single import of a pack that maps to N episodes calls this N times.
  */
 export function recordEpisodeFile(self: DatabaseManager, input: RecordEpisodeFileInput) {
+  // A new file is a fresh start for cutoff upgrades: forget the misses (and
+  // any give-up) counted against the file it replaces.
+  try { self.resetUpgradeSearch(input.showId, input.season, input.episode); } catch {}
   self.drizz
     .update(schema.episodeFiles)
     .set({ is_current: 0 })

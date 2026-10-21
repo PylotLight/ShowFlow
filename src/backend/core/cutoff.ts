@@ -3,7 +3,7 @@ import type { DatabaseManager } from '../db';
 import type { EpisodeWithFileRow } from '../db/grabs';
 import { qualityEngine, mergeProbeWithRelease, type ReleaseScore } from './quality_engine';
 import { getProfileModel } from '../db/quality_model';
-import { qualityLabel, qualityRank, RESOLUTIONS } from './quality_terms';
+import { qualityLabel, qualityRank } from './quality_terms';
 import { mediaFromStoredRow } from './media_probe';
 
 /**
@@ -23,9 +23,43 @@ import { mediaFromStoredRow } from './media_probe';
  */
 
 /** Upgrade-search backoff by consecutive misses: 6h, 1d, 3d, then weekly.
- *  Reuses episodes.last_searched_at / search_attempts - those only drive the
- *  missing-episode backoff while file_path is empty, so the two never mix. */
+ *  Counted in episodes.upgrade_misses (not search_attempts, which carries the
+ *  missing-episode streak from before the file existed); the timestamp is
+ *  episodes.last_searched_at, which only drives the missing backoff while
+ *  file_path is empty, so the two never mix. */
 export const UPGRADE_BACKOFF_HOURS = [6, 24, 72, 168] as const;
+
+/** Give-up defaults (config.upgradeGiveUpMisses / upgradeGiveUpAfterDays).
+ *  8 misses = the 6h/1d/3d ramp plus ~5 weekly tries (about six weeks). */
+export const DEFAULT_UPGRADE_GIVE_UP_MISSES = 8;
+export const DEFAULT_UPGRADE_GIVE_UP_DAYS = 90;
+
+/** "Upgrade until" when a profile has upgrades on but no explicit until
+ *  resolution: its target if that's 1080p or lower, else 1080p. The target is
+ *  the profile's ceiling (what it's allowed to grab), not where upgrades
+ *  should stop: allowing 2160p must not silently mean "chase 2160p for every
+ *  1080p file", and an unrestricted ("any") target must not mean 4320p. */
+export const DEFAULT_UPGRADE_UNTIL_RESOLUTION = 1080;
+export function defaultUpgradeUntilResolution(targetResolution: number | null | undefined): number {
+  return targetResolution != null && targetResolution > 0
+    ? Math.min(targetResolution, DEFAULT_UPGRADE_UNTIL_RESOLUTION)
+    : DEFAULT_UPGRADE_UNTIL_RESOLUTION;
+}
+
+export interface UpgradeGiveUpPolicy {
+  /** Stop scheduled upgrade searches after this many misses in a row (0 = never). */
+  misses: number;
+  /** Don't run scheduled upgrade searches for episodes that aired more than this many days ago (0 = no limit). */
+  days: number;
+}
+
+export function giveUpPolicy(config: { upgradeGiveUpMisses?: number; upgradeGiveUpAfterDays?: number } | null | undefined): UpgradeGiveUpPolicy {
+  const n = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : d);
+  return {
+    misses: n(config?.upgradeGiveUpMisses, DEFAULT_UPGRADE_GIVE_UP_MISSES),
+    days: n(config?.upgradeGiveUpAfterDays, DEFAULT_UPGRADE_GIVE_UP_DAYS),
+  };
+}
 
 /** Max upgrade searches per auto-grab cycle (after the missing batch). */
 export const MAX_UPGRADES_PER_CYCLE = 3;
@@ -39,6 +73,13 @@ export interface CutoffTarget {
   name: string;
   /** Also keep upgrading until the file's term score reaches this. */
   minTermScore?: number | null;
+  /** True when the profile set no until resolution and the default applied. */
+  defaulted?: boolean;
+}
+
+/** Identity of a cutoff for the give-up counter: a profile/cutoff change resets it. */
+export function cutoffKey(c: Pick<CutoffTarget, 'profileId' | 'name' | 'minTermScore'>): string {
+  return `${c.profileId}|${c.name}|${c.minTermScore ?? ''}`;
 }
 
 /** Resolve a show's quality profile id the same way GrabberService does. */
@@ -53,17 +94,21 @@ export function resolveShowProfileId(
 /**
  * The profile's "upgrade until" target, or null when upgrades are off.
  * Until a source ("1080p WEB-DL") = that exact rank; until a bare resolution
- * = any source at that resolution. No until resolution = the target (or top).
+ * = any source at that resolution. No until resolution =
+ * defaultUpgradeUntilResolution(target): the target capped at 1080p (it used
+ * to be the target itself, else the top resolution, so a profile allowing
+ * 2160p - or "any" - chased 2160p/4320p for every 1080p file).
  */
 export function getProfileCutoff(dbm: DatabaseManager, profileId: string): CutoffTarget | null {
   if (!profileId) return null;
   const m = getProfileModel(dbm, profileId);
   if (!m || !m.upgradesEnabled) return null;
-  const res = m.upgradeUntilResolution ?? m.targetResolution ?? RESOLUTIONS[RESOLUTIONS.length - 1]!;
+  const defaulted = m.upgradeUntilResolution == null;
+  const res = m.upgradeUntilResolution ?? defaultUpgradeUntilResolution(m.targetResolution);
   const src = m.upgradeUntilSource;
   const rank = src ? qualityRank(res, src) : qualityRank(res, 'sdtv'); // bare: lowest source step at that res
   const name = qualityLabel(res, src) ?? `${res}p`;
-  return { profileId, profileName: m.name, qualityId: '', rank, name, minTermScore: m.upgradeUntilScore };
+  return { profileId, profileName: m.name, qualityId: '', rank, name, minTermScore: m.upgradeUntilScore, defaulted };
 }
 
 /** Vertical resolution a quality name implies ("WEBDL-1080p" -> 1080), or null. */
@@ -186,16 +231,45 @@ export function scoreExistingEpisodeFile(
   return { compareScore: scoreValue(fileScore), quality: { rank: fileScore.rank, qualityName: fileScore.qualityName ?? null, termScore: fileScore.rejected ? null : fileScore.formatScore }, via: 'filename' };
 }
 
+/**
+ * Upgrade misses that still count against `key` (the current cutoff). A
+ * count recorded against another profile/cutoff no longer applies.
+ */
+export function effectiveUpgradeMisses(
+  row: { upgrade_misses?: number | null; upgrade_cutoff_key?: string | null },
+  key: string,
+): number {
+  return row.upgrade_cutoff_key === key ? Math.max(0, row.upgrade_misses ?? 0) : 0;
+}
+
 /** True when the episode's last upgrade search is old enough to search again. */
 export function isOutsideUpgradeBackoff(
-  row: Pick<EpisodeWithFileRow, 'last_searched_at' | 'search_attempts'>,
+  row: { last_searched_at: string | null },
+  misses: number,
   nowMs: number,
 ): boolean {
   if (!row.last_searched_at) return true;
   const last = Date.parse(row.last_searched_at);
   if (!Number.isFinite(last)) return true;
-  const idx = Math.min(Math.max(row.search_attempts, 1), UPGRADE_BACKOFF_HOURS.length) - 1;
+  const idx = Math.min(Math.max(misses, 1), UPGRADE_BACKOFF_HOURS.length) - 1;
   return nowMs - last >= UPGRADE_BACKOFF_HOURS[idx]! * 3_600_000;
+}
+
+/** Why scheduled upgrade searches stopped for an episode, or null if they haven't. */
+export type GiveUpReason = 'misses' | 'aged';
+
+export function upgradeGiveUpReason(
+  row: { air_date?: string | null },
+  misses: number,
+  policy: UpgradeGiveUpPolicy,
+  nowMs: number,
+): GiveUpReason | null {
+  if (policy.misses > 0 && misses >= policy.misses) return 'misses';
+  if (policy.days > 0 && row.air_date) {
+    const aired = Date.parse(row.air_date);
+    if (Number.isFinite(aired) && nowMs - aired > policy.days * 86_400_000) return 'aged';
+  }
+  return null;
 }
 
 export interface CutoffUnmetEpisode {
@@ -213,19 +287,33 @@ export interface CutoffUnmetEpisode {
   currentQuality: string | null;
   existingScore: number;
   lastSearchedAt: string | null;
-  searchAttempts: number;
+  /** Upgrade misses counted against the current cutoff. */
+  upgradeMisses: number;
+  /** cutoffKey() of the cutoff this row was judged against (record misses with it). */
+  cutoffKey: string;
+  airDate: string | null;
+  /** Set when scheduled upgrade searches have given up on this episode. */
+  givenUp: GiveUpReason | null;
 }
 
 /**
  * Every tracked auto-mode episode whose file is below its profile cutoff.
  * `cooldownIso` drops episodes with a grab in flight (pass a far-future
  * value to keep them, e.g. for the Wanted view); `applyBackoff` drops ones
- * searched too recently. Ordered never-searched first, then oldest search.
+ * searched too recently. Episodes the give-up policy has stopped searching
+ * (too many misses, or aired too long ago) are dropped unless
+ * `includeGivenUp` (RSS: still upgrade opportunistically; the per-profile
+ * view: show them as given up). `profileId` limits to one profile.
+ * Ordered never-searched first, then oldest search.
  */
 export function listCutoffUnmetEpisodes(
   dbm: DatabaseManager,
-  opts: { nowMs?: number; cooldownIso?: string; applyBackoff?: boolean; scorer?: Scorer } = {},
+  opts: {
+    nowMs?: number; cooldownIso?: string; applyBackoff?: boolean; scorer?: Scorer;
+    giveUp?: UpgradeGiveUpPolicy; includeGivenUp?: boolean; profileId?: string;
+  } = {},
 ): CutoffUnmetEpisode[] {
+  const policy = opts.giveUp ?? giveUpPolicy(null);
   const nowMs = opts.nowMs ?? Date.now();
   const rows = dbm.listEpisodesWithFiles(opts.cooldownIso ?? '9999-12-31T00:00:00.000Z');
   const profileByShow = new Map<string, string>();
@@ -233,18 +321,24 @@ export function listCutoffUnmetEpisodes(
   const out: CutoffUnmetEpisode[] = [];
 
   for (const row of rows) {
-    if (opts.applyBackoff && !isOutsideUpgradeBackoff(row, nowMs)) continue;
     let profileId = profileByShow.get(row.show_id);
     if (profileId === undefined) {
       profileId = resolveShowProfileId(dbm, row);
       profileByShow.set(row.show_id, profileId);
     }
+    if (opts.profileId != null && profileId !== opts.profileId) continue;
     let cutoff = cutoffByProfile.get(profileId);
     if (cutoff === undefined) {
       cutoff = getProfileCutoff(dbm, profileId);
       cutoffByProfile.set(profileId, cutoff);
     }
     if (!cutoff) continue;
+
+    const key = cutoffKey(cutoff);
+    const misses = effectiveUpgradeMisses(row, key);
+    const givenUp = upgradeGiveUpReason(row, misses, policy, nowMs);
+    if (givenUp && !opts.includeGivenUp) continue;
+    if (opts.applyBackoff && !isOutsideUpgradeBackoff(row, misses, nowMs)) continue;
 
     const existing = scoreExistingEpisodeFile(dbm, row.show_id, row.season_number, row.episode_number, row.file_path, profileId, opts.scorer);
     if (isCutoffMet(existing.quality, cutoff)) continue;
@@ -264,7 +358,10 @@ export function listCutoffUnmetEpisodes(
       currentQuality: existing.quality.qualityName ?? null,
       existingScore: existing.compareScore,
       lastSearchedAt: row.last_searched_at,
-      searchAttempts: row.search_attempts,
+      upgradeMisses: misses,
+      cutoffKey: key,
+      airDate: row.air_date ?? null,
+      givenUp,
     });
   }
 
