@@ -168,7 +168,7 @@ function formatWhen(at: string | undefined): string {
   return Number.isNaN(d.getTime()) ? "" : ` ${d.toLocaleString()}`;
 }
 
-const GRID = "grid grid-cols-[minmax(64px,auto)_1fr_1fr] gap-x-3";
+const GRID = "grid grid-cols-[minmax(56px,auto)_1fr_1fr] gap-x-2 md:gap-x-3";
 
 /**
  * Expanded detail: the one-line reason, incoming vs existing with the
@@ -217,16 +217,16 @@ export function ConflictDetail({
                 d.verdict !== "same" && d.verdict !== "unknown" && "bg-white/[0.015]",
               )}
             >
-              <span className="pt-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{d.label}</span>
-              <span className={cn("flex min-w-0 items-start gap-1 break-all font-mono text-[11px]", verdictClass(d.verdict))}>
+              <span className="pt-px font-mono text-[9px] uppercase tracking-wider text-muted-foreground md:text-[10px]">{d.label}</span>
+              <span className={cn("flex min-w-0 items-start gap-1 break-words font-mono text-[11px]", verdictClass(d.verdict))}>
                 <VerdictMark v={d.verdict} />
                 <span className="min-w-0">
                   {d.incoming ?? "—"}
-                  {d.note && <span className="ml-1 text-[10px] opacity-80">({d.note})</span>}
+                  {d.note && <span className="block text-[10px] opacity-80 md:ml-1 md:inline">({d.note})</span>}
                   {VERDICT_WORD[d.verdict] && <span className="sr-only"> ({VERDICT_WORD[d.verdict]})</span>}
                 </span>
               </span>
-              <span className="min-w-0 break-all font-mono text-[11px] text-foreground/70">{d.existing ?? "—"}</span>
+              <span className="min-w-0 break-words font-mono text-[11px] text-foreground/70">{d.existing ?? "—"}</span>
             </div>
           ))}
           <div className={cn(GRID, "items-start border-t border-white/5 px-3 py-1.5")}>
