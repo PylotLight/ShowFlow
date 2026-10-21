@@ -159,7 +159,9 @@ export class SystemManager {
     const client = this.getManualImportClient();
     if (!client) return { ok: false, message: 'No watch folder configured.' };
     const res = await client.forceImport(filename, showId, overrides);
-    if (res.ok) this.invalidateManualImportCache();
+    // Invalidate either way: a failure records a new decline reason that the
+    // Manual Import list should show instead of a stale cached one.
+    this.invalidateManualImportCache();
     return res;
   }
 

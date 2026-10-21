@@ -1,4 +1,4 @@
-import { watch, readFileSync } from 'node:fs';
+import { watch, readFileSync, statSync } from 'node:fs';
 import { mkdir, unlink, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -24,7 +24,7 @@ import type { DownloadClient } from './types';
 import { isSampleFile } from '../sample_filter';
 import { FileReplacement } from './safe_replace';
 import { markReleaseFailed } from '../release_failures';
-import { recordImportReason, clearImportReason, clearAllImportReasons, pruneImportReasons, type ManualImportReasonCode } from '../manual_import_reasons';
+import { recordImportReason, getImportReason, clearImportReason, clearAllImportReasons, pruneImportReasons, type ManualImportReasonCode } from '../manual_import_reasons';
 import { explainWatchEntry, upgradeReason, cutoffStatus, splitReplaceKept, type WatchEntryExplanation } from '../manual_import_explain';
 import type { UpgradeExplanation } from '../quality_engine';
 
@@ -108,6 +108,13 @@ export function isTorrentArtifact(filename: string): boolean {
 }
 
 /** An error that is the environment's fault (disk, permissions, DB), not the release's. */
+/** A persisted manual-import hold. size/mtimeMs absent = legacy path-only hold. */
+interface ManualHold {
+  path: string;
+  size?: number;
+  mtimeMs?: number;
+}
+
 function infraError(message: string): Error {
   return Object.assign(new Error(message), { infra: true });
 }
@@ -208,41 +215,81 @@ export class BlackholeClient implements DownloadClient {
   // Held files are skipped by scan/watch events until the user force-imports
   // them (success clears the hold) or clears it via a watch-folder rescan.
   // The set is persisted so a pod restart doesn't spam the same errors once.
+  //
+  // Each hold is keyed by path + size + mtime: when a different file lands
+  // under the same name (a re-download, a replaced release) the hold no
+  // longer matches, is dropped, and the new file is evaluated from scratch.
+  // Legacy entries (bare path strings) stay sticky by path alone.
   private static readonly MANUAL_HOLDS_KEY = 'blackhole.manual_holds';
 
-  private readManualHolds(): string[] {
+  private readManualHolds(): ManualHold[] {
     const raw = db.getSetting(BlackholeClient.MANUAL_HOLDS_KEY);
     if (!raw) return [];
     try {
-      const arr = JSON.parse(typeof raw === 'string' ? raw : raw);
-      return Array.isArray(arr) ? arr.filter(p => typeof p === 'string') : [];
+      const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!Array.isArray(arr)) return [];
+      const out: ManualHold[] = [];
+      for (const h of arr) {
+        if (typeof h === 'string') out.push({ path: h });
+        else if (h && typeof h === 'object' && typeof h.path === 'string') {
+          out.push({
+            path: h.path,
+            size: typeof h.size === 'number' ? h.size : undefined,
+            mtimeMs: typeof h.mtimeMs === 'number' ? h.mtimeMs : undefined,
+          });
+        }
+      }
+      return out;
     } catch {
       return [];
     }
   }
 
-  private writeManualHolds(paths: string[]) {
-    db.setSetting(BlackholeClient.MANUAL_HOLDS_KEY, paths);
+  private writeManualHolds(holds: ManualHold[]) {
+    if (holds.length === 0) db.removeSetting(BlackholeClient.MANUAL_HOLDS_KEY);
+    else db.setSetting(BlackholeClient.MANUAL_HOLDS_KEY, holds);
   }
 
+  private static fileSignature(fullPath: string): { size: number; mtimeMs: number } | null {
+    try {
+      const st = statSync(fullPath);
+      return { size: st.size, mtimeMs: Math.floor(st.mtimeMs) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * True when `fullPath` is held and the file on disk is still the one that
+   * was held. A hold whose size/mtime no longer match is released here so
+   * the changed file gets re-evaluated.
+   */
   isHeldForManual(fullPath: string): boolean {
-    return this.readManualHolds().includes(fullPath);
+    const hold = this.readManualHolds().find(h => h.path === fullPath);
+    if (!hold) return false;
+    if (hold.size == null || hold.mtimeMs == null) return true;
+    const sig = BlackholeClient.fileSignature(fullPath);
+    // File gone: nothing to re-evaluate; the listing prunes it.
+    if (!sig) return true;
+    if (sig.size === hold.size && sig.mtimeMs === hold.mtimeMs) return true;
+    debugLog('Manual-import hold no longer matches the file on disk (size/mtime changed); re-evaluating', { fullPath, hold, now: sig });
+    this.releaseManualHold(fullPath);
+    return false;
   }
 
   holdForManual(fullPath: string) {
-    const paths = this.readManualHolds();
-    if (!paths.includes(fullPath)) {
-      paths.push(fullPath);
-      this.writeManualHolds(paths);
-      debugLog('Held watch-folder file for manual import', { fullPath });
-    }
+    const sig = BlackholeClient.fileSignature(fullPath);
+    const holds = this.readManualHolds().filter(h => h.path !== fullPath);
+    holds.push({ path: fullPath, ...(sig ?? {}) });
+    this.writeManualHolds(holds);
+    debugLog('Held watch-folder file for manual import', { fullPath, ...(sig ?? {}) });
   }
 
   releaseManualHold(fullPath: string) {
     clearImportReason(fullPath);
-    const paths = this.readManualHolds();
-    if (paths.includes(fullPath)) {
-      this.writeManualHolds(paths.filter(p => p !== fullPath));
+    const holds = this.readManualHolds();
+    if (holds.some(h => h.path === fullPath)) {
+      this.writeManualHolds(holds.filter(h => h.path !== fullPath));
       debugLog('Released manual-import hold (file imported or removed)', { fullPath });
     }
   }
@@ -619,7 +666,14 @@ export class BlackholeClient implements DownloadClient {
     }
 
     try {
-      await this.handleFile(folder, filename, { force: true, showId, overrides });
+      const imported = await this.handleFile(folder, filename, { force: true, showId, overrides });
+      if (!imported) {
+        // handleFile declined without throwing: never report that as success.
+        let size: number | null = null;
+        try { size = Bun.file(fullPath).size; } catch {}
+        const why = getImportReason(fullPath, size)?.message ?? 'the file was not moved into the library';
+        return { ok: false, message: `Failed to import "${filename}": ${why}` };
+      }
       return { ok: true, message: `Imported "${filename}"` };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -666,7 +720,7 @@ export class BlackholeClient implements DownloadClient {
     hash: string,
     hit: MovieShowHit,
     opts?: { force?: boolean; showId?: string; overrides?: { season?: number; episodes?: number[] } },
-  ) {
+  ): Promise<boolean> {
     const showId = hit.showId;
     const show = db.getShow(showId);
     if (!show) {
@@ -674,7 +728,7 @@ export class BlackholeClient implements DownloadClient {
       this.declineReason(fullPath, 'UNMATCHED', `The matched movie (${showId}) no longer exists in the library. Use Match Show to pick one.`);
       if (opts?.force) throw new Error(`Movie show ${showId} no longer exists in the library.`);
       this.holdForManual(fullPath);
-      return;
+      return false;
     }
     db.logPipelineEvent({
       showId, stage: 'IMPORTING', eventType: 'import_started',
@@ -691,7 +745,7 @@ export class BlackholeClient implements DownloadClient {
       this.declineReason(fullPath, 'NO_ROOT_FOLDER', `No root folder is configured for movie "${show.title}". Assign a show profile with a root folder.`);
       if (opts?.force) throw new Error(message);
       this.holdForManual(fullPath);
-      return;
+      return false;
     }
 
     const base = sanitizeTitle(`${show.title}${show.year ? ` (${show.year})` : ''}`);
@@ -701,7 +755,8 @@ export class BlackholeClient implements DownloadClient {
     if (this.config.dryRun) {
       console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);
       db.logEvent({ type: 'dryrun', entityType: 'file', message: `[dry-run] Would import ${filename} for movie "${show.title}"` });
-      return;
+      if (opts?.force) throw new Error(`Dry-run mode is on: would import to ${finalPath}, nothing was moved.`);
+      return false;
     }
 
     // Old file(s) are only retired AFTER the new one is safely in place and
@@ -733,8 +788,8 @@ export class BlackholeClient implements DownloadClient {
               : `"${filename}" not imported over existing "${existingFilename}": ${UPGRADES_OFF}`,
             releaseTitle: filename,
           });
-          if (!opts?.force) this.holdForManual(fullPath);
-          return;
+          this.holdForManual(fullPath);
+          return false;
         }
         console.log(`[${this.name}] New file ${filename} is an upgrade over ${existingFilename}. Replacing.`);
         db.logEvent({ type: 'upgrade', entityType: 'file', message: `Upgrading ${existingFilename} to ${filename} for movie "${show.title}"` });
@@ -760,20 +815,25 @@ export class BlackholeClient implements DownloadClient {
       this.declineReason(fullPath, 'COLLISION', `A file already exists at the destination (${finalPath}) and the collision setting is "skip". Force Import, or change On collision in settings.`);
       if (opts?.force) throw new Error(message);
       this.holdForManual(fullPath);
-      return;
+      return false;
     }
     const movedTo = replacement.finalPath;
 
-    const mediaProbe = await probeMediaFile(movedTo);
-    let fileSize: number | null = null;
-    try { fileSize = (await stat(movedTo)).size; } catch {}
-    const grab = db.findMostRecentGrabForShow(showId, 30);
-    // Only credit the grab as this file's provenance when the landed release
-    // name actually matches it. Otherwise the most recent grab for the show
-    // (possibly an unrelated release) would be mis-stamped onto whatever file
-    // landed — e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE file.
-    const attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
+    // Everything between placing the file and committing the DB rows is
+    // rolled back on ANY failure (probe, stat, DB), so a partial import never
+    // leaves the old library file stranded as a hidden backup.
+    let grab: ReturnType<typeof db.findMostRecentGrabForShow> = null;
+    let attributable = false;
     try {
+      const mediaProbe = await probeMediaFile(movedTo);
+      let fileSize: number | null = null;
+      try { fileSize = (await stat(movedTo)).size; } catch {}
+      grab = db.findMostRecentGrabForShow(showId, 30);
+      // Only credit the grab as this file's provenance when the landed release
+      // name actually matches it. Otherwise the most recent grab for the show
+      // (possibly an unrelated release) would be mis-stamped onto whatever file
+      // landed — e.g. a FraMeSToR REMUX grab shown over a DirtyHippie RIFE file.
+      attributable = !!grab && releaseTitlesMatch(grab.release_title ?? '', filename);
       db.db.transaction(() => {
         db.logProcessedFile(hash, fullPath, movedTo);
         db.recordMovieFile({
@@ -790,7 +850,7 @@ export class BlackholeClient implements DownloadClient {
       })();
     } catch (dbErr) {
       await replacement.rollback();
-      throw infraError(`Database update failed for movie "${show.title}"; restored the previous file: ${dbErr instanceof Error ? dbErr.message : dbErr}`);
+      throw infraError(`Import of movie "${show.title}" failed after placing the file; restored the previous file: ${dbErr instanceof Error ? dbErr.message : dbErr}`);
     }
     await replacement.finalize();
     if (attributable) {
@@ -810,8 +870,15 @@ export class BlackholeClient implements DownloadClient {
       releaseTitle: filename,
       metadata: { filePath: movedTo },
     });
+    return true;
   }
 
+  /**
+   * Process one watch-folder file. Resolves true only when the file was
+   * actually moved into the library and recorded. In force mode (Manual
+   * Import) every failure is thrown so the caller reports the real error
+   * instead of "Imported".
+   */
   private async handleFile(
     folder: string,
     filename: string,
@@ -820,7 +887,7 @@ export class BlackholeClient implements DownloadClient {
       showId?: string;
       overrides?: { season?: number; episodes?: number[] };
     },
-  ) {
+  ): Promise<boolean> {
     const fullPath = path.join(folder, filename);
 
     if (this.isIgnoredFile(filename)) {
@@ -829,14 +896,14 @@ export class BlackholeClient implements DownloadClient {
         await unlink(fullPath);
       } catch {
       }
-      return;
+      return false;
     }
 
     // In-progress download artifact: skip WITHOUT deleting — the writer
     // still owns it. (Placed after the junk branch, before queue tracking.)
     if (!opts?.force && isIncompleteDownloadFile(filename)) {
       debugLog(`Skipping in-progress download artifact: ${filename}`);
-      return;
+      return false;
     }
 
     // Torrent/magnet handoff artifact: never import, never delete — an
@@ -844,17 +911,22 @@ export class BlackholeClient implements DownloadClient {
     // force-import must not move a .magnet into the library as "media".
     if (isTorrentArtifact(filename)) {
       debugLog(`Skipping torrent/magnet handoff artifact: ${filename}`);
-      return;
+      if (opts?.force) throw new Error('This is a torrent/magnet handoff artifact, not a media file.');
+      return false;
     }
 
     try {
       await stat(fullPath);
     } catch {
       debugLog('Ignoring rename event for a file that no longer exists (likely our own move-out, or an external delete)', { filename, fullPath });
-      return;
+      if (opts?.force) throw new Error('The file no longer exists in the watch folder.');
+      return false;
     }
 
-    if (this.processingQueue.has(fullPath)) return;
+    if (this.processingQueue.has(fullPath)) {
+      if (opts?.force) throw new Error('The file is already being imported; check again in a moment.');
+      return false;
+    }
     this.processingQueue.add(fullPath);
 
     // Set once the file is resolved to a show/episodes, so a failure after
@@ -865,7 +937,8 @@ export class BlackholeClient implements DownloadClient {
       if (!stable) {
         db.logEvent({ type: 'error', entityType: 'file', message: `File ${filename} failed to stabilize for processing` });
         this.declineReason(fullPath, 'IMPORT_ERROR', 'The file kept changing size for 5 minutes, so it was treated as still downloading and skipped.');
-        return;
+        if (opts?.force) throw new Error('The file kept changing size for 5 minutes (still downloading?).');
+        return false;
       }
 
       console.log(`[${this.name}] Processing file: ${filename}`);
@@ -876,13 +949,19 @@ export class BlackholeClient implements DownloadClient {
       maybeForcedGc();
       if (db.isProcessed(hash)) {
         if (opts?.force) {
+          // The processed_files row is only rewritten (upsert) inside the
+          // import transaction, so a failed force import keeps the old
+          // dedupe record instead of losing it up front.
           console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
-          db.removeProcessedFile(hash);
         } else {
           console.log(`[${this.name}] Skipping duplicate: ${filename}`);
           db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
           this.declineReason(fullPath, 'DUPLICATE', 'This exact file (same content hash) was already imported before, so it was skipped. Delete it, or Force Import to import it again.');
-          return;
+          // Sticky: without a hold the 3-minute safety rescan re-queues and
+          // re-hashes the whole file forever. The hold is keyed by
+          // size+mtime, so a different file under this name is re-checked.
+          this.holdForManual(fullPath);
+          return false;
         }
       }
 
@@ -899,18 +978,16 @@ export class BlackholeClient implements DownloadClient {
         // oracle path so season/episode overrides keep working.
         const picked = db.getShow(opts.showId);
         if (picked && (picked.series_type ?? 'standard') === 'movie') {
-          await this.importMovieFile(filename, fullPath, hash, {
+          return await this.importMovieFile(filename, fullPath, hash, {
             showId: picked.id,
             showTitle: picked.title,
             showYear: picked.year ?? null,
           }, opts);
-          return;
         }
       } else {
         const movieHit = this.matchMovieFile(filename);
         if (movieHit) {
-          await this.importMovieFile(filename, fullPath, hash, movieHit, opts);
-          return;
+          return await this.importMovieFile(filename, fullPath, hash, movieHit, opts);
         }
       }
 
@@ -995,15 +1072,14 @@ export class BlackholeClient implements DownloadClient {
       message: fullMessage,
     });
 
-    // When handleFile is invoked via the manual force-import route, swallow
-    // this error and the UI reports success despite the file remaining in
-    // the watch folder. Throw so forceImportFile can return a failed result.
+    // Force-import: throw (re-thrown by the catch below) so forceImport
+    // returns the real error instead of "Imported".
     this.declineReason(fullPath, !parsed?.show && !matchedAttempt ? 'PARSE_FAILED' : 'UNMATCHED', errorMessage);
     if (opts?.force) {
       throw new Error(errorMessage);
     }
     this.holdForManual(fullPath);
-    return;
+    return false;
       }
 
     const { show, episodes } = result;
@@ -1083,8 +1159,9 @@ export class BlackholeClient implements DownloadClient {
             message,
           });
           this.declineReason(fullPath, 'NO_PROFILE', `"${show.title}" isn't in the library and no show root-folder profiles are configured, so there's nowhere to put it. Create a show profile in settings.`);
-          if (!opts?.force) this.holdForManual(fullPath);
-          return;
+          if (opts?.force) throw new Error(message);
+          this.holdForManual(fullPath);
+          return false;
         }
 
         const configuredDefault = db.getSetting('defaultShowProfileId');
@@ -1101,8 +1178,9 @@ export class BlackholeClient implements DownloadClient {
           console.error(`[${this.name}] ${message}`);
           db.logEvent({ type: 'error', entityType: 'file', message });
           this.declineReason(fullPath, 'NO_PROFILE', message);
-          if (!opts?.force) this.holdForManual(fullPath);
-          return;
+          if (opts?.force) throw new Error(message);
+          this.holdForManual(fullPath);
+          return false;
         }
 
         showId = crypto.randomUUID();
@@ -1149,15 +1227,17 @@ export class BlackholeClient implements DownloadClient {
           });
         }
         this.declineReason(fullPath, 'NO_ROOT_FOLDER', `No root folder is configured for "${show.title}". Assign a show profile with a root folder.`);
-        if (!opts?.force) this.holdForManual(fullPath);
-        return;
+        if (opts?.force) throw new Error(`No root folder configured for ${show.title}.`);
+        this.holdForManual(fullPath);
+        return false;
       }
       const finalPath = path.join(rootFolder, result.proposedPath);
 
       if (this.config.dryRun) {
         console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);
         db.logEvent({ type: 'dryrun', entityType: 'file', message: `[dry-run] Would import ${filename} for ${show.title}` });
-        return;
+        if (opts?.force) throw new Error(`Dry-run mode is on: would import to ${finalPath}, nothing was moved.`);
+        return false;
       }
 
       // ---- Upgrade check across EVERY covered episode --------------------
@@ -1190,14 +1270,15 @@ export class BlackholeClient implements DownloadClient {
             releaseTitle: filename,
           });
         }
-        if (!opts?.force) this.holdForManual(fullPath);
-        return;
+        this.holdForManual(fullPath);
+        return false;
       }
       if (plan.existingNames.length > 0) {
         const names = plan.existingNames.join(', ');
         if (opts?.force) {
+          // The 'manual-import' history event is logged only after the
+          // import commits (below), never up front.
           console.log(`[${this.name}] Force-importing ${filename} (skipping upgrade check over ${names}).`);
-          db.logEvent({ type: 'manual-import', entityType: 'file', message: `Force-imported ${filename} over ${names} for ${show.title}` });
         } else {
           console.log(`[${this.name}] New file ${filename} is an upgrade over ${names}. Replacing.`);
           db.logEvent({ type: 'upgrade', entityType: 'file', message: `Upgrading ${names} to ${filename} for ${show.title}` });
@@ -1235,29 +1316,34 @@ export class BlackholeClient implements DownloadClient {
         // the watch folder. Hold it for manual import so the rescan doesn't
         // keep re-queuing and re-logging the same mistake.
         this.declineReason(fullPath, 'COLLISION', `A file already exists at the destination (${finalPath}) and the collision setting is "skip". Force Import, or change On collision in settings.`);
-        if (!opts?.force) this.holdForManual(fullPath);
-        return;
+        if (opts?.force) throw new Error(`Destination already exists (${finalPath}) and On collision is "skip". Nothing imported.`);
+        this.holdForManual(fullPath);
+        return false;
       }
       const movedTo = replacement.finalPath;
       BlackholeClient.mem('after move ' + filename.slice(0, 30));
       maybeForcedGc();
-
-      // Record on-disk provenance for each episode this file maps to: which
-      // release it came from (grabbed) vs. a direct drop without a grab.
-      // Attach the matching grab's release title/indexer/publish date so the
-      // show detail page and dashboard can show exactly what's stored.
-      // Probing the moved file once gives us its real resolution/codec/bitrate
-      // for the media badges + upgrade decisions later.
-      const mediaProbe = await probeMediaFile(movedTo);
-      const mediaCols = foldProbeToColumns(mediaProbe, filename);
-      let fileSize: number | null = null;
-      try { fileSize = (await stat(movedTo)).size; } catch {}
       const importedGrabIds = new Set<number>();
 
-      // All DB writes for this import in one transaction: either every
-      // covered episode points at the new file, or (on error) none do and
-      // the files are rolled back to how they were.
+      // From here until the DB commit, ANY failure (probe, stat, DB) rolls
+      // the files back: old library file(s) restored, incoming file back in
+      // the watch folder, no episode_files rows, no import events.
       try {
+
+        // Record on-disk provenance for each episode this file maps to: which
+        // release it came from (grabbed) vs. a direct drop without a grab.
+        // Attach the matching grab's release title/indexer/publish date so the
+        // show detail page and dashboard can show exactly what's stored.
+        // Probing the moved file once gives us its real resolution/codec/bitrate
+        // for the media badges + upgrade decisions later.
+        const mediaProbe = await probeMediaFile(movedTo);
+        const mediaCols = foldProbeToColumns(mediaProbe, filename);
+        let fileSize: number | null = null;
+        try { fileSize = (await stat(movedTo)).size; } catch {}
+
+        // All DB writes for this import in one transaction: either every
+        // covered episode points at the new file, or (on error) none do and
+        // the files are rolled back to how they were.
         db.db.transaction(() => {
           db.logProcessedFile(hash, fullPath, movedTo);
           const firstEpisode = episodes[0];
@@ -1302,7 +1388,7 @@ export class BlackholeClient implements DownloadClient {
         })();
       } catch (dbErr) {
         await replacement.rollback();
-        throw infraError(`Database update failed; restored the previous file(s): ${dbErr instanceof Error ? dbErr.message : dbErr}`);
+        throw infraError(`Import failed after placing the file; restored the previous file(s): ${dbErr instanceof Error ? dbErr.message : dbErr}`);
       }
       await replacement.finalize();
       for (const id of importedGrabIds) {
@@ -1313,6 +1399,9 @@ export class BlackholeClient implements DownloadClient {
       // any manual-import hold keyed to its source path.
       this.releaseManualHold(fullPath);
 
+      if (opts?.force && plan.existingNames.length > 0) {
+        db.logEvent({ type: 'manual-import', entityType: 'file', message: `Force-imported ${filename} over ${plan.existingNames.join(', ')} for ${show.title}` });
+      }
       console.log(`[${this.name}] Moved ${filename} -> ${movedTo}`);
       debugLog('File moved successfully', { filename, movedTo });
       db.logEvent({
@@ -1336,6 +1425,7 @@ export class BlackholeClient implements DownloadClient {
           metadata: { filePath: movedTo },
         });
       }
+      return true;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[${this.name}] Error processing ${filename}:`, e);
@@ -1348,6 +1438,10 @@ export class BlackholeClient implements DownloadClient {
       if (failCtx && !(e as any)?.infra) {
         this.failAttributedGrabs(failCtx, filename, `import failed: ${message}`);
       }
+      // Manual force import: surface the real error to the API/UI. The
+      // background loop keeps swallowing (the file stays for a retry).
+      if (opts?.force) throw e;
+      return false;
     } finally {
       this.processingQueue.delete(fullPath);
     }
