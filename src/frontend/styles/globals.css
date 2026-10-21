@@ -278,12 +278,13 @@ button[data-glass]:hover::before {
     transition: outline-color 0.6s ease-out, box-shadow 0.6s ease-out;
   }
 }
+/* One color-mix() per rule: the CSS bundler lowers color-mix() to a solid
+   var(--signal) fallback plus an @supports override, but only keeps the
+   override for the first color-mix in a rule. The halo then painted as a
+   solid teal ring. */
+[data-setting].setting-flash { --setting-flash-ring: color-mix(in oklab, var(--signal) 85%, transparent); }
+[data-setting].setting-flash { --setting-flash-halo: color-mix(in oklab, var(--signal) 14%, transparent); }
 [data-setting].setting-flash {
-  /* Colours via custom properties: the CSS minifier lowers color-mix() inside
-     box-shadow to a solid var(--signal) fallback with no override, which
-     painted a solid teal ring. Custom properties are passed through as-is. */
-  --setting-flash-ring: color-mix(in oklab, var(--signal) 85%, transparent);
-  --setting-flash-halo: color-mix(in oklab, var(--signal) 14%, transparent);
   border-radius: 0.625rem;
   outline: 2px solid var(--setting-flash-ring);
   outline-offset: 6px;
