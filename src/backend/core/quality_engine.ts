@@ -45,6 +45,19 @@ export interface ReleaseScore {
   termHits?: TermHit[];
 }
 
+/** Why an incoming file is or isn't an upgrade over an existing one. */
+export interface UpgradeExplanation {
+  isUpgrade: boolean;
+  /** upgrade | equal / worse score | incoming rejected by the profile | sample | upgrades off. */
+  verdict: 'upgrade' | 'equal' | 'worse' | 'rejected' | 'sample' | 'upgrades_off';
+  existing: ReleaseScore;
+  newcomer: ReleaseScore;
+  /** What the existing file's score came from: its probed media (+ release title) or just its filename. */
+  existingBasis: 'probe' | 'filename';
+  upgradesAllowed: boolean;
+  profileName: string | null;
+}
+
 /** Profile + resolved terms, loaded once per scoring call. */
 export interface LoadedProfile {
   model: ProfileModel | null;
@@ -121,13 +134,7 @@ export class QualityEngine {
 
   /** Filename-vs-filename upgrade check. Never true when the profile has upgrades off. */
   shouldUpgrade(existingFilename: string, newFilename: string, profileId: string): boolean {
-    const p = loadProfile(profileId);
-    if (p.model && !p.model.upgradesEnabled) return false;
-    const existing = scoreWithProfile(existingFilename, p);
-    const newcomer = scoreWithProfile(newFilename, p);
-    if (newcomer.rejected) return false;
-    if (isSampleFile(newFilename)) return false;
-    return newcomer.totalScore > existing.totalScore;
+    return this.explainUpgrade(null, existingFilename, newFilename, profileId).isUpgrade;
   }
 
   /**
@@ -143,8 +150,24 @@ export class QualityEngine {
     profileId: string,
     existingReleaseName?: string | null,
   ): boolean {
+    return this.explainUpgrade(existingProbe, existingFilename, newFilename, profileId, existingReleaseName).isUpgrade;
+  }
+
+  /**
+   * The upgrade decision WITH its reasoning: both scores, which basis the
+   * existing file was scored on, and why it was (not) an upgrade. This is
+   * the single implementation behind shouldUpgrade / shouldUpgradeWithMedia,
+   * so Manual Import's explanation can never drift from the real decision.
+   */
+  explainUpgrade(
+    existingProbe: Pick<MediaProbeInfo, 'video' | 'audio' | 'overallBitrate' | 'fileSize'> | null,
+    existingFilename: string,
+    newFilename: string,
+    profileId: string,
+    existingReleaseName?: string | null,
+  ): UpgradeExplanation {
     const p = loadProfile(profileId);
-    if (p.model && !p.model.upgradesEnabled) return false;
+    const upgradesAllowed = p.model ? p.model.upgradesEnabled : true;
     const existing = existingProbe
       ? mergeProbeWithRelease(
           scoreFromMedia(existingProbe, p),
@@ -152,9 +175,13 @@ export class QualityEngine {
         )
       : scoreWithProfile(existingFilename, p);
     const newcomer = scoreWithProfile(newFilename, p);
-    if (newcomer.rejected) return false;
-    if (isSampleFile(newFilename)) return false;
-    return newcomer.totalScore > existing.totalScore;
+    const existingBasis: UpgradeExplanation['existingBasis'] = existingProbe ? 'probe' : 'filename';
+    const base = { existing, newcomer, existingBasis, upgradesAllowed, profileName: p.model?.name ?? null };
+    if (!upgradesAllowed) return { ...base, isUpgrade: false, verdict: 'upgrades_off' };
+    if (newcomer.rejected) return { ...base, isUpgrade: false, verdict: 'rejected' };
+    if (isSampleFile(newFilename)) return { ...base, isUpgrade: false, verdict: 'sample' };
+    if (newcomer.totalScore > existing.totalScore) return { ...base, isUpgrade: true, verdict: 'upgrade' };
+    return { ...base, isUpgrade: false, verdict: newcomer.totalScore === existing.totalScore ? 'equal' : 'worse' };
   }
 
   /**

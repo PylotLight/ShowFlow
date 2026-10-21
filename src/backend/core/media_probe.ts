@@ -169,8 +169,13 @@ export interface MediaProbeInfo {
  * media file or the probe fails - never throws. Optionally caps how far off
  * the metadata-sized window mediabunny is allowed to stray, keeping memory
  * bounded for multi-GB files (defaults are fine for video files).
+ * `skipComputeDuration` skips the whole-file duration scan fallback (used by
+ * the Manual Import listing, which only displays the probe).
  */
-export async function probeMediaFile(filePath: string): Promise<MediaProbeInfo | null> {
+export async function probeMediaFile(
+  filePath: string,
+  opts: { skipComputeDuration?: boolean } = {},
+): Promise<MediaProbeInfo | null> {
   let input: Input | null = null;
   try {
     let fileSize: number | null = null;
@@ -185,7 +190,7 @@ export async function probeMediaFile(filePath: string): Promise<MediaProbeInfo |
     const format = await input.getFormat();
     let durationSeconds: number | null = null;
     durationSeconds = await input.getDurationFromMetadata();
-    if (durationSeconds == null && (fileSize == null || fileSize <= COMPUTE_DURATION_SIZE_CAP)) {
+    if (durationSeconds == null && !opts.skipComputeDuration && (fileSize == null || fileSize <= COMPUTE_DURATION_SIZE_CAP)) {
       try {
         durationSeconds = await input.computeDuration();
       } catch {
