@@ -15,7 +15,8 @@
 
 import { db } from "../db";
 import { backgroundJobs } from "./background_jobs";
-import { downloadAndInstallByTag } from "./updates_manager";
+import { downloadAndInstallByTag, updateJobs } from "./updates_manager";
+import { UpdateBusyError } from "./update_jobs";
 import { emitConnectSignal } from "./connect/bus";
 import { retryDelayMs, compareSemver, latestStableEntry } from "./update_policy";
 import { getCurrentRelease } from "./current_release";
@@ -286,6 +287,12 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
       return { ...base, status: "retry-scheduled", latestTag: latest.tag, pending, error: failure.message, nextRetryAt: new Date(failure.nextAt).toISOString() };
     }
 
+    // An activation holds the update slot (ShowFlow restarts any second):
+    // don't start a download it would cut off. The next cycle picks it up.
+    if (updateJobs.phase() === "activating") {
+      return { ...base, status: "unchanged", latestTag: latest.tag, pending };
+    }
+
     // Genuinely newer release + auto-download on: spend our one API call.
     const jobId = `update-download:${latest.tag}`;
     backgroundJobs.register({ id: jobId, type: 'update-download', label: `Downloading ShowFlow ${latest.title || latest.tag}`, total: 100, link: '/settings?tab=general' });
@@ -298,6 +305,12 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
         if (total) backgroundJobs.update(jobId, { completed: Math.floor((received / total) * 100), detail: `${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB` });
       });
     } catch (err) {
+      if (err instanceof UpdateBusyError) {
+        // An activation claimed the slot while we waited our turn: not a
+        // failed download, just try again next cycle.
+        backgroundJobs.complete(jobId, err.message);
+        return { ...base, status: "unchanged", latestTag: latest.tag, pending: getPendingUpdate() };
+      }
       // Previously a throw here (404 on the tag, network) escaped the cycle
       // and left the background job spinning as "running" forever.
       result = { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -350,6 +363,34 @@ export async function runWatchCycle(opts: { force?: boolean } = {}): Promise<Wat
     inFlight = null;
   });
   return inFlight;
+}
+
+/**
+ * Record a release downloaded + verified outside the watcher (manual "Update
+ * to", instant update) as the staged one, so the watcher doesn't download it
+ * a second time and the Activate banner / auto-activate know about it. Only
+ * a release newer than what's running (and not older than what's already
+ * staged) replaces the record.
+ */
+export async function recordStaged(input: { tag: string; releaseId: string; title?: string | null; notes?: string | null; publishedAt?: string | null }): Promise<PendingUpdate | null> {
+  const current = await getCurrentRelease().catch(() => null);
+  const currentVersion = current?.version ?? BUILD_VERSION;
+  if (compareVersions(input.tag, currentVersion) <= 0) return null;
+  const pending = getPendingUpdate();
+  if (pending && pending.releaseId === input.releaseId) return pending;
+  if (pending && compareVersions(input.tag, pending.tag) < 0) return null;
+  const fromFeed = entries.find((e) => e.tag === input.tag);
+  const record: PendingUpdate = {
+    tag: input.tag,
+    releaseId: input.releaseId,
+    title: input.title ?? fromFeed?.title ?? null,
+    notes: input.notes ?? fromFeed?.notes ?? null,
+    publishedAt: input.publishedAt ?? fromFeed?.updated ?? null,
+    stagedAt: new Date().toISOString(),
+  };
+  db.setSetting(PENDING_KEY, record);
+  if (failure?.tag === input.tag) failure = null;
+  return record;
 }
 
 /**
