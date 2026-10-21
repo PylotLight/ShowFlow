@@ -228,6 +228,36 @@ export function normalizeAutoActivate(raw: unknown): AutoActivateSettings {
   return { mode, hour };
 }
 
+// ---- Update mode -----------------------------------------------------------
+
+/**
+ * `staged` (default, the behaviour up to v0.1.89): "Update to vX" downloads +
+ * verifies, then activation is a separate click or the Auto-activate policy.
+ * `instant`: "Update now" runs download → verify → activate → reconnect in one
+ * go, and a background auto-download activates as soon as ShowFlow is idle.
+ */
+export type UpdateMode = 'staged' | 'instant';
+
+export const DEFAULT_UPDATE_MODE: UpdateMode = 'staged';
+
+export function normalizeUpdateMode(raw: unknown): UpdateMode {
+  let v: unknown = raw;
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v); } catch { /* bare string */ }
+  }
+  return v === 'instant' ? 'instant' : DEFAULT_UPDATE_MODE;
+}
+
+/**
+ * Auto-activate policy actually in force. Instant mode means "apply as soon
+ * as it's downloaded and nothing is importing/scanning", whatever the
+ * staged-mode Auto-activate select says (that choice is kept for when the
+ * user switches back).
+ */
+export function effectiveAutoActivate(mode: UpdateMode, settings: AutoActivateSettings): AutoActivateSettings {
+  return mode === 'instant' ? { mode: 'idle', hour: settings.hour } : settings;
+}
+
 export interface AutoActivateInput {
   settings: AutoActivateSettings;
   now: Date;
@@ -237,6 +267,12 @@ export interface AutoActivateInput {
   busy: BusyItem[];
   /** An activation is already being prepared. */
   activating: boolean;
+  /**
+   * A download (manual or background) or an instant update is in flight.
+   * Activating now would restart ShowFlow under it, so wait for it (the
+   * watcher re-checks right after staging, the scheduler every 15 min).
+   */
+  downloading?: boolean;
 }
 
 export function decideAutoActivate(i: AutoActivateInput): { activate: boolean; reason: string } {
@@ -246,6 +282,7 @@ export function decideAutoActivate(i: AutoActivateInput): { activate: boolean; r
     return { activate: false, reason: 'prerelease builds are never auto-activated — activate it manually' };
   }
   if (i.activating) return { activate: false, reason: 'activation already in progress' };
+  if (i.downloading) return { activate: false, reason: 'an update download is still running' };
   if (i.failedReleaseId && i.failedReleaseId === i.pending.releaseId) {
     return { activate: false, reason: 'this release already failed to activate — activate it manually' };
   }

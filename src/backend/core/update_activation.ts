@@ -3,9 +3,9 @@
 // and the optional auto-activate policy. All of this is app-side only — the
 // supervisor protocol (/admin/activate) is unchanged, so it ships OTA.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { db } from "../db";
-import { triggerActivate } from "./updates_manager";
+import { triggerActivate, updateJobs } from "./updates_manager";
 import { runBackup, loadRetention, DEFAULT_RETENTION } from "./backup";
 import {
   waitForQuiet,
@@ -13,6 +13,9 @@ import {
   shouldBackupBeforeActivate,
   decideAutoActivate,
   normalizeAutoActivate,
+  normalizeUpdateMode,
+  effectiveAutoActivate,
+  type UpdateMode,
   reconcileAttempt,
   type BusyItem,
   type ActivationAttempt,
@@ -25,6 +28,7 @@ const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ 
 const DATA_DIR = process.env.SHOWFLOW_DATA_DIR ?? "/data";
 const ATTEMPT_KEY = "updates:lastActivation";
 const AUTO_ACTIVATE_KEY = "updates:autoActivate";
+const UPDATE_MODE_KEY = "updates:mode";
 
 /** Manual activation waits this long for imports/scans to finish before going anyway. */
 export const MANUAL_DRAIN_TIMEOUT_MS = 2 * 60_000;
@@ -43,7 +47,7 @@ export function currentBusy(): BusyItem[] {
 
 // ---- Live progress (polled via /api/admin/updates/pending) ---------------
 
-export type ActivationPhase = "draining" | "backing-up" | "handing-off" | "failed";
+export type ActivationPhase = "waiting-download" | "draining" | "backing-up" | "handing-off" | "failed";
 
 export interface ActivationProgress {
   releaseId: string;
@@ -151,35 +155,63 @@ export interface StartActivationOpts {
   /** Skip the drain wait (user clicked "activate now anyway"). */
   force?: boolean;
   drainTimeoutMs?: number;
+  /**
+   * Re-checked after waiting out an in-flight download: auto-activate drops
+   * out when the release it meant to apply is no longer the staged one.
+   */
+  stillWanted?: () => boolean;
 }
+
+export type ActivationOutcome = "handed-off" | "failed" | "postponed" | "cancelled";
 
 /**
  * Runs the full safe-activation sequence in the background. Returns
  * immediately: `{ ok:false }` only for "already activating"; everything after
  * that is observable through getActivationProgress() and, once the handoff
  * kills this process, through /internal/ready + the boot-time reconcile.
+ * `done` settles with how it ended (the instant-update flow waits on it).
  */
-export function startActivation(releaseId: string, opts: StartActivationOpts = {}): { ok: boolean; message: string } {
-  if (progress && progress.phase !== "failed") {
-    return { ok: false, message: `Activation of ${progress.tag ?? progress.releaseId} is already in progress (${progress.phase}).` };
+export function startActivation(
+  releaseId: string,
+  opts: StartActivationOpts = {},
+): { ok: boolean; message: string; done?: Promise<ActivationOutcome> } {
+  const tag = opts.tag ?? null;
+  // The job slot is the one gate: one activation at a time, and while it's
+  // held no new download can start (see update_jobs.ts).
+  if (!updateJobs.beginActivation({ releaseId, tag, source: opts.auto ? "auto" : "manual" })) {
+    const cur = updateJobs.currentActivation();
+    const label = progress?.tag ?? progress?.releaseId ?? cur?.tag ?? cur?.releaseId ?? "a release";
+    return { ok: false, message: `Activation of ${label} is already in progress${progress ? ` (${progress.phase})` : ""}.` };
   }
+  const dl = updateJobs.currentDownload();
   progress = {
     releaseId,
-    tag: opts.tag ?? null,
-    phase: "draining",
-    detail: "Waiting for running imports/scans to finish…",
+    tag,
+    phase: dl ? "waiting-download" : "draining",
+    detail: dl
+      ? `Waiting for the download of ${dl.tag ?? dl.releaseId?.slice(0, 12) ?? "a release"} to finish…`
+      : "Waiting for running imports/scans to finish…",
     busy: [],
     startedAt: new Date().toISOString(),
     auto: !!opts.auto,
   };
-  void runActivation(releaseId, opts).catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    fail(releaseId, opts.tag ?? null, `Activation failed: ${message}`);
-  });
-  return { ok: true, message: `Activation of ${opts.tag ?? releaseId} started.` };
+  const done = runActivation(releaseId, opts)
+    .catch((err): ActivationOutcome => {
+      const message = err instanceof Error ? err.message : String(err);
+      fail(releaseId, tag, `Activation failed: ${message}`);
+      return "failed";
+    })
+    .then((outcome) => {
+      // Anything short of a handoff gives the slot back. After a handoff this
+      // process is about to be replaced, so keep it (no new downloads).
+      if (outcome !== "handed-off") updateJobs.endActivation(releaseId);
+      return outcome;
+    });
+  return { ok: true, message: `Activation of ${tag ?? releaseId} started.`, done };
 }
 
 function fail(releaseId: string, tag: string | null, message: string): void {
+  updateJobs.endActivation(releaseId);
   if (progress) progress = { ...progress, phase: "failed", detail: message, busy: [] };
   const prev = getLastActivation();
   if (prev && prev.releaseId === releaseId && !prev.outcome) {
@@ -190,8 +222,20 @@ function fail(releaseId: string, tag: string | null, message: string): void {
   db.logEvent({ type: "error", entityType: "system", entityId: tag ?? releaseId, message });
 }
 
-async function runActivation(releaseId: string, opts: StartActivationOpts): Promise<void> {
+async function runActivation(releaseId: string, opts: StartActivationOpts): Promise<ActivationOutcome> {
   const tag = opts.tag ?? null;
+
+  // 0. Never restart under a running download/verify (the watcher's, or a
+  //    manual "Update to" from another tab): let it finish first.
+  if (updateJobs.currentDownload()) {
+    await updateJobs.waitForDownloads();
+    if (opts.stillWanted && !opts.stillWanted()) {
+      progress = null;
+      console.log(`[updates] auto-activate of ${tag ?? releaseId} dropped: a newer download replaced it`);
+      return "cancelled";
+    }
+    if (progress) progress = { ...progress, phase: "draining", detail: "Waiting for running imports/scans to finish…" };
+  }
 
   // 1. Drain: let imports / scans / backups finish so the SIGTERM doesn't
   //    cut a file move in half. Auto mode only fires when already idle, so
@@ -214,7 +258,7 @@ async function runActivation(releaseId: string, opts: StartActivationOpts): Prom
         // Never interrupt work on the user's behalf — try again next tick.
         progress = null;
         console.log(`[updates] auto-activate postponed, still busy: ${drain.busy.map((b) => b.label).join(", ")}`);
-        return;
+        return "postponed";
       }
       db.logEvent({
         type: "update",
@@ -249,7 +293,7 @@ async function runActivation(releaseId: string, opts: StartActivationOpts): Prom
       // No backup → don't migrate. The user can still force it from the CLI.
       const message = err instanceof Error ? err.message : String(err);
       fail(releaseId, tag, `Pre-update backup failed (${message}) — not activating ${tag ?? releaseId}.`);
-      return;
+      return "failed";
     }
   }
 
@@ -264,8 +308,10 @@ async function runActivation(releaseId: string, opts: StartActivationOpts): Prom
   if (!result.ok) {
     // Pre-flight rejection (checksum, supervisor too old, already activating).
     fail(releaseId, tag, result.message);
+    return "failed";
   }
   // ok/timedOut: we're being replaced; the next boot reconciles.
+  return "handed-off";
 }
 
 // ---- Auto-activate -------------------------------------------------------
@@ -280,19 +326,78 @@ export function setAutoActivate(s: AutoActivateSettings): AutoActivateSettings {
   return n;
 }
 
+export function getUpdateMode(): UpdateMode {
+  return normalizeUpdateMode(db.getSetting(UPDATE_MODE_KEY));
+}
+
+export function setUpdateMode(mode: unknown): UpdateMode {
+  const n = normalizeUpdateMode(mode);
+  db.setSetting(UPDATE_MODE_KEY, n);
+  return n;
+}
+
 /** Called from the update-check task (every 15 min) and right after staging. */
 export function maybeAutoActivate(pending: { releaseId: string; tag: string } | null, now = new Date()): { activate: boolean; reason: string } {
+  const mode = getUpdateMode();
   const decision = decideAutoActivate({
-    settings: getAutoActivate(),
+    settings: effectiveAutoActivate(mode, getAutoActivate()),
     now,
     pending,
     failedReleaseId: failedReleaseId(),
     busy: currentBusy(),
-    activating: !!progress && progress.phase !== "failed",
+    activating: updateJobs.phase() === "activating" || (!!progress && progress.phase !== "failed"),
+    downloading: updateJobs.downloadBusy(),
   });
   if (decision.activate && pending) {
-    console.log(`[updates] auto-activating ${pending.tag} (${decision.reason})`);
-    startActivation(pending.releaseId, { tag: pending.tag, auto: true, drainTimeoutMs: 0 });
+    console.log(`[updates] auto-activating ${pending.tag} (${mode === "instant" ? "instant mode, " : ""}${decision.reason})`);
+    startActivation(pending.releaseId, {
+      tag: pending.tag,
+      auto: true,
+      drainTimeoutMs: 0,
+      stillWanted: () => stagedReleaseId() === pending.releaseId,
+    });
   }
   return decision;
+}
+
+/** releaseId of the currently staged (pending) release, read fresh from settings. */
+function stagedReleaseId(): string | null {
+  const raw = db.getSetting("updates:pending");
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return v && typeof v.releaseId === "string" ? v.releaseId : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---- Instant update (download → verify → activate in one go) -------------
+
+/**
+ * True when `releaseId` is already downloaded + verified into the
+ * supervisor's releases dir as the staged release (and didn't just fail to
+ * activate, in which case a fresh download is the sensible retry).
+ */
+export function isAlreadyStaged(releaseId: string, pendingReleaseId: string | null): boolean {
+  if (!pendingReleaseId || pendingReleaseId !== releaseId) return false;
+  if (failedReleaseId() === releaseId) return false;
+  if (/[/.]/.test(releaseId)) return false;
+  return existsSync(`${DATA_DIR}/releases/${releaseId}/manifest.json`);
+}
+
+/** Starts an instant update of a GitHub release (Settings > Updates "Update now"). */
+export async function startInstantUpdateFor(githubReleaseId: number, tag: string | null, source: "manual" | "auto" = "manual") {
+  const [{ startInstantUpdate, INSTANT_DRAIN_TIMEOUT_MS }, { downloadAndInstall }, watcher] = await Promise.all([
+    import("./update_instant"),
+    import("./updates_manager"),
+    import("./update_watcher"),
+  ]);
+  return startInstantUpdate({ githubReleaseId, tag }, source, {
+    jobs: updateJobs,
+    download: (id) => downloadAndInstall(id, { isStaged: (rid) => isAlreadyStaged(rid, watcher.getPendingUpdate()?.releaseId ?? null) }),
+    recordStaged: (t, rid) => watcher.recordStaged({ tag: t, releaseId: rid }),
+    activate: (rid, t) => startActivation(rid, { tag: t, auto: source === "auto", drainTimeoutMs: INSTANT_DRAIN_TIMEOUT_MS }),
+    activationError: () => (progress?.phase === "failed" ? progress.detail : getLastActivation()?.message ?? null),
+    log: (type, message) => db.logEvent({ type, entityType: "system", entityId: tag ?? undefined, message }),
+  });
 }

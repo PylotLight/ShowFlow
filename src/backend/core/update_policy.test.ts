@@ -6,6 +6,9 @@ import {
   shouldBackupBeforeActivate,
   decideAutoActivate,
   normalizeAutoActivate,
+  normalizeUpdateMode,
+  effectiveAutoActivate,
+  DEFAULT_UPDATE_MODE,
   reconcileAttempt,
   retryDelayMs,
   ATTEMPT_RECONCILE_WINDOW_MS,
@@ -147,6 +150,34 @@ describe('auto-activate scheduling', () => {
     expect(decideAutoActivate({ ...base, settings: s, now: at(1), failedReleaseId: 'older' }).activate).toBe(true);
     expect(decideAutoActivate({ ...base, settings: s, now: at(1), activating: true }).activate).toBe(false);
     expect(decideAutoActivate({ ...base, settings: s, now: at(1), pending: null }).activate).toBe(false);
+  });
+
+  test('waits while an update download (manual, background or instant) is running', () => {
+    // The v0.1.89 race: "When idle" fired while a manual "Update to" was still downloading.
+    const s = { mode: 'idle' as const, hour: 4 };
+    const d = decideAutoActivate({ ...base, settings: s, now: at(1), downloading: true });
+    expect(d.activate).toBe(false);
+    expect(d.reason).toContain('download');
+    expect(decideAutoActivate({ ...base, settings: s, now: at(1), downloading: false }).activate).toBe(true);
+  });
+});
+
+describe('update mode', () => {
+  test('defaults to staged (keeps the old download-then-activate behaviour)', () => {
+    expect(DEFAULT_UPDATE_MODE).toBe('staged');
+    expect(normalizeUpdateMode(undefined)).toBe('staged');
+    expect(normalizeUpdateMode('garbage')).toBe('staged');
+    expect(normalizeUpdateMode('instant')).toBe('instant');
+    expect(normalizeUpdateMode('"instant"')).toBe('instant');
+  });
+
+  test('instant mode auto-activates as soon as idle, whatever the staged-mode select says', () => {
+    const off = { mode: 'off' as const, hour: 3 };
+    expect(effectiveAutoActivate('instant', off)).toEqual({ mode: 'idle', hour: 3 });
+    expect(effectiveAutoActivate('staged', off)).toEqual(off);
+    const night = { mode: 'window' as const, hour: 2 };
+    expect(effectiveAutoActivate('instant', night).mode).toBe('idle');
+    expect(effectiveAutoActivate('staged', night)).toEqual(night);
   });
 });
 

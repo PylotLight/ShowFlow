@@ -24,6 +24,26 @@
 import { mkdir, rename, unlink } from "node:fs/promises";
 import { isPrereleaseTag, releaseRelation, type ReleaseRelation } from "./update_policy";
 import { createTarGzExtractor, type TarExtractor, type ExtractedEntry } from "./tar_stream";
+import { UpdateCoordinator } from "./update_jobs";
+
+/** Result of a download + supervisor verify ("stage") of one release. */
+export interface StageResult {
+  ok: boolean;
+  message: string;
+  releaseId?: string;
+  skipped?: boolean;
+  alreadyActive?: boolean;
+  /** This caller joined a download someone else (watcher / another tab) had already started. */
+  joined?: boolean;
+  /** Already downloaded + verified earlier; nothing was fetched. */
+  alreadyStaged?: boolean;
+}
+
+/**
+ * The process-wide update job slot: one download / activation at a time,
+ * same-release downloads share one job. See update_jobs.ts.
+ */
+export const updateJobs = new UpdateCoordinator<StageResult>();
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 
@@ -417,7 +437,7 @@ async function stageRelease(
   token: string | undefined,
   repo: string,
   onProgress?: (received: number, total: number | null) => void,
-): Promise<{ ok: boolean; message: string; releaseId?: string; alreadyActive?: boolean }> {
+): Promise<StageResult> {
   const releaseId = releaseIdFromAsset(tarballAsset.name);
   // Never re-stage the release we're running: the supervisor would rewrite
   // /data/releases/<sha>/showflow while it's executing (ETXTBSY), and there's
@@ -498,13 +518,26 @@ function releaseIdFromAsset(name: string): string {
 export async function downloadAndInstallByTag(
   tag: string,
   onProgress?: (received: number, total: number | null) => void,
-): Promise<{ ok: boolean; message: string; releaseId?: string; skipped?: boolean; alreadyActive?: boolean }> {
+): Promise<StageResult> {
   // Auto-download path only (the watcher): never pull a prerelease. Manual
   // installs by release id (downloadAndInstall) still allow it on purpose.
   if (isPrereleaseTag(tag)) {
     return { ok: false, skipped: true, message: `Release "${tag}" is a prerelease — skipped (install it manually from the releases list).` };
   }
   const { token, repo } = githubConfig();
+  // Joins a manual "Update to" of the same tag that's already running (and
+  // vice versa) instead of fetching the same tarball twice in parallel.
+  const { result, joined } = await updateJobs.download({ tag }, "auto", (h) => resolveAndStageByTag(tag, token, repo, h, onProgress));
+  return joined ? { ...result, joined } : result;
+}
+
+async function resolveAndStageByTag(
+  tag: string,
+  token: string | undefined,
+  repo: string,
+  h: { setReleaseId(id: string): void },
+  onProgress?: (received: number, total: number | null) => void,
+): Promise<StageResult> {
   setProgress({ tag, releaseId: null, phase: "resolving", receivedBytes: 0, totalBytes: null, attempt: 1, message: null });
 
   const relRes = await fetch(`${GITHUB_API}/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`, {
@@ -529,6 +562,7 @@ export async function downloadAndInstallByTag(
     return { ok: false, message };
   }
 
+  h.setReleaseId(releaseIdFromAsset(tarballAsset.name));
   return stageRelease(tag, tarballAsset, token, repo, onProgress);
 }
 
@@ -538,7 +572,13 @@ export async function downloadAndInstallByTag(
  * /admin/install-archive, which extracts and verifies the content
  * independently before copying into its own releases directory.
  */
-export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok: boolean; message: string; releaseId?: string; alreadyActive?: boolean }> {
+export async function downloadAndInstall(
+  githubReleaseId: number,
+  opts: {
+    /** True when this release is already downloaded + verified (skip the fetch). */
+    isStaged?: (releaseId: string, tag: string) => boolean;
+  } = {},
+): Promise<StageResult & { tag?: string }> {
   const { token, repo } = githubConfig();
 
   const relRes = await fetch(`${GITHUB_API}/repos/${repo}/releases/${githubReleaseId}`, {
@@ -553,8 +593,22 @@ export async function downloadAndInstall(githubReleaseId: number): Promise<{ ok:
   if (!tarballAsset) {
     return { ok: false, message: `Release "${release.tag_name}" is missing required tarball asset (showflow-<sha>.tar.gz).` };
   }
+  const tag: string = release.tag_name;
+  const releaseId = releaseIdFromAsset(tarballAsset.name);
+  if (!updateJobs.currentDownload() && opts.isStaged?.(releaseId, tag)) {
+    return { ok: true, alreadyStaged: true, tag, releaseId, message: `Release ${tag} is already downloaded and verified.` };
+  }
 
-  return stageRelease(release.tag_name, tarballAsset, token, repo);
+  // One job per release: if the background watcher (or another tab) is
+  // already downloading this release, wait for that one instead of racing it.
+  for (let i = 0; i < 2; i++) {
+    const { result, joined } = await updateJobs.download({ tag, releaseId }, "manual", () => stageRelease(tag, tarballAsset, token, repo));
+    // The watcher's by-tag job can end "skipped" (GitHub flags it prerelease,
+    // which the auto path never installs). A manual install still wants it.
+    if (joined && result.skipped) continue;
+    return { ...result, tag, ...(joined ? { joined } : {}) };
+  }
+  return { ok: false, tag, message: `Couldn't download ${tag}: the background download kept getting in the way.` };
 }
 
 /** Shared tarball download + stage-to-disk used by both id- and tag-based install.
