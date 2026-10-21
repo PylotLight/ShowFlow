@@ -123,7 +123,7 @@ async function runDaemon(): Promise<void> {
     port: PUBLIC_PORT,
     async fetch(req, server) {
       const port = manager.activePort;
-      if (port === null) return unavailableResponse();
+      if (port === null) return unavailableResponse(manager.phase);
 
       if (isWebSocketUpgrade(req)) {
         if (attemptWebSocketUpgrade(req, server as any, port)) return;
@@ -133,7 +133,9 @@ async function runDaemon(): Promise<void> {
       try {
         return await proxy(req, port);
       } catch {
-        return unavailableResponse();
+        // The child went away mid-request (SIGTERM from an activation, or a
+        // crash). Still JSON so the SPA treats it as a restart, not an error.
+        return unavailableResponse(manager.phase);
       }
     },
     websocket: {
