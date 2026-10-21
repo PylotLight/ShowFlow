@@ -70,6 +70,7 @@ export const SETTINGS_REGISTRY: SettingMeta[] = [
   // ── General ────────────────────────────────────────────────────────────
   ...S("general", "Updates", [
     { id: "general.updates", label: "Updates", description: "ShowFlow releases published on GitHub and what the supervisor is running.", keywords: ["update", "upgrade", "version", "release", "github", "supervisor", "new version"] },
+    { id: "general.update-mode", anchor: "general.updates", label: "Update mode", description: "Staged (download, then activate) or Instant (download + activate in one click).", keywords: ["instant", "staged", "update now", "one click", "automatic", "apply"] },
     { id: "general.auto-download", anchor: "general.updates", label: "Auto-download releases", description: "Download and verify new releases in the background, then wait for you to activate.", keywords: ["update", "automatic", "download", "release", "staged"] },
     { id: "general.auto-activate", anchor: "general.updates", label: "Auto-activate staged releases", description: "Activate a staged release by itself when idle or in a nightly window.", keywords: ["update", "automatic", "install", "restart", "nightly", "idle", "apply"] },
     { id: "general.update-status", anchor: "general.updates", label: "Update status", description: "Current state from the supervisor.", keywords: ["supervisor", "running version", "restart", "rollback"] },

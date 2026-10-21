@@ -96,6 +96,7 @@ describe("searchSettings", () => {
     expect(ids("hevc")).toContain("quality.terms");
     expect(ids("debounce")).toContain("connect.batch-window");
     expect(ids("colour")).toContain("appearance.accent");
+    expect(ids("instant")).toContain("general.update-mode");
   });
 
   test("all tokens must match (AND), across label + context", () => {
