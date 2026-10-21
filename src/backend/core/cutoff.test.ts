@@ -179,6 +179,16 @@ describe('upgrade give-up', () => {
     expect(giveUpPolicy({ upgradeGiveUpMisses: -1 } as any).misses).toBe(DEFAULT_UPGRADE_GIVE_UP_MISSES);
   });
 
+  test('defaults: give up after 5 misses (~11 days of backoff), skip episodes aired >90 days ago', () => {
+    expect(DEFAULT_UPGRADE_GIVE_UP_MISSES).toBe(5);
+    expect(DEFAULT_UPGRADE_GIVE_UP_DAYS).toBe(90);
+    const now = Date.now();
+    const recent = { air_date: new Date(now - 10 * DAY).toISOString() };
+    const def = giveUpPolicy(null);
+    expect(upgradeGiveUpReason(recent, 4, def, now)).toBeNull();
+    expect(upgradeGiveUpReason(recent, 5, def, now)).toBe('misses');
+  });
+
   test('reason: misses, aged, 0 = never', () => {
     const now = Date.now();
     const recent = new Date(now - 10 * DAY).toISOString();

@@ -561,6 +561,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
   onLibChange: () => void;
 }) {
   const [draft, setDraft] = React.useState<Profile>(profile);
+  const giveUp = useGiveUpPolicy();
   const [paint, setPaint] = React.useState<Mode>("prefer");
   const [saving, setSaving] = React.useState(false);
   // Reset the draft only when the saved profile itself changes (save, reload),
@@ -731,8 +732,10 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
               {draft.upgradeUntilResolution == null && " (Default: the target, capped at 1080p.)"}
             </p>
             {(draft.upgradeUntilResolution ?? 0) > DEFAULT_UNTIL && (
-              <p role="note" className="text-caption text-amber-200">
-                Every file under {resLabel(draft.upgradeUntilResolution!)} is chased, including your whole 1080p library. Pick 1080p unless you really want 4K everywhere.
+              <p data-testid="cutoff-give-up-info" className={SETTINGS_TEXT.desc}>
+                Upgrades keep searching until {resLabel(draft.upgradeUntilResolution!)}
+                {giveUp.misses > 0 ? `; searches give up after ${giveUp.misses} ${giveUp.misses === 1 ? "miss" : "misses"} in a row` : "; searches never give up"}
+                {giveUp.days > 0 ? ` and skip episodes aired more than ${giveUp.days} days ago.` : " (no age limit)."}
               </p>
             )}
             <CutoffUnmetList profileId={profile.id} dirty={dirty} />
@@ -880,7 +883,7 @@ function QualityProfilesTab() {
   );
 }
 
-const GIVE_UP_MISSES = [0, 4, 6, 8, 12, 20];
+const GIVE_UP_MISSES = [0, 3, 4, 5, 6, 8, 12];
 const GIVE_UP_DAYS = [0, 30, 60, 90, 180, 365];
 
 /**
@@ -890,15 +893,23 @@ const GIVE_UP_DAYS = [0, 30, 60, 90, 180, 365];
  * still grabs a better release if one shows up, and a new file, a
  * profile/cutoff change or a manual search starts them over.
  */
+/** Current give-up rules (defaults mirror core/cutoff.ts). */
+function useGiveUpPolicy(): { misses: number; days: number } {
+  const { config } = useSettings();
+  return {
+    misses: typeof config?.upgradeGiveUpMisses === "number" ? config.upgradeGiveUpMisses : 5,
+    days: typeof config?.upgradeGiveUpAfterDays === "number" ? config.upgradeGiveUpAfterDays : 90,
+  };
+}
+
 function UpgradeGiveUpPanel() {
-  const { config, saveConfig } = useSettings();
-  const misses = typeof config?.upgradeGiveUpMisses === "number" ? config.upgradeGiveUpMisses : 8;
-  const days = typeof config?.upgradeGiveUpAfterDays === "number" ? config.upgradeGiveUpAfterDays : 90;
+  const { saveConfig } = useSettings();
+  const { misses, days } = useGiveUpPolicy();
   const opts = (list: number[], cur: number) => (list.includes(cur) ? list : [...list, cur].sort((a, b) => a - b));
   return (
     <GlassPanel className="space-y-4 p-5 sm:p-6" data-setting="quality.give-up">
       <Section title="Upgrade searches · all profiles" description="Stop chasing a cutoff that never gets met. Given-up episodes aren't searched or listed as below cutoff; RSS still takes a better release if one turns up, and a new file, a cutoff change or a manual search starts them over.">
-        <FieldRow settingId="quality.give-up-misses" label="Give up after" description="Searches in a row that found nothing better (backoff 6h, 1d, 3d, then weekly).">
+        <FieldRow settingId="quality.give-up-misses" label="Give up after" description="Searches in a row that found nothing better (backoff 6h, 1d, 3d, then weekly; the default 5 is about 11 days).">
           <Select value={String(misses)} onValueChange={v => saveConfig({ upgradeGiveUpMisses: Number(v) })}>
             <SelectTrigger size="sm" className="w-32 text-sub" aria-label="Give up after misses"><SelectValue /></SelectTrigger>
             <SelectContent>

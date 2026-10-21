@@ -30,8 +30,8 @@ import { mediaFromStoredRow } from './media_probe';
 export const UPGRADE_BACKOFF_HOURS = [6, 24, 72, 168] as const;
 
 /** Give-up defaults (config.upgradeGiveUpMisses / upgradeGiveUpAfterDays).
- *  8 misses = the 6h/1d/3d ramp plus ~5 weekly tries (about six weeks). */
-export const DEFAULT_UPGRADE_GIVE_UP_MISSES = 8;
+ *  5 misses = searches at 0, +6h, +1d, +3d, +7d: about 11 days, then stop. */
+export const DEFAULT_UPGRADE_GIVE_UP_MISSES = 5;
 export const DEFAULT_UPGRADE_GIVE_UP_DAYS = 90;
 
 /** "Upgrade until" when a profile has upgrades on but no explicit until
