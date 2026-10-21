@@ -6,7 +6,8 @@ import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
 import { usePolling } from "@frontend/lib/usePolling";
 import { reconnectDelayMs, pendingPollMs, applyEstimateLabel } from "@frontend/lib/updateTiming";
-import { updateFetch, resolveRecovery, type RecoveryTarget } from "@frontend/lib/updateFetch";
+import { updateFetch, resolveRecovery, sameVersion, type RecoveryTarget } from "@frontend/lib/updateFetch";
+import { instantStepView, type InstantJobView } from "@frontend/lib/instantUpdate";
 
 interface PendingUpdate {
   tag: string;
@@ -19,6 +20,15 @@ interface PendingUpdate {
 
 interface UpdateInfo {
   autoActivate?: { mode: "off" | "idle" | "window"; hour: number };
+  /** "staged": download, then activate. "instant": Update now = download + verify + activate + reload. */
+  mode?: "staged" | "instant";
+  /** The server's single update job slot (one download / activation at a time). */
+  job?: {
+    phase: "idle" | "downloading" | "activating";
+    download: { tag: string | null; releaseId: string | null; source: "manual" | "auto"; joiners: number } | null;
+    activation: { tag: string | null; releaseId: string; source: "manual" | "auto" } | null;
+    instant: InstantJobView | null;
+  } | null;
   serverTime?: string;
   download?: {
     tag: string | null;
@@ -30,13 +40,14 @@ interface UpdateInfo {
     timings?: { downloadMs?: number; extractedInline?: boolean; supervisorMs?: number; supervisorPath?: "install" | "install-archive" };
   } | null;
   downloadFailure?: { tag: string; count: number; nextRetryAt: string; message: string } | null;
-  activation?: { releaseId: string; tag: string | null; phase: "draining" | "backing-up" | "handing-off" | "failed"; detail: string; busy: string[]; auto: boolean } | null;
+  activation?: { releaseId: string; tag: string | null; phase: "waiting-download" | "draining" | "backing-up" | "handing-off" | "failed"; detail: string; busy: string[]; auto: boolean } | null;
   lastActivation?: { releaseId: string; tag: string | null; outcome?: "activated" | "rolled-back" | "failed"; message?: string; backupFile: string | null; startedAt?: string; finishedAt?: string } | null;
   pendingMigrations?: string[] | null;
   busy?: string[];
 }
 
 const ACTIVATION_PHASE_LABEL: Record<string, string> = {
+  "waiting-download": "Waiting for download",
   draining: "Waiting for jobs",
   "backing-up": "Backing up DB",
   "handing-off": "Handing off",
@@ -124,6 +135,14 @@ export function UpdatesPanel() {
   stepStatusRef.current = stepStatus;
   /** Set while a manual "Update to" install request is in flight. */
   const installingTagRef = React.useRef<string | null>(null);
+  /** Tag of an instant update ("Update now") we started and are following through /pending. */
+  const [instantTag, setInstantTagState] = React.useState<string | null>(null);
+  const instantTagRef = React.useRef<string | null>(null);
+  function setInstantTag(tag: string | null) {
+    instantTagRef.current = tag;
+    setInstantTagState(tag);
+  }
+  const instantMode = info.mode === "instant";
   /** Target of the running reconnect poll, so a second trigger doesn't start a parallel one. */
   const reconnectTargetRef = React.useRef<RecoveryTarget | null>(null);
   /** Quiet retries of fetchAll() while ShowFlow restarts, before we show an error. */
@@ -137,6 +156,7 @@ export function UpdatesPanel() {
     const a = infoRef.current.activation;
     if (awaitingRef.current) return { releaseId: awaitingRef.current, tag: activeTagRef.current };
     if (installingTagRef.current) return { releaseId: null, tag: installingTagRef.current };
+    if (instantTagRef.current) return { releaseId: infoRef.current.job?.instant?.releaseId ?? null, tag: instantTagRef.current };
     if (a && a.phase !== "failed") return { releaseId: a.releaseId, tag: a.tag };
     // Pipeline card past the build step and not already failed (e.g. a staged
     // release that auto-activate is about to apply).
@@ -284,7 +304,46 @@ export function UpdatesPanel() {
   // (download, verify, drain, backup, handoff). Idle otherwise.
   const busyDownload = !!info.download && ["resolving", "downloading", "verifying"].includes(info.download.phase);
   const busyActivation = !!info.activation && info.activation.phase !== "failed";
-  usePolling(() => { fetchPending(); }, pendingPollMs(!!awaitingHandoff || (!!info.activation && info.activation.phase === "handing-off")), !!token && (busyDownload || busyActivation || !!awaitingHandoff || (actionLoading?.startsWith("install-") ?? false)));
+  usePolling(() => { fetchPending(); }, pendingPollMs(!!awaitingHandoff || (!!info.activation && info.activation.phase === "handing-off")), !!token && (busyDownload || busyActivation || !!awaitingHandoff || !!instantTag || (actionLoading?.startsWith("install-") ?? false)));
+
+  // Drive the stepper through an instant update: download (step 2) →
+  // activate (step 3, then the handoff effect below takes over) → reconnect.
+  React.useEffect(() => {
+    if (!instantTag) return;
+    const view = instantStepView(instantTag, info.job?.instant ?? null, info.activation ?? null);
+    switch (view.kind) {
+      case "download":
+        setCurrentStep(2);
+        setStepStatus("running");
+        if (!info.download || !["downloading", "verifying"].includes(info.download.phase)) {
+          setStepMessage(view.joined ? "Already downloading in the background, following that download…" : "Resolving the release on GitHub…");
+        }
+        return;
+      case "activate":
+        setInstantTag(null);
+        setCurrentStep(3);
+        setStepStatus("running");
+        setDownloadProgress(100);
+        setStepMessage("Downloaded and verified. Activating…");
+        import("@frontend/register-sw").then(m => m.markPendingRelease(view.releaseId)).catch(() => {});
+        setAwaitingHandoff(view.releaseId);
+        return;
+      case "failed":
+        setInstantTag(null);
+        setStepStatus("error");
+        setStepMessage(view.message);
+        setErr(view.message);
+        return;
+      case "done":
+        setInstantTag(null);
+        setStepStatus("success");
+        setStepMessage(view.message);
+        fetchAll(true);
+        return;
+      case "waiting":
+        return;
+    }
+  }, [info, instantTag]);
 
   // Drive the stepper from the backend's activation progress.
   React.useEffect(() => {
@@ -319,6 +378,21 @@ export function UpdatesPanel() {
       setStepMessage(d.timings?.extractedInline ? "Unpacked while downloading — supervisor is verifying the checksum…" : "Supervisor is extracting and verifying the checksum…");
     }
   }, [info.download, currentStep]);
+
+  function saveMode(next: "staged" | "instant") {
+    const prev = info.mode;
+    setInfo(i => ({ ...i, mode: next }));
+    updateFetch<{ mode?: "staged" | "instant" }>("/api/admin/updates/settings", {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify({ mode: next }),
+    })
+      .then(r => {
+        if (r.kind === "ok" && r.data?.mode) setInfo(i => ({ ...i, mode: r.data.mode }));
+        else setInfo(i => ({ ...i, mode: prev }));
+      })
+      .catch(() => setInfo(i => ({ ...i, mode: prev })));
+  }
 
   function saveAutoActivate(next: { mode: "off" | "idle" | "window"; hour: number }) {
     const prev = info.autoActivate;
@@ -608,7 +682,18 @@ export function UpdatesPanel() {
         return;
       }
       setDownloadProgress(100);
-      const data = r.data;
+      const data = r.data as ({ ok?: boolean; message?: string; releaseId?: string; activating?: boolean; tag?: string | null } | null);
+      if (r.kind === "error" && data?.activating && data.releaseId) {
+        // An activation holds the update slot. If it's this release (e.g.
+        // auto-activate got there first), follow it instead of failing.
+        if (sameVersion(data.tag, tagName)) {
+          setCurrentStep(3);
+          setStepMessage(`Already activating ${tagName}…`);
+          setAwaitingHandoff(data.releaseId);
+          fetchPending();
+          return;
+        }
+      }
       if (r.kind === "error" || !data?.ok) {
         const message = data?.message || (r.kind === "error" ? r.message : "") || "Install failed";
         setStepStatus("error");
@@ -630,6 +715,45 @@ export function UpdatesPanel() {
       setErr(String(e)); 
     }
     finally { installingTagRef.current = null; setActionLoading(null); }
+  }
+
+  /** Instant mode: download → verify → activate → reload, one click. */
+  async function doInstant(githubReleaseId: number, tagName: string) {
+    setActiveUpdateTag(tagName);
+    setCurrentStep(2);
+    setStepStatus("running");
+    setStepMessage("Starting update…");
+    setDownloadProgress(0);
+    setActionLoading(`install-${githubReleaseId}`);
+    setErr(null);
+    try {
+      const r = await updateFetch<{ ok?: boolean; accepted?: boolean; joined?: boolean; message?: string; job?: UpdateInfo["job"] }>("/api/admin/updates/update-now", {
+        method: "POST",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ githubReleaseId, tag: tagName }),
+      });
+      if (r.kind === "restarting") {
+        startReconnectPoll({ releaseId: null, tag: tagName });
+        return;
+      }
+      const data = r.data;
+      if (r.kind === "error" || !data?.accepted) {
+        const message = data?.message || (r.kind === "error" ? r.message : "") || "Update failed";
+        setStepStatus("error");
+        setStepMessage(message);
+        setErr(message);
+        return;
+      }
+      if (data.job) setInfo(i => ({ ...i, job: data.job }));
+      setInstantTag(tagName);
+      fetchPending();
+    } catch (e) {
+      setStepStatus("error");
+      setStepMessage(String(e));
+      setErr(String(e));
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   async function doActivate(releaseId: string, tagName?: string) {
@@ -769,7 +893,7 @@ export function UpdatesPanel() {
                 ) : (
                   <PlayIcon className="size-3 mr-1.5" />
                 )}
-                Activate Now
+                {instantMode ? "Update now" : "Activate Now"}
               </Button>
             ) : (
               r.hasRequiredAssets && !isCurrent && r.relation === "older" ? (
@@ -779,14 +903,17 @@ export function UpdatesPanel() {
                   variant="secondary"
                   size="sm"
                   disabled={actionLoading !== null}
-                  onClick={() => doInstall(r.githubReleaseId, r.tagName)}
+                  title={instantMode ? `Download, verify and switch to ${r.tagName} in one go` : `Download and verify ${r.tagName}, then activate it`}
+                  onClick={() => (instantMode ? doInstant(r.githubReleaseId, r.tagName) : doInstall(r.githubReleaseId, r.tagName))}
                 >
                   {actionLoading === `install-${r.githubReleaseId}` ? (
                     <Loader2Icon className="size-3 animate-spin mr-1.5" />
+                  ) : instantMode ? (
+                    <PlayIcon className="size-3 mr-1.5" />
                   ) : (
                     <DownloadIcon className="size-3 mr-1.5" />
                   )}
-                  Update to {r.tagName}
+                  {instantMode ? "Update now" : `Update to ${r.tagName}`}
                 </Button>
               )
             )}
@@ -850,7 +977,7 @@ export function UpdatesPanel() {
               ) : (
                 <PlayIcon className="size-3.5 mr-1.5" />
               )}
-              Activate
+              {instantMode ? "Update now" : "Activate"}
             </Button>
           </div>
           {info.lastActivation && info.lastActivation.releaseId === pending.releaseId && (info.lastActivation.outcome === "rolled-back" || info.lastActivation.outcome === "failed") && (
@@ -1013,7 +1140,19 @@ export function UpdatesPanel() {
               <span className="text-[11px] text-muted-foreground font-mono">Auto-download</span>
               <Switch checked={autoDownload} onCheckedChange={toggleAutoDownload} />
             </label>
-            <label className="flex items-center gap-2 select-none" title="Activate a staged release by itself — only when nothing is importing or scanning. Off by default.">
+            <label className="flex items-center gap-2 select-none" title="Instant: Update now downloads, verifies and switches over in one go, and auto-downloaded releases go live as soon as ShowFlow is idle. Staged: download first, then activate (by hand or on the Auto-activate schedule).">
+              <span className="text-[11px] text-muted-foreground font-mono">Mode</span>
+              <select
+                aria-label="Update mode"
+                className="h-7 rounded-md border border-white/10 bg-black/40 px-2 text-[11px] font-mono text-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal/60"
+                value={info.mode ?? "staged"}
+                onChange={(e) => saveMode(e.target.value === "instant" ? "instant" : "staged")}
+              >
+                <option value="staged">Staged (download, then activate)</option>
+                <option value="instant">Instant (download + activate)</option>
+              </select>
+            </label>
+            {!instantMode && <label className="flex items-center gap-2 select-none" title="Activate a staged release by itself — only when nothing is importing or scanning. Off by default.">
               <span className="text-[11px] text-muted-foreground font-mono">Auto-activate</span>
               <select
                 aria-label="Auto-activate staged releases"
@@ -1031,7 +1170,7 @@ export function UpdatesPanel() {
                   <option key={h} value={`window:${h}`}>Nightly {String(h).padStart(2, "0")}:00 (idle)</option>
                 ))}
               </select>
-            </label>
+            </label>}
             <Button variant="ghost" size="sm" onClick={() => runCheck({ force: true, note: true })} disabled={checking} title="Check GitHub for a new release now">
               {checking ? <Loader2Icon className="size-3.5 animate-spin mr-1.5" /> : <RadioIcon className="size-3.5 mr-1.5" />}
               Check now
@@ -1046,7 +1185,14 @@ export function UpdatesPanel() {
           Watching the Releases feed automatically (this panel checks every ~20s while open; every 15 min in the background).
           {checkNote && <span className="text-signal"> {checkNote}</span>}
         </div>
-        {info.autoActivate?.mode === "window" && info.serverTime && (
+        {instantMode && (
+          <p className="text-[11px] font-mono text-muted-foreground">
+            Instant: Update now downloads, verifies and switches over in one go, then this page reloads.
+            {autoDownload ? " New releases are downloaded and applied automatically as soon as nothing is importing or scanning." : " Auto-download is off, so new releases wait for you."}
+            {info.busy && info.busy.length > 0 && <span className="text-amber-300"> Running now: {info.busy.join(", ")}. Update now waits up to 2 min for these to finish, then restarts anyway.</span>}
+          </p>
+        )}
+        {!instantMode && info.autoActivate?.mode === "window" && info.serverTime && (
           <p className="text-[11px] font-mono text-muted-foreground">
             Nightly window uses the server's clock (now {info.serverTime.slice(16, 21)}); it's skipped if ShowFlow is busy for the whole hour.
           </p>
