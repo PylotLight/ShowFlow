@@ -76,10 +76,10 @@ describe("UpdateCoordinator downloads", () => {
     const d = deferred<R>();
     const a = c.download({ tag: "v1" }, "auto", () => d.promise);
     const b = c.download({ tag: "v1" }, "manual", () => d.promise);
-    d.promise.catch(() => {}); // the test's own handle, not the coordinator's
     d.reject(new Error("404"));
-    await expect(a).rejects.toThrow("404");
-    await expect(b).rejects.toThrow("404");
+    const [ra, rb] = await Promise.allSettled([a, b]);
+    expect(ra.status === "rejected" && String(ra.reason)).toContain("404");
+    expect(rb.status === "rejected" && String(rb.reason)).toContain("404");
     expect(c.phase()).toBe("idle");
   });
 
