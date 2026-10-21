@@ -399,6 +399,7 @@ export async function resolveEpisodeDuplicate(
     originalName: keptName,
     fileSize: size,
     sourceKind: 'import',
+    origin: 'scan',
   });
   db.updateEpisodeFilePath(showId, season, episode, keep.path);
 

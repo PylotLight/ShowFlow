@@ -22,7 +22,8 @@ import { isSampleFile } from './sample_filter';
 // Map a scanned/parsed episode assignment to both episodes.file_path and the
 // episode_files provenance table. Scanned files have no release provenance
 // (they were placed directly on disk), so source_kind stays 'import' unless
-// a matching grab exists.
+// a matching grab exists. Rows written here are origin 'scan' so they never
+// show up as imports in Activity > History.
 //
 // Idempotency (issues-tracking #28): a steady-state scan must be ~free. When
 // the live episode_files row already points at this exact path with the same
@@ -40,7 +41,23 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
     size = st.size;
     live = db.getCurrentEpisodeFile(showId, season, episodeNumber);
   } catch {}
-  if (live && live.file_path === file && live.container && live.file_size === size) {
+  if (live && live.file_path === file && live.file_size === size && (live.container || live.probed_at)) {
+    return 'unchanged';
+  }
+  // Same path and the file wasn't replaced (same size, or the row predates
+  // size tracking — the scanner used to never store file_size, which made
+  // the fast-path above miss on EVERY scan and append a fresh "import" row
+  // per file per scan). Fill in size/media on the live row in place instead
+  // of inserting history: a rescan is not an import.
+  if (live && size !== null && live.file_path === file && (live.file_size === size || live.file_size === null)) {
+    try {
+      const needsProbe = !live.container && !live.probed_at;
+      const media = needsProbe ? await probeToMediaColumns(file) : null;
+      db.refreshEpisodeFileInPlace(live.id, { fileSize: size, media, probed: needsProbe });
+      db.updateEpisodeFilePath(showId, season, episodeNumber, file);
+    } catch (err) {
+      debugLog(`Failed to refresh provenance for ${file}: ${err}`);
+    }
     return 'unchanged';
   }
   db.updateEpisodeFilePath(showId, season, episodeNumber, file);
@@ -78,6 +95,8 @@ async function mapScannedFile(showId: string, season: number, episodeNumber: num
       episode: episodeNumber,
       filePath: file,
       originalName: landedName,
+      fileSize: size,
+      origin: 'scan',
       sourceKind: attributable ? 'release' : 'import',
       releaseTitle: attributable ? grab!.release_title : null,
       indexerName: attributable ? grab!.indexer_name : null,
@@ -207,7 +226,18 @@ export class LibraryScanner {
     } catch {
       return 'unchanged';
     }
-    if (live && live.file_path === file && live.container && live.file_size === size) {
+    if (live && live.file_path === file && live.file_size === size && (live.container || live.probed_at)) {
+      return 'unchanged';
+    }
+    // Same file re-seen (see mapScannedFile): refresh in place, no new row.
+    if (live && size !== null && live.file_path === file && (live.file_size === size || live.file_size === null)) {
+      try {
+        const needsProbe = !live.container && !live.probed_at;
+        const media = needsProbe ? await probeToMediaColumns(file) : null;
+        db.refreshEpisodeFileInPlace(live.id, { fileSize: size, media, probed: needsProbe });
+      } catch (err) {
+        debugLog(`Failed to refresh movie provenance for ${file}: ${err}`);
+      }
       return 'unchanged';
     }
     try {
@@ -220,6 +250,7 @@ export class LibraryScanner {
         filePath: file,
         originalName: filename,
         fileSize: size,
+        origin: 'scan',
         sourceKind: grab ? 'release' : 'import',
         releaseTitle: grab?.release_title ?? null,
         indexerName: grab?.indexer_name ?? null,
@@ -724,12 +755,16 @@ export class LibraryScanner {
     // episodes.file_path to the path that still exists.
     const bestRow = db.getCurrentEpisodeFile(showId, season, episode);
     if (!bestRow?.file_path || bestRow.file_path !== best.path) {
+      let bestSize: number | null = null;
+      try { bestSize = (await fs.promises.stat(best.path)).size; } catch {}
       db.recordEpisodeFile({
         showId,
         season,
         episode,
         filePath: best.path,
         originalName: best.path.split(/[\\/]/).pop() ?? best.path,
+        fileSize: bestSize,
+        origin: 'scan',
         sourceKind: 'import',
         media: await probeToMediaColumns(best.path),
       });

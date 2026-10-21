@@ -394,6 +394,7 @@ export class DatabaseManager {
   listAllCurrentEpisodeFiles() { return episodeFiles.listAllCurrentEpisodeFiles(this); }
   backfillEpisodeFiles() { return episodeFiles.backfillEpisodeFiles(this); }
   updateEpisodeFileMedia(rowId: number, media: Parameters<typeof episodeFiles.updateEpisodeFileMedia>[2]) { return episodeFiles.updateEpisodeFileMedia(this, rowId, media); }
+  refreshEpisodeFileInPlace(rowId: number, input: Parameters<typeof episodeFiles.refreshEpisodeFileInPlace>[2]) { return episodeFiles.refreshEpisodeFileInPlace(this, rowId, input); }
   updateEpisodeFileRowPath(rowId: number, filePath: string) { return episodeFiles.updateEpisodeFileRowPath(this, rowId, filePath); }
   listUnprobedEpisodeFiles() { return episodeFiles.listUnprobedEpisodeFiles(this); }
   pruneSupersededEpisodeFiles() { return episodeFiles.pruneSupersededEpisodeFiles(this); }
