@@ -343,6 +343,11 @@ export function listHistory(self: DatabaseManager, filter: HistoryFilter): { ite
         f.indexer_name AS indexer_name
       FROM episode_files f
       LEFT JOIN shows s ON s.id = f.show_id
+      -- Only real pipeline imports. Library re-scans, duplicate cleanup and
+      -- the Sonarr mirror also write episode_files rows (origin 'scan' /
+      -- 'sync'); listing those buried real history under "Imported <file>"
+      -- rows for files that were already in the library.
+      WHERE f.origin = 'import'
     `);
   }
 
