@@ -173,7 +173,7 @@ const TASKS: Record<TaskName, TaskDefinition> = {
   'update-check': {
     name: 'update-check',
     displayName: 'Update Watcher',
-    description: 'Check the GitHub Releases Atom feed for a newer build and auto-download + verify it (rate-limit-free; activation stays a manual click)',
+    description: 'Check the GitHub Releases Atom feed for a newer build and auto-download + verify it (rate-limit-free). Activation follows Settings > Updates: a manual click, the Auto-activate schedule, or right away when idle in Instant mode',
     category: 'system',
     intervalMinutes: 15, // ETag/304 revalidation makes frequent checks essentially free
     defaultEnabled: true,
@@ -182,7 +182,8 @@ const TASKS: Record<TaskName, TaskDefinition> = {
       const result = await runWatchCycle();
       debugLog(`Task update-check complete: ${result.status} (latest ${result.latestTag ?? 'none'})`);
       // Optional auto-activate (Settings > Updates, off by default): a staged
-      // release goes live when idle / inside the chosen hour.
+      // release goes live when idle / inside the chosen hour, or as soon as
+      // idle in Instant mode. Never while an update download is running.
       const { maybeAutoActivate } = await import('./update_activation');
       const auto = maybeAutoActivate(result.pending);
       if (result.pending) debugLog(`Auto-activate: ${auto.activate ? 'activating' : 'not now'} (${auto.reason})`);

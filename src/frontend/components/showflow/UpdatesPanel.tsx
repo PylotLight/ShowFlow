@@ -316,7 +316,7 @@ export function UpdatesPanel() {
         setCurrentStep(2);
         setStepStatus("running");
         if (!info.download || !["downloading", "verifying"].includes(info.download.phase)) {
-          setStepMessage(view.joined ? "Already downloading in the background, following that download…" : "Resolving the release on GitHub…");
+          setStepMessage(info.job?.download?.source === "auto" ? "Already downloading in the background, following that download…" : "Resolving the release on GitHub…");
         }
         return;
       case "activate":

@@ -22,7 +22,7 @@ export interface ActivationView {
 
 export type InstantStepState =
   /** Step 2: downloading / verifying (progress comes from `download`). */
-  | { kind: "download"; joined: boolean }
+  | { kind: "download" }
   /** Step 3: downloaded + verified, activation running; follow it by releaseId. */
   | { kind: "activate"; releaseId: string }
   | { kind: "failed"; message: string }
@@ -35,7 +35,7 @@ export function instantStepView(tag: string, job: InstantJobView | null, activat
   if (job && sameVersion(job.tag, tag)) {
     switch (job.step) {
       case "download":
-        return { kind: "download", joined: false };
+        return { kind: "download" };
       case "activate":
         if (job.releaseId) return { kind: "activate", releaseId: job.releaseId };
         break;
