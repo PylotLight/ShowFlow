@@ -27,6 +27,9 @@ import {
   CommandShortcut,
 } from "@frontend/components/ui/command";
 import { SETTINGS_TABS } from "@frontend/components/showflow/settings/tabs";
+import { requestSettingFocus } from "@frontend/components/showflow/settings/focus";
+import { searchSettings } from "@frontend/components/showflow/settings/registry";
+import { findTab } from "@frontend/components/showflow/settings/SettingsNav";
 import type { ShowSummary } from "@frontend/components/showflow/PosterCard";
 import { ACTIVITY_TABS, activityHash, navigate, pageHash } from "@frontend/lib/router";
 import { toast } from "@frontend/lib/toast";
@@ -139,6 +142,9 @@ export function CommandPalette({ open, onOpenChange, onSelectShow, onAddShow }: 
       .slice(0, 12);
   }, [shows, q]);
 
+  // Individual settings (settings/registry.ts), only once the user types.
+  const settingHits = React.useMemo(() => (q ? searchSettings(q, { limit: 8, includeTabs: false }) : []), [q]);
+
   const otherTasks = tasks.filter((t) => t.name !== "auto-grab" && t.name !== "scan-library");
 
   return (
@@ -188,6 +194,25 @@ export function CommandPalette({ open, onOpenChange, onSelectShow, onAddShow }: 
           </CommandItem>
         </CommandGroup>
 
+        {settingHits.length > 0 && (
+          <CommandGroup heading="Settings">
+            {settingHits.map(({ entry, path }) => {
+              const Icon = findTab(entry.tab)?.icon ?? SearchIcon;
+              return (
+                <CommandItem
+                  key={entry.id}
+                  // Everything we matched on, so cmdk's own filter keeps it.
+                  value={`setting ${entry.label} ${path} ${(entry.keywords ?? []).join(" ")} ${entry.description} ${entry.id}`}
+                  onSelect={() => run(() => requestSettingFocus(entry))}
+                >
+                  <Icon /> <span className="truncate">{entry.label}</span>
+                  <span className="ml-auto shrink-0 truncate pl-2 font-mono text-[11px] text-muted-foreground">{path}</span>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        )}
+
         <CommandSeparator />
         <CommandGroup heading="Pages">
           {PAGES.map((p) => (
@@ -205,7 +230,7 @@ export function CommandPalette({ open, onOpenChange, onSelectShow, onAddShow }: 
           })}
         </CommandGroup>
 
-        <CommandGroup heading="Settings">
+        <CommandGroup heading="Settings tabs">
           {SETTINGS_TABS.map((t) => (
             <CommandItem key={t.id} value={`settings ${t.label} ${t.id}`} onSelect={() => run(() => navigate(pageHash("settings", t.id)))}>
               <t.icon /> Settings <span className="text-muted-foreground">›</span> {t.label}

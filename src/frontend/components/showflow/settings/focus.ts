@@ -23,6 +23,10 @@ export function registerSettingsPage(): () => void {
   return () => { mounted--; };
 }
 
+export function peekPendingSettingFocus(): SettingFocusRequest | null {
+  return pending;
+}
+
 export function takePendingSettingFocus(): SettingFocusRequest | null {
   const p = pending;
   pending = null;
@@ -30,11 +34,12 @@ export function takePendingSettingFocus(): SettingFocusRequest | null {
 }
 
 export function requestSettingFocus(entry: Pick<SettingMeta, "tab" | "id">) {
-  const req = { tab: entry.tab, id: entry.id };
+  // Stored even when the page is mounted: switching tabs can remount it
+  // (a ?section= URL keys the page), and the new instance picks it up.
+  pending = { tab: entry.tab, id: entry.id };
   if (mounted > 0) {
-    window.dispatchEvent(new CustomEvent<SettingFocusRequest>(SETTING_FOCUS_EVENT, { detail: req }));
+    window.dispatchEvent(new CustomEvent<SettingFocusRequest>(SETTING_FOCUS_EVENT, { detail: pending }));
   } else {
-    pending = req;
     navigate(pageHash("settings", entry.tab));
   }
 }
@@ -102,6 +107,8 @@ export function flashSettingElement(el: HTMLElement) {
  * then scroll + flash. Returns a cancel function.
  */
 export function focusSettingWhenReady(id: string, timeoutMs = 4000): () => void {
+  // A whole-tab result: the tab switch is the destination.
+  if (id.startsWith("tab:")) return () => {};
   let cancelled = false;
   const start = performance.now();
   const tick = () => {
