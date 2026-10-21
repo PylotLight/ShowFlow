@@ -195,7 +195,7 @@ function DatabaseCleanup({ sweepTask, onDone }: { sweepTask: any; onDone: () => 
   const busy = busyAction !== null;
 
   return (
-    <GlassPanel className="overflow-hidden">
+    <GlassPanel data-setting="analytics.database-cleanup" className="overflow-hidden">
       <div className="px-6 py-4 border-b border-white/5 flex items-center gap-2">
         <Trash2Icon className="size-4 text-signal" />
         <h4 className="font-display text-sm font-semibold text-white/90">Database Cleanup</h4>
@@ -303,7 +303,7 @@ export function AnalyticsPanel() {
   const largestTable = sortedTables[0];
 
   return (
-    <div className="space-y-6">
+    <div data-setting="analytics.database-usage" className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Database Usage</h3>

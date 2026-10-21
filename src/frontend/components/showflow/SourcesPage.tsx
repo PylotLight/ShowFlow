@@ -94,7 +94,7 @@ function SourcesPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div data-setting="sources.overview" className="space-y-4">
       <GlassPanel className="flex items-center justify-between p-5">
         <div className="flex items-center gap-3">
           <HardDriveIcon className="size-5 text-signal" />

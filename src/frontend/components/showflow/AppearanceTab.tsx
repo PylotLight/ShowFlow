@@ -96,11 +96,11 @@ function Section({ title, description, defaultOpen = false, onReset, children }:
   );
 }
 
-function ColorField({ label, description, value, fallback, onChange }: {
-  label: string; description: string; value: string | undefined; fallback: string; onChange: (v: string) => void;
+function ColorField({ label, description, value, fallback, onChange, settingId }: {
+  settingId?: string; label: string; description: string; value: string | undefined; fallback: string; onChange: (v: string) => void;
 }) {
   return (
-    <FieldRow label={label} description={description}>
+    <FieldRow settingId={settingId} label={label} description={description}>
       <div className="flex items-center gap-2 @md:justify-end">
         <input
           type="color"
@@ -154,7 +154,7 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
 }) {
   return (
     <>
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="appearance.accent" className="p-6 space-y-5">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Accent Theme</h3>
           <p className="text-muted-foreground text-xs mt-0.5">Choose the accent color used throughout the interface</p>
@@ -162,7 +162,7 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
         <ColorDock current={accent} onChange={(color) => { setAccent(color); }} />
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="appearance.colors" className="p-6 space-y-5">
         <Section
           title="Colors"
           description="Adjust the base color scheme"
@@ -174,19 +174,19 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
             updateTheme(vals);
           }}
         >
-          <ColorField label="Background" description="Base background color of the interface" value={theme.background} fallback="#0b0e1a" onChange={v => updateTheme({ background: v })} />
-          <ColorField label="Foreground" description="Primary text color" value={theme.foreground} fallback="#f0f2f6" onChange={v => updateTheme({ foreground: v })} />
-          <ColorField label="Surface" description="Card and panel background" value={theme.surfaceGlass} fallback="#181c2e" onChange={v => updateTheme({ surfaceGlass: v })} />
-          <ColorField label="Card" description="Elevated surface background" value={theme.card} fallback="#131724" onChange={v => updateTheme({ card: v })} />
-          <ColorField label="Card Foreground" description="Text on card surfaces" value={theme.cardForeground} fallback="#f0f2f6" onChange={v => updateTheme({ cardForeground: v })} />
-          <ColorField label="Popover" description="Dropdown and popover background" value={theme.popover} fallback="#131724" onChange={v => updateTheme({ popover: v })} />
-          <ColorField label="Muted Foreground" description="Secondary / muted text color" value={theme.mutedForeground} fallback="#8b8fa3" onChange={v => updateTheme({ mutedForeground: v })} />
-          <ColorField label="Border" description="Default border color" value={theme.border} fallback="#ffffff1a" onChange={v => updateTheme({ border: v })} />
-          <ColorField label="Input" description="Form input border color" value={theme.input} fallback="#ffffff1f" onChange={v => updateTheme({ input: v })} />
+          <ColorField settingId="appearance.color-background" label="Background" description="Base background color of the interface" value={theme.background} fallback="#0b0e1a" onChange={v => updateTheme({ background: v })} />
+          <ColorField settingId="appearance.color-foreground" label="Foreground" description="Primary text color" value={theme.foreground} fallback="#f0f2f6" onChange={v => updateTheme({ foreground: v })} />
+          <ColorField settingId="appearance.color-surface" label="Surface" description="Card and panel background" value={theme.surfaceGlass} fallback="#181c2e" onChange={v => updateTheme({ surfaceGlass: v })} />
+          <ColorField settingId="appearance.color-card" label="Card" description="Elevated surface background" value={theme.card} fallback="#131724" onChange={v => updateTheme({ card: v })} />
+          <ColorField settingId="appearance.color-card-foreground" label="Card Foreground" description="Text on card surfaces" value={theme.cardForeground} fallback="#f0f2f6" onChange={v => updateTheme({ cardForeground: v })} />
+          <ColorField settingId="appearance.color-popover" label="Popover" description="Dropdown and popover background" value={theme.popover} fallback="#131724" onChange={v => updateTheme({ popover: v })} />
+          <ColorField settingId="appearance.color-muted-foreground" label="Muted Foreground" description="Secondary / muted text color" value={theme.mutedForeground} fallback="#8b8fa3" onChange={v => updateTheme({ mutedForeground: v })} />
+          <ColorField settingId="appearance.color-border" label="Border" description="Default border color" value={theme.border} fallback="#ffffff1a" onChange={v => updateTheme({ border: v })} />
+          <ColorField settingId="appearance.color-input" label="Input" description="Form input border color" value={theme.input} fallback="#ffffff1f" onChange={v => updateTheme({ input: v })} />
         </Section>
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="appearance.typography" className="p-6 space-y-5">
         <Section
           title="Typography"
           description="Control fonts and text sizing"
@@ -198,18 +198,18 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
             updateTheme(vals);
           }}
         >
-          <FieldRow label="Display Font" description="Font family for headings and titles">
+          <FieldRow settingId="appearance.display-font" label="Display Font" description="Font family for headings and titles">
             <FontFamilySelect value={theme.fontDisplay} onChange={v => updateTheme({ fontDisplay: v })} options={DISPLAY_FONTS} defaultValue={THEME_DEFAULTS.fontDisplay} />
           </FieldRow>
-          <FieldRow label="Sans Font" description="Font family for body text">
+          <FieldRow settingId="appearance.sans-font" label="Sans Font" description="Font family for body text">
             <FontFamilySelect value={theme.fontSans} onChange={v => updateTheme({ fontSans: v })} options={SANS_FONTS} defaultValue={THEME_DEFAULTS.fontSans} />
           </FieldRow>
-          <FieldRow label="Mono Font" description="Font family for monospace / code text">
+          <FieldRow settingId="appearance.mono-font" label="Mono Font" description="Font family for monospace / code text">
             <FontFamilySelect value={theme.fontMono} onChange={v => updateTheme({ fontMono: v })} options={MONO_FONTS} defaultValue={THEME_DEFAULTS.fontMono} />
           </FieldRow>
           <div className="border-t border-white/5 pt-5 space-y-5">
             <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Text Sizes</p>
-            <FieldRow label="Caption" description="Small labels and auxiliary text">
+            <FieldRow settingId="appearance.text-sizes" label="Caption" description="Small labels and auxiliary text">
               <Select value={theme.fontSizeCaption || "0.75rem"} onValueChange={v => updateTheme({ fontSizeCaption: v })}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>{FONT_SIZE_OPTIONS.map(o => (<SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>))}</SelectContent>
@@ -237,14 +237,14 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
         </Section>
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="appearance.sizes" className="p-6 space-y-5">
         <Section
           title="Sizes & Spacing"
           description="Adjust the density and sizing of UI elements"
           defaultOpen
           onReset={() => updateTheme({ radius: THEME_DEFAULTS.radius })}
         >
-          <FieldRow label="Card Radius" description="Border radius on panels and cards">
+          <FieldRow settingId="appearance.card-radius" label="Card Radius" description="Border radius on panels and cards">
             <Select value={theme.radius || "0.625rem"} onValueChange={v => updateTheme({ radius: v })}>
               <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -259,7 +259,7 @@ export function AppearanceTab({ theme, accent, updateTheme, setAccent }: {
               </SelectContent>
             </Select>
           </FieldRow>
-          <FieldRow label="Element Radius" description="Border radius on buttons and inputs (derived from card radius)">
+          <FieldRow settingId="appearance.element-radius" label="Element Radius" description="Border radius on buttons and inputs (derived from card radius)">
             <div className="flex items-center gap-2 h-9">
               <div className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-1 text-muted-foreground font-mono text-xs">
                 {theme.radius ? `calc(${theme.radius} - 2px)` : "calc(0.625rem - 2px)"}

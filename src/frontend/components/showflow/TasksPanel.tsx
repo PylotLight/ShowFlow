@@ -89,7 +89,7 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
 
   return (
     <div className="space-y-6">
-      <GlassPanel className="overflow-hidden">
+      <GlassPanel data-setting="tasks.file-watcher" className="overflow-hidden">
         <div className="px-6 py-4 border-b border-white/5">
           <div className="flex items-center gap-2">
             <RadioIcon className="size-4 text-signal" />
@@ -120,7 +120,7 @@ export function TasksPanel({ tasks, loading, onRunTask, onUpdateTask, taskRunnin
             </div>
             <div className="divide-y divide-white/5">
               {categoryTasks.map(task => (
-                <div key={task.name} className="px-6 py-4">
+                <div key={task.name} data-setting={`tasks.${task.name}`} className="px-6 py-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">

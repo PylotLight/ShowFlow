@@ -64,6 +64,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
       <SectionHeading id="grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
       <GlassPanel className="p-6 space-y-5">
         <FieldRow
+          settingId="general.upgrade-until-cutoff"
           label="Upgrade until cutoff"
           description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Global switch; each quality profile also has its own Keep upgrading toggle and upgrade-until target."
         >
@@ -74,6 +75,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
           />
         </FieldRow>
         <FieldRow
+          settingId="general.prefer-season-packs"
           label="Prefer season packs"
           description="For a season that has finished airing, try one season pack before searching episode by episode."
         >
@@ -85,6 +87,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
         </FieldRow>
         {config.preferSeasonPacks !== false && (
           <FieldRow
+            settingId="general.pack-threshold"
             label="Pack threshold"
             description="Missing episodes a finished season needs before a pack is tried."
           >
@@ -112,7 +115,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
 
       <SectionHeading id="defaults" title="Defaults" description="How new shows are added and how file collisions are handled." />
       <GlassPanel className="p-6 space-y-5">
-        <FieldRow label="Default Provider" description="Metadata provider used when adding shows">
+        <FieldRow settingId="general.default-provider" label="Default Provider" description="Metadata provider used when adding shows">
           <Select
             value={config.defaultProvider || "tmdb"}
             onValueChange={v => saveConfig({ defaultProvider: v })}
@@ -127,7 +130,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="On Collision" description="What to do when a file already exists at the destination">
+        <FieldRow settingId="general.on-collision" label="On Collision" description="What to do when a file already exists at the destination">
           <Select
             value={config.onCollision || "skip"}
             onValueChange={v => saveConfig({ onCollision: v })}
@@ -142,13 +145,14 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="Dry Run" description="Log actions without actually moving files">
+        <FieldRow settingId="general.dry-run" label="Dry Run" description="Log actions without actually moving files">
           <Switch
             checked={!!config.dryRun}
             onCheckedChange={v => saveConfig({ dryRun: v })}
           />
         </FieldRow>
         <FieldRow
+          settingId="general.fallback-timezone"
           label="Fallback Timezone"
           description="Used when a show's origin country doesn't pin airtimes down — defaults to America/New_York (Sonarr-compatible)"
         >

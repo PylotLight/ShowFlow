@@ -35,7 +35,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
 
   return (
     <>
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="integrations.metadata" className="p-6 space-y-5">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Metadata Providers</h3>
           <p className="text-muted-foreground text-xs mt-0.5">API keys for show metadata (required by Sonarr import)</p>
@@ -93,7 +93,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
         </FieldRow>
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="integrations.sonarr" className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Sonarr</h3>
@@ -111,14 +111,14 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
         </div>
         {sonarr.enabled && (
         <>
-          <FieldRow label="Sonarr URL" description="e.g. http://localhost:8989">
+          <FieldRow settingId="integrations.sonarr-url" label="Sonarr URL" description="e.g. http://localhost:8989">
             <Input
               value={sonarr.baseUrl}
               onChange={e => setSonarr((prev: any) => ({ ...prev, baseUrl: e.target.value }))}
               placeholder="http://localhost:8989"
             />
           </FieldRow>
-          <FieldRow label="API Key" description="Found in Sonarr Settings > General">
+          <FieldRow settingId="integrations.sonarr-api-key" label="API Key" description="Found in Sonarr Settings > General">
             <div className="relative">
               <Input
                 type={showSonarrKey ? "text" : "password"}
@@ -135,7 +135,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
               </button>
             </div>
           </FieldRow>
-          <FieldRow label="API Version" description="Sonarr API version">
+          <FieldRow settingId="integrations.sonarr-api-version" label="API Version" description="Sonarr API version">
             <Select
               value={sonarr.apiVersion}
               onValueChange={v => setSonarr((prev: any) => ({ ...prev, apiVersion: v }))}
@@ -173,7 +173,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
           )}
 
           {/* Import Series section - merged into the same panel */}
-          <div className="pt-5 border-t border-white/5 space-y-5">
+          <div data-setting="integrations.sonarr-import" className="pt-5 border-t border-white/5 space-y-5">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-mono text-sm font-semibold text-white/90">Import Series from Sonarr</h4>
@@ -335,7 +335,7 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
         )}
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="integrations.jellyfin" className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Jellyfin</h3>
@@ -353,14 +353,14 @@ export function IntegrationsTab({ sonarr, setSonarr, showSonarrKey, setShowSonar
         </div>
         {jellyfin.enabled && (
         <>
-          <FieldRow label="Jellyfin URL" description="e.g. http://localhost:8096">
+          <FieldRow settingId="integrations.jellyfin-url" label="Jellyfin URL" description="e.g. http://localhost:8096">
             <Input
               value={jellyfin.baseUrl}
               onChange={e => setJellyfin((prev: any) => ({ ...prev, baseUrl: e.target.value }))}
               placeholder="http://localhost:8096"
             />
           </FieldRow>
-          <FieldRow label="API Key" description="Found in Jellyfin Dashboard > API Keys">
+          <FieldRow settingId="integrations.jellyfin-api-key" label="API Key" description="Found in Jellyfin Dashboard > API Keys">
             <div className="relative">
               <Input
                 type={showJellyfinKey ? "text" : "password"}

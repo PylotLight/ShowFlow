@@ -27,7 +27,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         <p className="text-muted-foreground text-xs mt-0.5">Credentials for metadata providers. These replace values in your .env file.</p>
       </div>
 
-      <FieldRow label="TMDB API Key" description="themoviedb.org v3 API key or v4 read access token (starts eyJ…) — either works">
+      <FieldRow settingId="providers.tmdb-api-key" label="TMDB API Key" description="themoviedb.org v3 API key or v4 read access token (starts eyJ…) — either works">
         <div className="relative">
           <Input
             type={showTmdbKey ? "text" : "password"}
@@ -45,7 +45,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         </div>
       </FieldRow>
 
-      <FieldRow label="TVDB API Key" description="thetvdb.com API key for show metadata">
+      <FieldRow settingId="providers.tvdb-api-key" label="TVDB API Key" description="thetvdb.com API key for show metadata">
         <div className="relative">
           <Input
             type={showTvdbKey ? "text" : "password"}
@@ -63,7 +63,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         </div>
       </FieldRow>
 
-      <FieldRow label="TVDB PIN" description="PIN for TVDB v4 API authentication (optional)">
+      <FieldRow settingId="providers.tvdb-pin" label="TVDB PIN" description="PIN for TVDB v4 API authentication (optional)">
         <div className="relative">
           <Input
             type={showTvdbPin ? "text" : "password"}
@@ -81,7 +81,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         </div>
       </FieldRow>
 
-      <div>
+      <div data-setting="providers.imdb">
         <h4 className="font-display text-sm font-semibold tracking-wide text-white/90">IMDb API (AWS Data Exchange)</h4>
         <p className="text-muted-foreground text-xs mt-0.5">
           Optional. Signed GraphQL ratings lookup by IMDb ID. Requires an AWS Data Exchange subscription, its
@@ -99,7 +99,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         <span className="text-sm">Enable IMDb ratings lookup</span>
       </div>
 
-      <FieldRow label="IMDb API Key" description="API key from your IMDb API subscription email">
+      <FieldRow settingId="providers.imdb-api-key" label="IMDb API Key" description="API key from your IMDb API subscription email">
         <div className="relative">
           <Input
             type={showImdbKey ? "text" : "password"}
@@ -117,7 +117,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         </div>
       </FieldRow>
 
-      <FieldRow label="AWS Access Key ID" description="Long-term AWS credential for Data Exchange access">
+      <FieldRow settingId="providers.aws-access-key-id" label="AWS Access Key ID" description="Long-term AWS credential for Data Exchange access">
         <Input
           type="text"
           value={imdb.awsAccessKeyId || ""}
@@ -126,7 +126,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         />
       </FieldRow>
 
-      <FieldRow label="AWS Secret Access Key" description="Long-term AWS secret for Data Exchange access">
+      <FieldRow settingId="providers.aws-secret-access-key" label="AWS Secret Access Key" description="Long-term AWS secret for Data Exchange access">
         <div className="relative">
           <Input
             type={showAwsSecret ? "text" : "password"}
@@ -144,7 +144,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         </div>
       </FieldRow>
 
-      <FieldRow label="AWS Region" description="Region of the Data Exchange asset (usually us-east-1)">
+      <FieldRow settingId="providers.aws-region" label="AWS Region" description="Region of the Data Exchange asset (usually us-east-1)">
         <Input
           type="text"
           value={imdb.region || "us-east-1"}
@@ -153,7 +153,7 @@ export function ProvidersTab({ config, updateApiKey, showTmdbKey, setShowTmdbKey
         />
       </FieldRow>
 
-      <FieldRow label="Dataset / Revision / Asset IDs" description="From your Data Exchange subscription (data-set-id, revision-id, asset-id)">
+      <FieldRow settingId="providers.imdb-dataset" label="Dataset / Revision / Asset IDs" description="From your Data Exchange subscription (data-set-id, revision-id, asset-id)">
         <div className="flex gap-2">
           <Input
             type="text"

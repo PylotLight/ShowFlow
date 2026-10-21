@@ -108,9 +108,9 @@ function toSave(p: Profile) {
 
 // ---- small building blocks ------------------------------------------------
 
-function Section({ title, description, children, className }: { title: string; description?: string; children: React.ReactNode; className?: string }) {
+function Section({ title, description, children, className, settingId }: { title: string; description?: string; children: React.ReactNode; className?: string; settingId?: string }) {
   return (
-    <section className={cn("space-y-3 border-t border-white/[0.06] pt-4 first:border-t-0 first:pt-0", className)}>
+    <section data-setting={settingId} className={cn("space-y-3 border-t border-white/[0.06] pt-4 first:border-t-0 first:pt-0", className)}>
       <div>
         <h4 className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-signal">{title}</h4>
         {description && <p className={cn("mt-0.5", SETTINGS_TEXT.desc)}>{description}</p>}
@@ -608,7 +608,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
       )}
 
       <Section title="Profile">
-        <FieldRow label="Name" description="Shown wherever you pick a profile.">
+        <FieldRow settingId="quality.profile-name" label="Name" description="Shown wherever you pick a profile.">
           <Input value={draft.name} onChange={e => set("name", e.target.value)} aria-label="Profile name" className="h-8 text-sub" />
         </FieldRow>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -628,19 +628,19 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
       </Section>
 
       <Section title="Resolution" description="Aim for the target; anything above it is skipped, anything below the minimum too.">
-        <FieldRow label="Target" description="Best resolution to grab.">
+        <FieldRow settingId="quality.resolution-target" label="Target" description="Best resolution to grab.">
           <ResSelect label="Target resolution" value={draft.targetResolution} onChange={v => set("targetResolution", v)} allowAny options={lib.resolutions} />
         </FieldRow>
-        <FieldRow label="Minimum" description="Lowest resolution you'll accept.">
+        <FieldRow settingId="quality.resolution-minimum" label="Minimum" description="Lowest resolution you'll accept.">
           <ResSelect label="Minimum resolution" value={draft.minResolution} onChange={v => set("minResolution", v)} allowAny options={lib.resolutions} />
         </FieldRow>
         {minBad && <p role="alert" className="text-caption text-red-300">Minimum is above the target.</p>}
-        <FieldRow label="Unknown resolution" description="Accept names with no resolution tag (common on anime). They rank below any known resolution.">
+        <FieldRow settingId="quality.unknown-resolution" label="Unknown resolution" description="Accept names with no resolution tag (common on anime). They rank below any known resolution.">
           <Switch checked={draft.allowUnknownResolution} onCheckedChange={v => set("allowUnknownResolution", v)} aria-label="Accept unknown resolution" />
         </FieldRow>
       </Section>
 
-      <Section title="Sources" description="Fixed order, best first. Turn off any you never want.">
+      <Section settingId="quality.sources" title="Sources" description="Fixed order, best first. Turn off any you never want.">
         <div className="flex flex-wrap items-center gap-1.5">
           {lib.sources.map((s, i) => {
             const off = skip.has(s.id);
@@ -662,7 +662,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
         </div>
       </Section>
 
-      <Section title="Terms" description="Each term counts once. Strong avoid beats a codec bonus, Never rejects outright.">
+      <Section settingId="quality.terms" title="Terms" description="Each term counts once. Strong avoid beats a codec bonus, Never rejects outright.">
         <PaintBar paint={paint} setPaint={setPaint} weights={lib.modeWeights} />
         <TermChips draft={draft} lib={lib} paint={paint} onChange={t => set("terms", t)} />
         <ReleaseGroupsRow draft={draft} paint={paint} onChange={t => set("terms", t)} />
@@ -670,7 +670,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
       </Section>
 
       <Section title="Upgrades" description="Off means off: no upgrade searches, and imports never replace a file you already have.">
-        <FieldRow label="Keep upgrading" description="Look for better releases after the first grab.">
+        <FieldRow settingId="quality.keep-upgrading" label="Keep upgrading" description="Look for better releases after the first grab.">
           <Switch
             checked={draft.upgradesEnabled}
             onCheckedChange={v => setDraft(d => ({
@@ -682,7 +682,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
           />
         </FieldRow>
         {draft.upgradesEnabled && (
-          <FieldRow label="Until" description="Stop once the file reaches this. Optional term score keeps going until terms catch up too.">
+          <FieldRow settingId="quality.upgrade-until" label="Until" description="Stop once the file reaches this. Optional term score keeps going until terms catch up too.">
             <div className="flex flex-wrap items-center justify-end gap-2">
               <ResSelect label="Upgrade until resolution" value={draft.upgradeUntilResolution} onChange={v => set("upgradeUntilResolution", v)} allowAny={false} options={lib.resolutions} />
               <Select value={draft.upgradeUntilSource ?? "any"} onValueChange={v => set("upgradeUntilSource", v === "any" ? null : (v as Source))}>
@@ -708,7 +708,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
         )}
       </Section>
 
-      <Section title="Test a release" description="Paste a title to see how this profile parses and scores it. Nothing is grabbed.">
+      <Section settingId="quality.test-release" title="Test a release" description="Paste a title to see how this profile parses and scores it. Nothing is grabbed.">
         <TestBox profileId={profile.id} dirty={dirty} />
       </Section>
 
@@ -785,7 +785,7 @@ function QualityProfilesTab() {
   const current = profiles.find(p => p.id === selected) ?? profiles[0];
   return (
     <div className="space-y-4">
-      <GlassPanel className="space-y-3 p-5 sm:p-6">
+      <GlassPanel data-setting="quality.profiles" className="space-y-3 p-5 sm:p-6">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-foreground">Quality profiles</h3>
           <p className={cn("mt-0.5", SETTINGS_TEXT.desc)}>

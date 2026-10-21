@@ -65,19 +65,19 @@ export function NamingTab({ config, saveConfig }: {
           <p className="text-muted-foreground text-xs mt-0.5">How stored episode files are renamed, matching Sonarr's Episode Naming settings. Quality tokens like {`{Quality Full}`} are expected in the filename.</p>
         </div>
 
-        <FieldRow label="Rename Episodes" description="Rename stored files to the format below. Off keeps original filenames.">
+        <FieldRow settingId="naming.rename-episodes" label="Rename Episodes" description="Rename stored files to the format below. Off keeps original filenames.">
           <Switch
             checked={naming.renameEpisodes}
             onCheckedChange={v => { saveConfig({ renameEpisodes: v }); loadPreview({ renameEpisodes: v }); }}
           />
         </FieldRow>
-        <FieldRow label="Replace Illegal Characters" description="Replace characters illegal on NTFS/POSIX filesystems with spaces">
+        <FieldRow settingId="naming.replace-illegal-characters" label="Replace Illegal Characters" description="Replace characters illegal on NTFS/POSIX filesystems with spaces">
           <Switch
             checked={naming.replaceIllegalCharacters}
             onCheckedChange={v => { saveConfig({ replaceIllegalCharacters: v }); loadPreview({ replaceIllegalCharacters: v }); }}
           />
         </FieldRow>
-        <FieldRow label="Colon Replacement" description="How colons in titles are handled (Smart removes a colon before a digit, replaces with a space otherwise)">
+        <FieldRow settingId="naming.colon-replacement" label="Colon Replacement" description="How colons in titles are handled (Smart removes a colon before a digit, replaces with a space otherwise)">
           <Select
             value={naming.colonReplacement}
             onValueChange={v => { saveConfig({ colonReplacement: v }); loadPreview({ colonReplacement: v }); }}
@@ -93,7 +93,7 @@ export function NamingTab({ config, saveConfig }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="Multi Episode Style" description="How multiple episodes in one file are numbered">
+        <FieldRow settingId="naming.multi-episode-style" label="Multi Episode Style" description="How multiple episodes in one file are numbered">
           <Select
             value={naming.multiEpisodeStyle}
             onValueChange={v => { saveConfig({ multiEpisodeStyle: v }); loadPreview({ multiEpisodeStyle: v }); }}
@@ -109,7 +109,7 @@ export function NamingTab({ config, saveConfig }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="Season Folder Format" description="Template for season subdirectories">
+        <FieldRow settingId="naming.season-folder-format" label="Season Folder Format" description="Template for season subdirectories">
           <Input
             value={naming.seasonFolderFormat}
             onChange={e => saveConfig({ seasonFolderFormat: e.target.value })}
@@ -126,18 +126,21 @@ export function NamingTab({ config, saveConfig }: {
         </div>
 
         <FormatField
+          settingId="naming.standard-episode-format"
           label="Standard Episode Format"
           description="Used for standard series"
           value={naming.standardEpisodeFormat}
           onChange={v => { saveConfig({ standardEpisodeFormat: v }); loadPreview({ standardEpisodeFormat: v }); }}
         />
         <FormatField
+          settingId="naming.daily-episode-format"
           label="Daily Episode Format"
           description="Used for daily series (uses {Air Date})"
           value={naming.dailyEpisodeFormat}
           onChange={v => { saveConfig({ dailyEpisodeFormat: v }); loadPreview({ dailyEpisodeFormat: v }); }}
         />
         <FormatField
+          settingId="naming.anime-episode-format"
           label="Anime Episode Format"
           description="Used for anime series (supports absolute numbers)"
           value={naming.animeEpisodeFormat}
@@ -185,7 +188,8 @@ export function NamingTab({ config, saveConfig }: {
   );
 }
 
-function FormatField({ label, description, value, onChange }: {
+function FormatField({ label, description, value, onChange, settingId }: {
+  settingId?: string;
   label: string;
   description: string;
   value: string;
@@ -194,7 +198,7 @@ function FormatField({ label, description, value, onChange }: {
   const key = label === "Standard Episode Format" ? "standardEpisodeFormat"
     : label === "Daily Episode Format" ? "dailyEpisodeFormat" : "animeEpisodeFormat";
   return (
-    <FieldRow label={label} description={description}>
+    <FieldRow settingId={settingId} label={label} description={description}>
       <Input
         data-format={key}
         value={value}

@@ -129,7 +129,7 @@ export function BackupPanel() {
 
   return (
     <>
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="backup.backups" className="p-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-[12rem] flex-1">
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Database Backups</h3>
@@ -154,7 +154,7 @@ export function BackupPanel() {
           </div>
         </div>
 
-        <div className="rounded-lg px-4 py-3 bg-white/[0.03] space-y-3">
+        <div data-setting="backup.retention" className="rounded-lg px-4 py-3 bg-white/[0.03] space-y-3">
           <div>
             <div className="text-sm font-medium text-white/80">Retention</div>
             <p className="text-muted-foreground text-xs mt-0.5">

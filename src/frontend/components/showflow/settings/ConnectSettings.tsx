@@ -313,7 +313,7 @@ function MediaRefreshPanel({ initial, lastRefresh, onSaved }: { initial: MediaRe
   }
 
   return (
-    <GlassPanel className="space-y-5 p-6">
+    <GlassPanel data-setting="connect.media-refresh" className="space-y-5 p-6">
       <div>
         <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Media server refresh</h3>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -322,7 +322,7 @@ function MediaRefreshPanel({ initial, lastRefresh, onSaved }: { initial: MediaRe
       </div>
 
       <div className="space-y-4 border-t border-white/10 pt-4">
-        <div className="flex items-center justify-between gap-3">
+        <div data-setting="connect.jellyfin-refresh" className="flex items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-foreground">Jellyfin</h4>
             <p className="text-xs text-muted-foreground">Uses the URL and API key from Integrations → Jellyfin.</p>
@@ -343,7 +343,7 @@ function MediaRefreshPanel({ initial, lastRefresh, onSaved }: { initial: MediaRe
       </div>
 
       <div className="space-y-4 border-t border-white/10 pt-4">
-        <div className="flex items-center justify-between gap-3">
+        <div data-setting="connect.plex-refresh" className="flex items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-foreground">Plex</h4>
             <p className="text-xs text-muted-foreground">Refreshes the library section that contains the imported folder.</p>
@@ -352,10 +352,10 @@ function MediaRefreshPanel({ initial, lastRefresh, onSaved }: { initial: MediaRe
         </div>
         {m.plex.enabled && (
           <>
-            <FieldRow label="Plex URL" description="e.g. http://plex:32400">
+            <FieldRow settingId="connect.plex-url" label="Plex URL" description="e.g. http://plex:32400">
               <Input value={m.plex.baseUrl} onChange={e => setM({ ...m, plex: { ...m.plex, baseUrl: e.target.value } })} placeholder="http://plex:32400" aria-label="Plex URL" />
             </FieldRow>
-            <FieldRow label="Plex token" description="Your X-Plex-Token">
+            <FieldRow settingId="connect.plex-token" label="Plex token" description="Your X-Plex-Token">
               <Input type="password" value={m.plex.token} onChange={e => setM({ ...m, plex: { ...m.plex, token: e.target.value } })} placeholder="X-Plex-Token" aria-label="Plex token" autoComplete="off" />
             </FieldRow>
             <PathMapFields server="Plex" value={m.plex.pathMap} onChange={pathMap => setM({ ...m, plex: { ...m.plex, pathMap } })} />
@@ -370,7 +370,7 @@ function MediaRefreshPanel({ initial, lastRefresh, onSaved }: { initial: MediaRe
       </div>
 
       <div className="border-t border-white/10 pt-4">
-        <FieldRow label="Batch window" description="Seconds to wait for more imports before refreshing">
+        <FieldRow settingId="connect.batch-window" label="Batch window" description="Seconds to wait for more imports before refreshing">
           <Input type="number" min={1} max={600} className="w-28" value={m.debounceSeconds}
             onChange={e => setM({ ...m, debounceSeconds: Math.max(1, Math.min(600, Number(e.target.value) || 30)) })} aria-label="Batch window in seconds" />
         </FieldRow>
@@ -415,7 +415,7 @@ export function ConnectSettings() {
 
   return (
     <>
-      <GlassPanel className="space-y-5 p-6">
+      <GlassPanel data-setting="connect.notifications" className="space-y-5 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Notifications</h3>

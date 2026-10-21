@@ -31,7 +31,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
 }) {
   return (
     <>
-      <GlassPanel className="p-6 space-y-5">
+      <GlassPanel data-setting="indexers.prowlarr" className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Prowlarr Connection</h3>
@@ -54,14 +54,14 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
           </div>
         </div>
         {prowlarr.enabled && (
-        <><FieldRow label="Prowlarr URL" description="e.g. http://localhost:9696">
+        <><FieldRow settingId="indexers.prowlarr-url" label="Prowlarr URL" description="e.g. http://localhost:9696">
           <Input
             value={prowlarr.baseUrl}
             onChange={e => setProwlarr((prev: any) => ({ ...prev, baseUrl: e.target.value }))}
             placeholder="http://localhost:9696"
           />
         </FieldRow>
-        <FieldRow label="API Key" description="Found in Prowlarr Settings > General">
+        <FieldRow settingId="indexers.prowlarr-api-key" label="API Key" description="Found in Prowlarr Settings > General">
           <div className="relative">
             <Input
               type={showProwlarrKey ? "text" : "password"}
@@ -78,7 +78,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
             </button>
           </div>
         </FieldRow>
-        <FieldRow label="Sync Level" description="How indexers are synced from Prowlarr">
+        <FieldRow settingId="indexers.sync-level" label="Sync Level" description="How indexers are synced from Prowlarr">
           <Select
             value={prowlarr.syncLevel}
             onValueChange={v => setProwlarr((prev: any) => ({ ...prev, syncLevel: v }))}
@@ -158,7 +158,7 @@ export function IndexersTab({ prowlarr, setProwlarr, saveProwlarr, saveProwlarrW
         )}
       </GlassPanel>
 
-      <GlassPanel className="p-6 space-y-4">
+      <GlassPanel data-setting="indexers.native" className="p-6 space-y-4">
         <div>
           <h3 className="font-display text-base font-semibold tracking-wide text-white/90">Native Indexers</h3>
           <p className="text-muted-foreground text-xs mt-0.5">Built-in trackers — no Prowlarr required</p>
