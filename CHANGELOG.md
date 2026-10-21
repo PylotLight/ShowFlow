@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Manual Import explains itself**: rows on Activity → Manual Import now show why a file wasn't imported (Not an upgrade, Cutoff met, Upgrades off, Rejected by profile, Duplicate, Unmatched, Can't parse, No root folder, Name collision, Error…) instead of just `Resolved`. The Existing column shows the library file's quality/size and the score delta, and each row expands into an incoming vs existing comparison (score, quality, codec, HDR, audio, size, group, with differences highlighted), the profile/cutoff state and what Force Import would replace. Reasons are recorded by the importer when it skips a file and re-derived with the same scoring for older files. Phones get cards instead of the table.
+- **Fix**: library rescans no longer flood Activity → History with `Imported …` rows for files already in the library. Scans now store file size and refresh unchanged files in place, and a new `episode_files.origin` column (migration `0012_episode_file_origin`) keeps scan/sync rows out of History. Existing spam rows are reclassified (not deleted); real imports and upgrades stay.
+- **Fix**: long release names (e.g. in the "Remove from blocklist?" confirm) no longer push dialog text and buttons outside the box. Dialogs wrap long tokens, show filename-like descriptions in mono, and scroll instead of overflowing on mobile.
 
 ## [v0.1.87] - 2026-10-16
 - **Tidier episode rows**: the "why?" text is gone. Each row has one status icon (info when it's on disk, a clock when it hasn't aired, amber when it aired but is missing); tap it for file/release details or why it hasn't been grabbed, as a bottom sheet on small screens and a popover on desktop. TBA titles are greyed, the duplicate status dot is hidden on small screens, and unaired episodes say UPCOMING instead of MISSING.
