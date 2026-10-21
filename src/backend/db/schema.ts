@@ -200,6 +200,19 @@ export const episodes = sqliteTable('episodes', {
    */
   last_searched_at: text('last_searched_at'),
   search_attempts: integer('search_attempts').notNull().default(0),
+  /**
+   * Cutoff-upgrade searches (core/cutoff.ts), kept apart from the
+   * missing-episode backoff above: consecutive upgrade searches that ended
+   * without a grab, and the cutoff they were counted against
+   * ("profileId|cutoff|minScore"). A different key (profile or cutoff
+   * changed) means the count no longer applies. Reset when a new file is
+   * recorded or the user searches the episode manually. Once the count
+   * reaches config.upgradeGiveUpMisses the episode is given up on: no more
+   * scheduled upgrade searches, not listed as cutoff unmet; RSS can still
+   * upgrade it opportunistically.
+   */
+  upgrade_misses: integer('upgrade_misses').notNull().default(0),
+  upgrade_cutoff_key: text('upgrade_cutoff_key'),
   last_updated: text('last_updated').default(sql`(datetime('now'))`),
 }, (table) => ({
   pk: primaryKey({

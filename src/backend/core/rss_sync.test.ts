@@ -337,7 +337,8 @@ describe('runRssSyncCycle: season packs + cutoff upgrades', () => {
     const upgrade = (existingScore: number) => [{
       showId: 'due', showTitle: 'Due Show', seriesType: 'standard', profile: null, libraryTypeId: null,
       season: 1, episode: 2, filePath: '/media/due/e2.mkv', profileId: 'standard', profileName: 'Standard',
-      cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore, lastSearchedAt: null, searchAttempts: 0,
+      cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore, lastSearchedAt: null,
+      upgradeMisses: 0, cutoffKey: 'standard|WEBDL-1080p|', airDate: null, givenUp: null,
     }];
     const items = [
       rel('Due Show S01E02 720p', 'x1', 'Wed 2026-10-14 9:00 PM AEDT (UTC+11:00)'),

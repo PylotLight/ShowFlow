@@ -11,6 +11,8 @@ import { Switch } from "@frontend/components/ui/switch";
 import { navigate, pageHash } from "@frontend/lib/router";
 import { cn } from "@frontend/lib/utils";
 import { FieldRow, SETTINGS_TEXT } from "./SettingsShared";
+import { CutoffUnmetList } from "./CutoffUnmetList";
+import { useSettings } from "./settings/SettingsContext";
 
 /**
  * One profile-centric Quality screen (replaces the old qualities list, global
@@ -122,6 +124,18 @@ function Section({ title, description, children, className, settingId }: { title
 
 const chipBase = "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-caption leading-none transition-colors outline-none focus-visible:ring-2 focus-visible:ring-signal/70";
 const chipOff = "border-white/15 bg-white/[0.03] text-foreground/85 hover:border-white/30 hover:bg-white/[0.06]";
+
+/** Mirrors core/cutoff.ts defaultUpgradeUntilResolution: with no explicit
+ *  "until", upgrades stop at the target capped at 1080p. The target is the
+ *  ceiling of what may be grabbed, not where upgrades stop. */
+const DEFAULT_UNTIL = 1080;
+const defaultUntil = (target: number | null) => (target != null && target > 0 ? Math.min(target, DEFAULT_UNTIL) : DEFAULT_UNTIL);
+
+function cutoffLabel(p: Pick<Profile, "upgradeUntilResolution" | "upgradeUntilSource" | "targetResolution">, sources: { id: Source; label: string }[]): string {
+  const res = p.upgradeUntilResolution ?? defaultUntil(p.targetResolution);
+  const src = p.upgradeUntilSource ? sources.find(s => s.id === p.upgradeUntilSource)?.label ?? p.upgradeUntilSource : null;
+  return src ? `${resLabel(res)} ${src}` : `${resLabel(res)} (any source)`;
+}
 
 function ResSelect({ value, onChange, label, allowAny, options }: { value: number | null; onChange: (v: number | null) => void; label: string; allowAny: boolean; options: number[] }) {
   return (
@@ -547,6 +561,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
   onLibChange: () => void;
 }) {
   const [draft, setDraft] = React.useState<Profile>(profile);
+  const giveUp = useGiveUpPolicy();
   const [paint, setPaint] = React.useState<Mode>("prefer");
   const [saving, setSaving] = React.useState(false);
   // Reset the draft only when the saved profile itself changes (save, reload),
@@ -628,7 +643,7 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
       </Section>
 
       <Section title="Resolution" description="Aim for the target; anything above it is skipped, anything below the minimum too.">
-        <FieldRow settingId="quality.resolution-target" label="Target" description="Best resolution to grab.">
+        <FieldRow settingId="quality.resolution-target" label="Target" description="Highest resolution to grab; anything above is skipped. Not the upgrade cutoff, that's under Upgrades.">
           <ResSelect label="Target resolution" value={draft.targetResolution} onChange={v => set("targetResolution", v)} allowAny options={lib.resolutions} />
         </FieldRow>
         <FieldRow settingId="quality.resolution-minimum" label="Minimum" description="Lowest resolution you'll accept.">
@@ -676,15 +691,17 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
             onCheckedChange={v => setDraft(d => ({
               ...d,
               upgradesEnabled: v,
-              upgradeUntilResolution: v && d.upgradeUntilResolution == null ? (d.targetResolution ?? 1080) : d.upgradeUntilResolution,
+              // Start from the default cutoff (target capped at 1080p), never
+              // silently from a 2160p/"any" target.
+              upgradeUntilResolution: v && d.upgradeUntilResolution == null ? defaultUntil(d.targetResolution) : d.upgradeUntilResolution,
             }))}
             aria-label="Keep upgrading"
           />
         </FieldRow>
         {draft.upgradesEnabled && (
-          <FieldRow settingId="quality.upgrade-until" label="Until" description="Stop once the file reaches this. Optional term score keeps going until terms catch up too.">
+          <FieldRow settingId="quality.upgrade-until" label="Until (cutoff)" description="Stop once the file reaches this. Optional term score keeps going until terms catch up too.">
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <ResSelect label="Upgrade until resolution" value={draft.upgradeUntilResolution} onChange={v => set("upgradeUntilResolution", v)} allowAny={false} options={lib.resolutions} />
+              <ResSelect label="Upgrade until resolution" value={draft.upgradeUntilResolution ?? defaultUntil(draft.targetResolution)} onChange={v => set("upgradeUntilResolution", v)} allowAny={false} options={lib.resolutions} />
               <Select value={draft.upgradeUntilSource ?? "any"} onValueChange={v => set("upgradeUntilSource", v === "any" ? null : (v as Source))}>
                 <SelectTrigger size="sm" className="w-28 text-sub" aria-label="Upgrade until source">
                   <SelectValue />
@@ -705,6 +722,24 @@ function ProfileEditor({ profile, lib, profiles, onSaved, onDeleted, onLibChange
               />
             </div>
           </FieldRow>
+        )}
+        {draft.upgradesEnabled && (
+          <div className="space-y-2">
+            <p data-testid="cutoff-summary" className={SETTINGS_TEXT.desc}>
+              Cutoff: files below <span className="text-foreground">{cutoffLabel(draft, lib.sources)}</span>
+              {draft.upgradeUntilScore != null && <> or a term score under <span className="text-foreground">{draft.upgradeUntilScore}</span></>}
+              {" "}get upgrade searches; at or above it they're left alone.
+              {draft.upgradeUntilResolution == null && " (Default: the target, capped at 1080p.)"}
+            </p>
+            {(draft.upgradeUntilResolution ?? 0) > DEFAULT_UNTIL && (
+              <p data-testid="cutoff-give-up-info" className={SETTINGS_TEXT.desc}>
+                Upgrades keep searching until {resLabel(draft.upgradeUntilResolution!)}
+                {giveUp.misses > 0 ? `; searches give up after ${giveUp.misses} ${giveUp.misses === 1 ? "miss" : "misses"} in a row` : "; searches never give up"}
+                {giveUp.days > 0 ? ` and skip episodes aired more than ${giveUp.days} days ago.` : " (no age limit)."}
+              </p>
+            )}
+            <CutoffUnmetList profileId={profile.id} dirty={dirty} />
+          </div>
         )}
       </Section>
 
@@ -842,7 +877,56 @@ function QualityProfilesTab() {
           onLibChange={loadLib}
         />
       )}
+
+      <UpgradeGiveUpPanel />
     </div>
+  );
+}
+
+const GIVE_UP_MISSES = [0, 3, 4, 5, 6, 8, 12];
+const GIVE_UP_DAYS = [0, 30, 60, 90, 180, 365];
+
+/**
+ * When scheduled upgrade searches stop (all profiles; config
+ * upgradeGiveUpMisses / upgradeGiveUpAfterDays, see core/cutoff.ts). Given-up
+ * episodes aren't searched or counted as below cutoff any more, but RSS
+ * still grabs a better release if one shows up, and a new file, a
+ * profile/cutoff change or a manual search starts them over.
+ */
+/** Current give-up rules (defaults mirror core/cutoff.ts). */
+function useGiveUpPolicy(): { misses: number; days: number } {
+  const { config } = useSettings();
+  return {
+    misses: typeof config?.upgradeGiveUpMisses === "number" ? config.upgradeGiveUpMisses : 5,
+    days: typeof config?.upgradeGiveUpAfterDays === "number" ? config.upgradeGiveUpAfterDays : 90,
+  };
+}
+
+function UpgradeGiveUpPanel() {
+  const { saveConfig } = useSettings();
+  const { misses, days } = useGiveUpPolicy();
+  const opts = (list: number[], cur: number) => (list.includes(cur) ? list : [...list, cur].sort((a, b) => a - b));
+  return (
+    <GlassPanel className="space-y-4 p-5 sm:p-6" data-setting="quality.give-up">
+      <Section title="Upgrade searches · all profiles" description="Stop chasing a cutoff that never gets met. Given-up episodes aren't searched or listed as below cutoff; RSS still takes a better release if one turns up, and a new file, a cutoff change or a manual search starts them over.">
+        <FieldRow settingId="quality.give-up-misses" label="Give up after" description="Searches in a row that found nothing better (backoff 6h, 1d, 3d, then weekly; the default 5 is about 11 days).">
+          <Select value={String(misses)} onValueChange={v => saveConfig({ upgradeGiveUpMisses: Number(v) })}>
+            <SelectTrigger size="sm" className="w-32 text-sub" aria-label="Give up after misses"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {opts(GIVE_UP_MISSES, misses).map(n => <SelectItem key={n} value={String(n)}>{n === 0 ? "Never" : `${n} misses`}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+        <FieldRow settingId="quality.give-up-days" label="Only recent episodes" description="No upgrade searches for episodes that aired longer ago than this.">
+          <Select value={String(days)} onValueChange={v => saveConfig({ upgradeGiveUpAfterDays: Number(v) })}>
+            <SelectTrigger size="sm" className="w-32 text-sub" aria-label="Upgrade search age limit"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {opts(GIVE_UP_DAYS, days).map(n => <SelectItem key={n} value={String(n)}>{n === 0 ? "No limit" : `${n} days`}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+      </Section>
+    </GlassPanel>
   );
 }
 

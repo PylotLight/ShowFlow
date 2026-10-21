@@ -225,7 +225,9 @@ describe("Manual Import explanations", () => {
     libraryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-miex-lib-"));
     showId = `${RUN_ID}-${Math.random().toString(36).slice(2, 6)}`;
     db.saveShow({ uuid: showId, providerId: `p-${showId}`, type: "tmdb", title: "Explain Show", config: {}, rootFolderPath: libraryRoot });
-    saveProfileModel(db, { id: UP, name: "Upgrades on", upgradesEnabled: true });
+    // Explicit top until so a 2160p file is still below cutoff (no until now
+    // defaults to 1080p, which a 2160p file meets -> CUTOFF_MET instead).
+    saveProfileModel(db, { id: UP, name: "Upgrades on", upgradesEnabled: true, upgradeUntilResolution: 4320 });
     saveProfileModel(db, { id: OFF, name: "No upgrades", upgradesEnabled: false });
     saveProfileModel(db, { id: CUT, name: "Until 1080p", upgradesEnabled: true, upgradeUntilResolution: 1080 });
     db.db.run(`UPDATE shows SET profile = ?, library_type_id = NULL WHERE id = ?`, [UP, showId]);

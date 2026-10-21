@@ -48,6 +48,14 @@ export const ConfigSchema = z.object({
    */
   upgradeUntilCutoff: z.boolean().default(true),
   /**
+   * Give up scheduled upgrade searches for an episode after this many misses
+   * in a row against the same cutoff (0 = never). RSS can still upgrade it;
+   * a new file, a profile/cutoff change or a manual search resets it.
+   */
+  upgradeGiveUpMisses: z.number().int().min(0).max(100).default(5).catch(5),
+  /** No scheduled upgrade searches for episodes that aired more than this many days ago (0 = no limit). */
+  upgradeGiveUpAfterDays: z.number().int().min(0).max(36500).default(90).catch(90),
+  /**
    * Auto-grab / RSS: for a fully aired season with several missing episodes,
    * try one season pack before searching episode by episode.
    */

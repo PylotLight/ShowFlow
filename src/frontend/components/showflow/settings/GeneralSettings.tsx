@@ -47,7 +47,7 @@ export function GeneralSettings({ onReRunWizard }: { onReRunWizard?: () => void 
         <FieldRow
           settingId="general.upgrade-until-cutoff"
           label="Upgrade until cutoff"
-          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Global switch; each quality profile also has its own Keep upgrading toggle and upgrade-until target."
+          description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Global switch; each quality profile has its own Keep upgrading toggle and cutoff, and Quality has the give-up rules."
         >
           <Switch
             aria-label="Upgrade until cutoff"

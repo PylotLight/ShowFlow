@@ -95,13 +95,15 @@ export const SETTINGS_REGISTRY: SettingMeta[] = [
   ...S("quality", "Quality profiles", [
     { id: "quality.profiles", label: "Quality profiles", description: "What to grab and when to stop upgrading; create from a preset.", keywords: ["profile", "preset", "quality", "new profile", "sonarr"] },
     { id: "quality.profile-name", label: "Profile name", description: "Shown wherever you pick a profile.", keywords: ["rename profile"] },
-    { id: "quality.resolution-target", label: "Target resolution", description: "Best resolution to grab.", keywords: ["1080p", "2160p", "4k", "720p", "uhd", "resolution", "max"] },
+    { id: "quality.resolution-target", label: "Target resolution", description: "Highest resolution to grab; not the upgrade cutoff.", keywords: ["1080p", "2160p", "4k", "720p", "uhd", "resolution", "max"] },
     { id: "quality.resolution-minimum", label: "Minimum resolution", description: "Lowest resolution you'll accept.", keywords: ["480p", "720p", "sd", "resolution", "min"] },
     { id: "quality.unknown-resolution", label: "Unknown resolution", description: "Accept names with no resolution tag (common on anime).", keywords: ["no resolution", "anime", "untagged"] },
     { id: "quality.sources", label: "Sources", description: "Release sources in order, best first; turn off any you never want.", keywords: ["bluray", "web-dl", "webrip", "hdtv", "remux", "dvd", "source"] },
     { id: "quality.terms", label: "Terms", description: "Prefer, avoid, must-have or never terms in release names.", keywords: ["custom format", "preferred words", "codec", "hevc", "x265", "release group", "keywords", "score", "must have", "never"] },
     { id: "quality.keep-upgrading", label: "Keep upgrading", description: "Look for better releases after the first grab.", keywords: ["upgrade", "cutoff", "replace"] },
     { id: "quality.upgrade-until", fallback: "quality.keep-upgrading", label: "Upgrade until", description: "Stop upgrading once the file reaches this quality.", keywords: ["cutoff", "upgrade target", "stop"] },
+    { id: "quality.give-up-misses", label: "Give up upgrade searches", description: "Stop searching for an episode's upgrade after this many misses in a row.", keywords: ["cutoff unmet", "upgrade", "give up", "stop searching", "backoff", "misses"] },
+    { id: "quality.give-up-days", label: "Upgrade search age limit", description: "No upgrade searches for episodes that aired longer ago than this.", keywords: ["cutoff unmet", "upgrade", "old episodes", "back catalog", "days"] },
     { id: "quality.test-release", label: "Test a release", description: "Paste a title to see how a profile parses and scores it.", keywords: ["parse", "score", "release name", "debug", "try"] },
   ]),
 

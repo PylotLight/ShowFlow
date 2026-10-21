@@ -1,7 +1,10 @@
 import { test, expect, describe } from 'bun:test';
 import { DatabaseManager } from '../db/index';
 import type { ReleaseScore } from './quality_engine';
-import { isCutoffMet, listCutoffUnmetEpisodes, isOutsideUpgradeBackoff, resolutionOf, type Scorer } from './cutoff';
+import {
+  isCutoffMet, listCutoffUnmetEpisodes, isOutsideUpgradeBackoff, resolutionOf, getProfileCutoff, defaultUpgradeUntilResolution,
+  giveUpPolicy, upgradeGiveUpReason, cutoffKey, effectiveUpgradeMisses, DEFAULT_UPGRADE_GIVE_UP_MISSES, DEFAULT_UPGRADE_GIVE_UP_DAYS, type Scorer,
+} from './cutoff';
 import { isSeasonPackTitle } from './grabber_service';
 import { shouldTrySeasonPack, runAutoGrabCycle, PACK_SETTLE_DAYS, type AutoGrabber } from './auto_grabber';
 import type { SeasonAirStats } from '../db/grabs';
@@ -143,15 +146,147 @@ describe('listCutoffUnmetEpisodes', () => {
 
   test('upgrade backoff: 6h after the first miss, then longer', () => {
     const now = Date.now();
-    expect(isOutsideUpgradeBackoff({ last_searched_at: null, search_attempts: 0 }, now)).toBe(true);
-    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 2 * HOUR).toISOString(), search_attempts: 1 }, now)).toBe(false);
-    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 7 * HOUR).toISOString(), search_attempts: 1 }, now)).toBe(true);
-    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 7 * HOUR).toISOString(), search_attempts: 2 }, now)).toBe(false);
-    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 8 * DAY).toISOString(), search_attempts: 9 }, now)).toBe(true);
+    expect(isOutsideUpgradeBackoff({ last_searched_at: null }, 0, now)).toBe(true);
+    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 2 * HOUR).toISOString() }, 1, now)).toBe(false);
+    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 7 * HOUR).toISOString() }, 1, now)).toBe(true);
+    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 7 * HOUR).toISOString() }, 2, now)).toBe(false);
+    expect(isOutsideUpgradeBackoff({ last_searched_at: new Date(now - 8 * DAY).toISOString() }, 9, now)).toBe(true);
 
     const db = seedLibrary();
-    db.recordEpisodeSearchMiss('a', 1, 1);
+    const key = listCutoffUnmetEpisodes(db, { scorer }).find(e => e.episode === 1)!.cutoffKey;
+    db.recordUpgradeSearchMiss('a', 1, 1, key);
     expect(listCutoffUnmetEpisodes(db, { scorer, applyBackoff: true }).map(e => e.episode)).toEqual([5]);
+    db.close();
+  });
+
+  test('upgrade backoff ignores the missing-episode streak from before the file existed', () => {
+    const db = seedLibrary();
+    // E01 missed 9 scheduled searches while missing, then got its file:
+    // the first upgrade search must not start at the weekly step.
+    db.db.query(`UPDATE episodes SET search_attempts = 9, last_searched_at = ? WHERE show_id = 'a' AND episode_number = 1`)
+      .run(new Date(Date.now() - 7 * HOUR).toISOString());
+    expect(listCutoffUnmetEpisodes(db, { scorer, applyBackoff: true }).map(e => e.episode)).toContain(1);
+    db.close();
+  });
+});
+
+describe('upgrade give-up', () => {
+  const policy = { misses: 3, days: 90 };
+
+  test('policy defaults and parsing', () => {
+    expect(giveUpPolicy(null)).toEqual({ misses: DEFAULT_UPGRADE_GIVE_UP_MISSES, days: DEFAULT_UPGRADE_GIVE_UP_DAYS });
+    expect(giveUpPolicy({ upgradeGiveUpMisses: 0, upgradeGiveUpAfterDays: 0 })).toEqual({ misses: 0, days: 0 });
+    expect(giveUpPolicy({ upgradeGiveUpMisses: -1 } as any).misses).toBe(DEFAULT_UPGRADE_GIVE_UP_MISSES);
+  });
+
+  test('defaults: give up after 5 misses (~11 days of backoff), skip episodes aired >90 days ago', () => {
+    expect(DEFAULT_UPGRADE_GIVE_UP_MISSES).toBe(5);
+    expect(DEFAULT_UPGRADE_GIVE_UP_DAYS).toBe(90);
+    const now = Date.now();
+    const recent = { air_date: new Date(now - 10 * DAY).toISOString() };
+    const def = giveUpPolicy(null);
+    expect(upgradeGiveUpReason(recent, 4, def, now)).toBeNull();
+    expect(upgradeGiveUpReason(recent, 5, def, now)).toBe('misses');
+  });
+
+  test('reason: misses, aged, 0 = never', () => {
+    const now = Date.now();
+    const recent = new Date(now - 10 * DAY).toISOString();
+    const old = new Date(now - 200 * DAY).toISOString();
+    expect(upgradeGiveUpReason({ air_date: recent }, 2, policy, now)).toBeNull();
+    expect(upgradeGiveUpReason({ air_date: recent }, 3, policy, now)).toBe('misses');
+    expect(upgradeGiveUpReason({ air_date: old }, 0, policy, now)).toBe('aged');
+    expect(upgradeGiveUpReason({ air_date: '2020-01-01' }, 0, policy, now)).toBe('aged');
+    expect(upgradeGiveUpReason({ air_date: null }, 0, policy, now)).toBeNull();
+    expect(upgradeGiveUpReason({ air_date: old }, 99, { misses: 0, days: 0 }, now)).toBeNull();
+  });
+
+  test('misses only count against the cutoff they were recorded for', () => {
+    expect(effectiveUpgradeMisses({ upgrade_misses: 5, upgrade_cutoff_key: 'p|1080p|' }, 'p|1080p|')).toBe(5);
+    expect(effectiveUpgradeMisses({ upgrade_misses: 5, upgrade_cutoff_key: 'p|2160p|' }, 'p|1080p|')).toBe(0);
+    expect(effectiveUpgradeMisses({ upgrade_misses: 5, upgrade_cutoff_key: null }, 'p|1080p|')).toBe(0);
+  });
+
+  test('after N misses the episode leaves the pool; RSS view still sees it', () => {
+    const db = seedLibrary();
+    const ep1 = () => listCutoffUnmetEpisodes(db, { scorer, giveUp: policy, includeGivenUp: true }).find(e => e.episode === 1)!;
+    const key = ep1().cutoffKey;
+    for (let i = 0; i < 3; i++) db.recordUpgradeSearchMiss('a', 1, 1, key);
+    expect(ep1().upgradeMisses).toBe(3);
+    expect(ep1().givenUp).toBe('misses');
+    expect(listCutoffUnmetEpisodes(db, { scorer, giveUp: policy }).map(e => e.episode)).toEqual([5]);
+    // 0 = never give up
+    expect(listCutoffUnmetEpisodes(db, { scorer, giveUp: { misses: 0, days: 0 } }).map(e => e.episode).sort()).toEqual([1, 5]);
+    db.close();
+  });
+
+  test('a failed search (indexer down) backs off but does not count', () => {
+    const db = seedLibrary();
+    db.recordUpgradeSearchMiss('a', 1, 1, 'standard|WEBDL-1080p|', false);
+    const row = db.db.query(`SELECT upgrade_misses, last_searched_at FROM episodes WHERE show_id='a' AND episode_number=1`).get() as any;
+    expect(row.upgrade_misses).toBe(0);
+    expect(row.last_searched_at).not.toBeNull();
+    db.close();
+  });
+
+  test('reset by a new file, a manual search, or a cutoff change', () => {
+    const db = seedLibrary();
+    const find = () => listCutoffUnmetEpisodes(db, { scorer, giveUp: policy, includeGivenUp: true }).find(e => e.episode === 1)!;
+    const giveUp = () => { const k = find().cutoffKey; for (let i = 0; i < 3; i++) db.recordUpgradeSearchMiss('a', 1, 1, k); expect(find().givenUp).toBe('misses'); };
+
+    giveUp();
+    db.resetUpgradeSearch('a', 1, 1); // manual search
+    expect(find().givenUp).toBeNull();
+
+    giveUp();
+    db.recordEpisodeFile({ showId: 'a', season: 1, episode: 1, filePath: '/m/Alpha.S01E01.720p.WEBRip.mkv' });
+    expect(find().upgradeMisses).toBe(0);
+
+    giveUp();
+    saveProfileModel(db, { id: 'standard', name: 'Standard', upgradesEnabled: true, upgradeUntilResolution: 1080, upgradeUntilSource: null });
+    // cutoff now "1080p" (any source): the old count doesn't apply
+    expect(find().cutoffName).toBe('1080p');
+    expect(find().givenUp).toBeNull();
+    db.close();
+  });
+
+  test('episodes that aired long ago are not searched, by default after 90 days', () => {
+    const db = seedLibrary();
+    db.db.query(`UPDATE episodes SET air_date = '2019-05-01' WHERE show_id = 'a' AND episode_number = 1`).run();
+    expect(listCutoffUnmetEpisodes(db, { scorer }).map(e => e.episode)).toEqual([5]);
+    const all = listCutoffUnmetEpisodes(db, { scorer, includeGivenUp: true });
+    expect(all.find(e => e.episode === 1)!.givenUp).toBe('aged');
+    expect(listCutoffUnmetEpisodes(db, { scorer, giveUp: { misses: 8, days: 0 } }).map(e => e.episode).sort()).toEqual([1, 5]);
+    db.close();
+  });
+
+  test('profileId limits the list', () => {
+    const db = seedLibrary();
+    expect(listCutoffUnmetEpisodes(db, { scorer, profileId: 'standard' })).toHaveLength(2);
+    expect(listCutoffUnmetEpisodes(db, { scorer, profileId: 'other' })).toHaveLength(0);
+    db.close();
+  });
+});
+
+describe('default upgrade-until', () => {
+  test('the target is a ceiling, not the cutoff: capped at 1080p', () => {
+    expect(defaultUpgradeUntilResolution(2160)).toBe(1080);
+    expect(defaultUpgradeUntilResolution(4320)).toBe(1080);
+    expect(defaultUpgradeUntilResolution(1080)).toBe(1080);
+    expect(defaultUpgradeUntilResolution(720)).toBe(720);
+    expect(defaultUpgradeUntilResolution(null)).toBe(1080);
+  });
+
+  test('a profile allowing 2160p with no explicit until stops at 1080p, not 2160p', () => {
+    const db = new DatabaseManager(':memory:');
+    saveProfileModel(db, { id: 'p4k', name: 'Allows 4K', targetResolution: 2160, upgradesEnabled: true, upgradeUntilResolution: null });
+    saveProfileModel(db, { id: 'any', name: 'Any', targetResolution: null, upgradesEnabled: true, upgradeUntilResolution: null });
+    saveProfileModel(db, { id: 'explicit', name: 'Explicit 4K', targetResolution: 2160, upgradesEnabled: true, upgradeUntilResolution: 2160 });
+    expect(getProfileCutoff(db, 'p4k')).toMatchObject({ name: '1080p', defaulted: true });
+    expect(getProfileCutoff(db, 'any')).toMatchObject({ name: '1080p', defaulted: true });
+    // an explicit choice is kept
+    expect(getProfileCutoff(db, 'explicit')).toMatchObject({ name: '2160p', defaulted: false });
+    expect(cutoffKey(getProfileCutoff(db, 'p4k')!)).toBe('p4k|1080p|');
     db.close();
   });
 });
@@ -229,14 +364,18 @@ describe('runAutoGrabCycle', () => {
     const pool = [1, 2, 3, 4, 5].map(n => ({
       showId: 's', showTitle: 'Pack Show', seriesType: null, profile: null, libraryTypeId: null,
       season: 1, episode: n, filePath: `/m/e${n}.mkv`, profileId: 'standard', profileName: 'Standard',
-      cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore: 20_000, lastSearchedAt: null, searchAttempts: 0,
+      cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore: 20_000, lastSearchedAt: null,
+      upgradeMisses: 0, cutoffKey: 'standard|WEBDL-1080p|', airDate: null, givenUp: null,
     }));
     const { g, calls } = stubGrabber({ pack: false });
     const res = await runAutoGrabCycle(cfg(), null, { db, grabber: g, listUpgrades: () => pool });
     expect(calls).toEqual(['up S1E1>20000', 'up S1E2>20000', 'up S1E3>20000']);
     expect(res.upgradeSearched).toBe(3);
-    const row = db.db.query(`SELECT search_attempts, last_searched_at FROM episodes WHERE show_id='s' AND episode_number=1`).get() as any;
-    expect(row.search_attempts).toBe(1);
+    const row = db.db.query(`SELECT search_attempts, upgrade_misses, upgrade_cutoff_key, last_searched_at FROM episodes WHERE show_id='s' AND episode_number=1`).get() as any;
+    // upgrade misses have their own counter; the missing-episode streak is untouched
+    expect(row.upgrade_misses).toBe(1);
+    expect(row.upgrade_cutoff_key).toBe('standard|WEBDL-1080p|');
+    expect(row.search_attempts).toBe(0);
     expect(row.last_searched_at).not.toBeNull();
 
     const off = stubGrabber({ pack: false });

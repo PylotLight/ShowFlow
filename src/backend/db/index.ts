@@ -366,6 +366,8 @@ export class DatabaseManager {
   listGrabbedReleasesForShow(showId: string, limit?: number) { return grabs.listGrabbedReleasesForShow(this, showId, limit); }
   listEpisodesDueForGrab(nowIso: string, grabCooldownIso: string, limit: number) { return grabs.listEpisodesDueForGrab(this, nowIso, grabCooldownIso, limit); }
   recordEpisodeSearchMiss(showId: string, season: number, episode: number, nowIso?: string) { return grabs.recordEpisodeSearchMiss(this, showId, season, episode, nowIso); }
+  recordUpgradeSearchMiss(showId: string, season: number, episode: number, cutoffKey: string, count?: boolean, nowIso?: string) { return grabs.recordUpgradeSearchMiss(this, showId, season, episode, cutoffKey, count, nowIso); }
+  resetUpgradeSearch(showId: string, season: number, episode: number) { return grabs.resetUpgradeSearch(this, showId, season, episode); }
   getGrab(id: number) { return grabs.getGrab(this, id); }
   markGrabStatus(id: number, status: Parameters<typeof grabs.markGrabStatus>[2]) { return grabs.markGrabStatus(this, id, status); }
   markGrabFailed(id: number, reason: string, nowIso?: string) { return grabs.markGrabFailed(this, id, reason, nowIso); }
