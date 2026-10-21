@@ -155,7 +155,18 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
   // Settings search / ⌘K: a picked setting switches tab (and opens its
   // mobile section), then the effect below scrolls to and flashes it.
   const [focusNonce, setFocusNonce] = React.useState(0);
-  React.useEffect(() => registerSettingsPage(), []);
+  // One in-flight "wait for the row, then scroll" poll. Not tied to effect
+  // cleanup: the tab switch re-renders (mobileSection syncs to the URL) and
+  // would cancel it before its first frame. Cancelled on unmount only.
+  const focusPoll = React.useRef<(() => void) | null>(null);
+  const startFocus = React.useCallback((id: string) => {
+    focusPoll.current?.();
+    focusPoll.current = focusSettingWhenReady(id);
+  }, []);
+  React.useEffect(() => {
+    const unregister = registerSettingsPage();
+    return () => { unregister(); focusPoll.current?.(); };
+  }, []);
   React.useEffect(() => {
     const on = () => {
       const req = peekPendingSettingFocus();
@@ -173,13 +184,13 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
     if (!req || req.tab !== tab) return;
     if (!isDesktop && mobileSection !== req.tab) { setMobileSection(req.tab); return; }
     takePendingSettingFocus();
-    return focusSettingWhenReady(req.id);
-  }, [loading, loadError, tab, isDesktop, mobileSection, focusNonce]);
+    startFocus(req.id);
+  }, [loading, loadError, tab, isDesktop, mobileSection, focusNonce, startFocus]);
 
   // ?section= deep links (#/settings/general?section=libraries), any tab.
   React.useEffect(() => {
     if (loading || loadError || !scrollToSection) return;
-    return focusSettingWhenReady(scrollToSection);
+    startFocus(scrollToSection);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, after load
   }, [loading, loadError]);
 
