@@ -120,6 +120,8 @@ export function UpdatesPanel() {
   activeTagRef.current = activeUpdateTag;
   const currentStepRef = React.useRef(1);
   currentStepRef.current = currentStep;
+  const stepStatusRef = React.useRef(stepStatus);
+  stepStatusRef.current = stepStatus;
   /** Set while a manual "Update to" install request is in flight. */
   const installingTagRef = React.useRef<string | null>(null);
   /** Target of the running reconnect poll, so a second trigger doesn't start a parallel one. */
@@ -136,7 +138,9 @@ export function UpdatesPanel() {
     if (awaitingRef.current) return { releaseId: awaitingRef.current, tag: activeTagRef.current };
     if (installingTagRef.current) return { releaseId: null, tag: installingTagRef.current };
     if (a && a.phase !== "failed") return { releaseId: a.releaseId, tag: a.tag };
-    if (activeTagRef.current && currentStepRef.current >= 2) return { releaseId: null, tag: activeTagRef.current };
+    // Pipeline card past the build step and not already failed (e.g. a staged
+    // release that auto-activate is about to apply).
+    if (activeTagRef.current && currentStepRef.current >= 2 && stepStatusRef.current !== "error") return { releaseId: null, tag: activeTagRef.current };
     return null;
   }
 
