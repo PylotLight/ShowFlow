@@ -39,7 +39,7 @@ export function GeneralSettings({ onReRunWizard }: { onReRunWizard?: () => void 
       {/* sticky so the jump chips stay reachable while scrolling a long tab */}
       <SectionNav items={SECTIONS} label="General sections" />
 
-      <SectionHeading id="updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
+      <SectionHeading id="updates" settingId="general.updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
       <UpdatesPanel />
 
       <SectionHeading id="grabbing" settingId="general.grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
