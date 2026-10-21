@@ -320,6 +320,8 @@ export class SonarrImporter {
               filePath: ep.episodeFile.path,
               originalName: ep.episodeFile.path.split(/[\\/]/).pop() ?? ep.episodeFile.path,
               fileSize: ep.episodeFile.size ?? null,
+              // Mirroring an existing Sonarr library is not an import event.
+              origin: 'sync',
               sourceKind: ep.episodeFile.sceneName ? 'release' : 'import',
               releaseTitle: ep.episodeFile.sceneName ?? null,
               indexerName: null,

@@ -440,6 +440,13 @@ export const episodeFiles = sqliteTable('episode_files', {
   /** 'release' = was grabbed from an indexer (release_title/indexer set);
    *  'import' = placed/dropped directly into the pipeline with no grab. */
   source_kind: text('source_kind').default('import'),
+  /** What recorded this row (separate from provenance in source_kind):
+   *  'import' = a real pipeline import (blackhole / forced / manual import,
+   *  upgrades) — the only rows the Activity > History feed shows;
+   *  'scan' = the library scanner / duplicate cleanup / legacy backfill
+   *  re-recording a file that was already on disk;
+   *  'sync' = mirrored from an external manager (Sonarr library import). */
+  origin: text('origin').notNull().default('import'),
   /** Release title this file came from (indexer-provided for grabs; the
    *  original filename for direct imports). Null for unknown. */
   release_title: text('release_title'),

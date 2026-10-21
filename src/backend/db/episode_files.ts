@@ -12,6 +12,8 @@ export interface EpisodeFileRow {
   original_name: string;
   file_size: number | null;
   source_kind: string;
+  /** 'import' | 'scan' | 'sync' — see schema.episodeFiles.origin. */
+  origin: string;
   release_title: string | null;
   indexer_name: string | null;
   publish_date: string | null;
@@ -52,6 +54,8 @@ export type FileMediaColumns = {
   release_tags: string | null;
 };
 
+export type EpisodeFileOrigin = 'import' | 'scan' | 'sync';
+
 export type RecordEpisodeFileInput = {
   showId: string;
   season: number;
@@ -60,6 +64,11 @@ export type RecordEpisodeFileInput = {
   originalName?: string;
   fileSize?: number | null;
   sourceKind?: 'release' | 'import';
+  /** What is recording the row (default 'import'). Only 'import' rows are
+   *  real pipeline imports and appear in Activity > History; the library
+   *  scanner, duplicate cleanup and legacy backfill pass 'scan', the Sonarr
+   *  library mirror passes 'sync'. */
+  origin?: EpisodeFileOrigin;
   releaseTitle?: string | null;
   indexerName?: string | null;
   publishDate?: string | null;
@@ -117,6 +126,7 @@ export function backfillEpisodeFiles(self: DatabaseManager) {
       releaseTitle: grab?.release_title ?? null,
       indexerName: grab?.indexer_name ?? null,
       publishDate: grab?.publish_date ?? null,
+      origin: 'scan',
     });
     filled++;
   }
@@ -152,6 +162,7 @@ export function recordEpisodeFile(self: DatabaseManager, input: RecordEpisodeFil
       original_name: input.originalName ?? input.filePath.split(/[\\/]/).pop() ?? input.filePath,
       file_size: input.fileSize ?? null,
       source_kind: input.sourceKind ?? 'import',
+      origin: input.origin ?? 'import',
       release_title: input.releaseTitle ?? null,
       indexer_name: input.indexerName ?? null,
       publish_date: input.publishDate ?? null,
@@ -199,6 +210,30 @@ export function updateEpisodeFileMedia(self: DatabaseManager, rowId: number, med
       ...(media.bitrate_kbps !== undefined ? { bitrate_kbps: media.bitrate_kbps } : {}),
       ...(media.release_tags !== undefined ? { release_tags: media.release_tags } : {}),
       probed_at: sql`(datetime('now'))`,
+    })
+    .where(eq(schema.episodeFiles.id, rowId))
+    .run();
+}
+
+/**
+ * Refresh an existing live row in place when a re-scan finds the SAME file
+ * (same path, same or previously-unknown size): stamps the size and, when a
+ * probe was run, the media columns. Never inserts a row, so imported_at and
+ * the History feed are untouched — a rescan is not an import.
+ */
+export function refreshEpisodeFileInPlace(
+  self: DatabaseManager,
+  rowId: number,
+  input: { fileSize: number | null; media?: Partial<FileMediaColumns> | null; probed?: boolean },
+) {
+  if (input.media) updateEpisodeFileMedia(self, rowId, input.media);
+  self.drizz
+    .update(schema.episodeFiles)
+    .set({
+      file_size: input.fileSize,
+      // A probe that ran but read nothing still counts as attempted, so the
+      // next scan doesn't re-probe the same unreadable file forever.
+      ...(input.probed && !input.media ? { probed_at: sql`(datetime('now'))` } : {}),
     })
     .where(eq(schema.episodeFiles.id, rowId))
     .run();
