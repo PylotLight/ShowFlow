@@ -23,13 +23,12 @@ function NamingSettings() {
 }
 
 /** Body for one settings tab. Each tab owns its own state. */
-export function SettingsTabContent({ id, scrollToSection, onReRunWizard }: {
+export function SettingsTabContent({ id, onReRunWizard }: {
   id: string;
-  scrollToSection?: string;
   onReRunWizard?: () => void;
 }) {
   switch (id) {
-    case "general": return <GeneralSettings scrollToSection={scrollToSection} onReRunWizard={onReRunWizard} />;
+    case "general": return <GeneralSettings onReRunWizard={onReRunWizard} />;
     case "providers": return <ProvidersSettings />;
     case "indexers": return <IndexersSettings />;
     case "integrations": return <IntegrationsSettings />;

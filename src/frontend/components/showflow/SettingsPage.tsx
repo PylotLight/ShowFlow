@@ -5,6 +5,10 @@ import { createPortal } from "react-dom";
 import { HeaderActions } from "@frontend/lib/header-actions";
 
 import { ErrorNotice } from "./settings/errors";
+import {
+  SETTING_FOCUS_EVENT, focusSettingWhenReady, peekPendingSettingFocus, registerSettingsPage, requestSettingFocus, takePendingSettingFocus,
+} from "./settings/focus";
+import { SettingsSearch } from "./settings/SettingsSearch";
 import { SettingsProvider, useSettings } from "./settings/SettingsContext";
 import { SettingsCompactNav, SettingsMobileList, SettingsSideNav, findTab } from "./settings/SettingsNav";
 import { SettingsTabContent } from "./settings/SettingsTabContent";
@@ -148,6 +152,48 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
 
   React.useEffect(load, [load]);
 
+  // Settings search / ⌘K: a picked setting switches tab (and opens its
+  // mobile section), then the effect below scrolls to and flashes it.
+  const [focusNonce, setFocusNonce] = React.useState(0);
+  // One in-flight "wait for the row, then scroll" poll. Not tied to effect
+  // cleanup: the tab switch re-renders (mobileSection syncs to the URL) and
+  // would cancel it before its first frame. Cancelled on unmount only.
+  const focusPoll = React.useRef<(() => void) | null>(null);
+  const startFocus = React.useCallback((id: string) => {
+    focusPoll.current?.();
+    focusPoll.current = focusSettingWhenReady(id);
+  }, []);
+  React.useEffect(() => {
+    const unregister = registerSettingsPage();
+    return () => { unregister(); focusPoll.current?.(); };
+  }, []);
+  React.useEffect(() => {
+    const on = () => {
+      const req = peekPendingSettingFocus();
+      if (!req) return;
+      setTab(req.tab);
+      if (!window.matchMedia(SM_QUERY).matches) setMobileSection(req.tab);
+      setFocusNonce(n => n + 1);
+    };
+    window.addEventListener(SETTING_FOCUS_EVENT, on);
+    return () => window.removeEventListener(SETTING_FOCUS_EVENT, on);
+  }, [setTab]);
+  React.useEffect(() => {
+    if (loading || loadError) return;
+    const req = peekPendingSettingFocus();
+    if (!req || req.tab !== tab) return;
+    if (!isDesktop && mobileSection !== req.tab) { setMobileSection(req.tab); return; }
+    takePendingSettingFocus();
+    startFocus(req.id);
+  }, [loading, loadError, tab, isDesktop, mobileSection, focusNonce, startFocus]);
+
+  // ?section= deep links (#/settings/general?section=libraries), any tab.
+  React.useEffect(() => {
+    if (loading || loadError || !scrollToSection) return;
+    startFocus(scrollToSection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, after load
+  }, [loading, loadError]);
+
   React.useEffect(() => {
     if (!mobileSection) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileSection(null); };
@@ -169,16 +215,25 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
 
   const body = (id: string) => (
     <div className={cn("space-y-6", SETTINGS_SCALE)}>
-      <SettingsTabContent id={id} scrollToSection={scrollToSection} onReRunWizard={onReRunWizard} />
+      <SettingsTabContent id={id} onReRunWizard={onReRunWizard} />
     </div>
   );
 
   return (
     <SettingsProvider config={config} setConfig={setConfig} settingsRows={settingsRows}>
       <HeaderActions>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+        {/* data-header-row: under md the header drops page actions to their
+            own full-width row, so the search box isn't squeezed by the title. */}
+        <div data-header-row={isDesktop || undefined} className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
           {!isDesktop && mobileSection && (
             <span className="mr-auto truncate font-mono text-xs font-semibold text-white">{findTab(mobileSection)?.label ?? "Settings"}</span>
+          )}
+          {isDesktop && (
+            <SettingsSearch
+              onPick={requestSettingFocus}
+              className="w-full md:w-64 lg:w-72"
+              dropdownClassName="md:left-auto md:right-0 md:w-[26rem]"
+            />
           )}
           <SaveStatus />
         </div>
@@ -194,6 +249,7 @@ export function SettingsPage({ onDone: _onDone, initialTab, scrollToSection, onR
         </div>
       ) : (
         <>
+          <SettingsSearch onPick={requestSettingFocus} className="mb-5" />
           <SettingsMobileList onSelect={(id) => { setTab(id); setMobileSection(id); }} />
           {mobileSection && (
             <MobileSection id={mobileSection} onClose={() => setMobileSection(null)}>{body(mobileSection)}</MobileSection>

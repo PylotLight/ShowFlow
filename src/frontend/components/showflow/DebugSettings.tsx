@@ -45,7 +45,7 @@ export function DebugSettings() {
           <p className="text-muted-foreground text-xs mt-0.5">Capture API calls, system events, and provider activity for live inspection</p>
         </div>
 
-        <FieldRow label="Debug Enabled" description="When on, all API calls and system events are logged to the live console below">
+        <FieldRow settingId="debug.debug-enabled" label="Debug Enabled" description="When on, all API calls and system events are logged to the live console below">
           <Switch
             checked={debugEnabled}
             onCheckedChange={toggleDebug}

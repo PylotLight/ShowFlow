@@ -20,7 +20,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
         <p className="text-muted-foreground text-xs mt-0.5">Configure download client and completed download handling</p>
       </div>
 
-      <FieldRow label="Download Client" description="How releases are submitted for downloading">
+      <FieldRow settingId="downloads.download-client" label="Download Client" description="How releases are submitted for downloading">
         <Select
           value={clientType}
           onValueChange={v => saveConfig({ downloadClient: { ...(config.downloadClient || {}), type: v } })}
@@ -44,7 +44,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
 
       {clientType === "torbox" && (
         <>
-          <FieldRow label="TorBox API Key" description="Your TorBox API key for direct downloads">
+          <FieldRow settingId="downloads.torbox-api-key" label="TorBox API Key" description="Your TorBox API key for direct downloads">
             <div className="relative">
               <Input
                 type={showTorboxKey ? "text" : "password"}
@@ -64,7 +64,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
               </button>
             </div>
           </FieldRow>
-          <FieldRow label="Download Directory" description="Where TorBox saves files locally (optional)">
+          <FieldRow settingId="downloads.download-directory" label="Download Directory" description="Where TorBox saves files locally (optional)">
             <FolderPicker
               value={config.downloadClient?.torbox?.outputFolder || ""}
               onChange={v => {
@@ -73,7 +73,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
               }}
             />
           </FieldRow>
-          <FieldRow label="Concurrent Downloads" description="Max grabs downloading at once. Extra downloads queue until a slot frees up. Applies after the watcher restarts.">
+          <FieldRow settingId="downloads.concurrent-downloads" label="Concurrent Downloads" description="Max grabs downloading at once. Extra downloads queue until a slot frees up. Applies after the watcher restarts.">
             <Input
               type="number"
               min={1}
@@ -93,14 +93,14 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
 
       {clientType === "sabnzbd" && (
         <>
-          <FieldRow label="SABnzbd URL" description="e.g. http://localhost:8080">
+          <FieldRow settingId="downloads.sabnzbd-url" label="SABnzbd URL" description="e.g. http://localhost:8080">
             <Input
               value={config.downloadClient?.sabnzbd?.url || ""}
               onChange={e => saveConfig({ downloadClient: { ...(config.downloadClient || {}), sabnzbd: { ...(config.downloadClient?.sabnzbd || {}), url: e.target.value } } })}
               placeholder="http://localhost:8080"
             />
           </FieldRow>
-          <FieldRow label="SABnzbd API Key" description="Found in SABnzbd Config > General">
+          <FieldRow settingId="downloads.sabnzbd-api-key" label="SABnzbd API Key" description="Found in SABnzbd Config > General">
             <Input
               type="password"
               value={config.downloadClient?.sabnzbd?.apiKey || ""}
@@ -116,7 +116,7 @@ export function DownloadsTab({ config, saveConfig, showTorboxKey, setShowTorboxK
           <h4 className="font-mono text-sm font-semibold text-white/90">Completed Downloads</h4>
           <p className="text-muted-foreground text-xs mt-0.5">Where finished downloads are picked up and organized</p>
         </div>
-        <FieldRow label="Watch Folder" description="Directory where download clients place completed files">
+        <FieldRow settingId="downloads.watch-folder" label="Watch Folder" description="Directory where download clients place completed files">
           <FolderPicker
             value={config.downloadClient?.blackhole?.watchFolder || ""}
             onChange={v => saveConfig({

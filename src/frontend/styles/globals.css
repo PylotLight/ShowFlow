@@ -264,3 +264,30 @@ button[data-glass]:hover::before {
     ),
     #101216;
 }
+
+/* Settings search: brief highlight on the row a result lands on. A class
+   that's added then removed (not a keyframe animation), so it still shows
+   under prefers-reduced-motion, which turns animations off app-wide; the
+   fade-out is a transition. Outline + outer halo only, no background, so
+   glass panels keep their fill. Base in @layer base so utilities on a row
+   still win; the flash itself is unlayered so it beats them while it shows. */
+@layer base {
+  [data-setting] {
+    outline: 2px solid transparent;
+    outline-offset: 6px;
+    transition: outline-color 0.6s ease-out, box-shadow 0.6s ease-out;
+  }
+}
+/* One color-mix() per rule: the CSS bundler lowers color-mix() to a solid
+   var(--signal) fallback plus an @supports override, but only keeps the
+   override for the first color-mix in a rule. The halo then painted as a
+   solid teal ring. */
+[data-setting].setting-flash { --setting-flash-ring: color-mix(in oklab, var(--signal) 85%, transparent); }
+[data-setting].setting-flash { --setting-flash-halo: color-mix(in oklab, var(--signal) 14%, transparent); }
+[data-setting].setting-flash {
+  border-radius: 0.625rem;
+  outline: 2px solid var(--setting-flash-ring);
+  outline-offset: 6px;
+  box-shadow: 0 0 0 8px var(--setting-flash-halo);
+  transition: outline-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}

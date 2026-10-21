@@ -5,13 +5,17 @@ import { Switch } from "@frontend/components/ui/switch";
 import { LibraryTypeManager } from "../LibraryTypeManager";
 import { UpdatesPanel } from "../UpdatesPanel";
 import { FieldRow } from "../SettingsShared";
+import { SectionNav } from "./SectionNav";
 import { useSettings } from "./SettingsContext";
 import { TIMEZONE_PRESETS } from "@frontend/lib/timezones";
 
-/** Group heading so General reads as distinct sections, not one long stack. */
-function SectionHeading({ id, title, description }: { id: string; title: string; description: string }) {
+/**
+ * Group heading so General reads as distinct sections, not one long stack.
+ * `id` is the ?section= deep-link / chip target; `settingId` the search anchor.
+ */
+function SectionHeading({ id, settingId, title, description }: { id: string; settingId: string; title: string; description: string }) {
   return (
-    <div id={id} className="scroll-mt-14 pt-2 first:pt-0">
+    <div id={id} data-setting={settingId} className="scroll-mt-20 pt-2 first:pt-0">
       <h2 className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-signal">{title}</h2>
       <p className="mt-1 text-sub text-muted-foreground">{description}</p>
     </div>
@@ -27,43 +31,21 @@ const SECTIONS = [
   { id: "defaults", label: "Defaults" },
 ];
 
-export function GeneralSettings({ scrollToSection, onReRunWizard }: {
-  scrollToSection?: string;
-  onReRunWizard?: () => void;
-}) {
+export function GeneralSettings({ onReRunWizard }: { onReRunWizard?: () => void }) {
   const { config, saveConfig } = useSettings();
-  const updatesRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (scrollToSection === "updates" && updatesRef.current) {
-      updatesRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [scrollToSection]);
 
   return (
     <div className="space-y-6">
       {/* sticky so the jump chips stay reachable while scrolling a long tab */}
-      <nav aria-label="General sections" className="sticky top-0 z-20 -mx-1 flex flex-wrap gap-1.5 rounded-b-lg bg-background/70 px-1 py-2 backdrop-blur-md">
-        {SECTIONS.map(sec => (
-          <a
-            key={sec.id}
-            href={`#${sec.id}`}
-            onClick={(e) => { e.preventDefault(); document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-            className="rounded-full bg-white/[0.06] px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-signal/70"
-          >
-            {sec.label}
-          </a>
-        ))}
-      </nav>
+      <SectionNav items={SECTIONS} label="General sections" />
 
-      <div ref={updatesRef}>
-        <SectionHeading id="updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
-      </div>
+      <SectionHeading id="updates" settingId="general.updates" title="Updates" description="ShowFlow releases published on GitHub, and the supervisor's view of what's running." />
       <UpdatesPanel />
 
-      <SectionHeading id="grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
+      <SectionHeading id="grabbing" settingId="general.grabbing" title="Grabbing" description="How the auto-grabber and RSS sync pick what to download." />
       <GlassPanel className="p-6 space-y-5">
         <FieldRow
+          settingId="general.upgrade-until-cutoff"
           label="Upgrade until cutoff"
           description="Keep looking for a better release while an episode's file is below its quality profile's cutoff. Global switch; each quality profile also has its own Keep upgrading toggle and upgrade-until target."
         >
@@ -74,6 +56,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
           />
         </FieldRow>
         <FieldRow
+          settingId="general.prefer-season-packs"
           label="Prefer season packs"
           description="For a season that has finished airing, try one season pack before searching episode by episode."
         >
@@ -85,6 +68,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
         </FieldRow>
         {config.preferSeasonPacks !== false && (
           <FieldRow
+            settingId="general.pack-threshold"
             label="Pack threshold"
             description="Missing episodes a finished season needs before a pack is tried."
           >
@@ -105,14 +89,14 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
         )}
       </GlassPanel>
 
-      <SectionHeading id="libraries" title="Libraries" description="Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates." />
+      <SectionHeading id="libraries" settingId="general.libraries" title="Libraries" description="Each library bundles a root folder, quality profile, and indexer set. Shows assigned to a library are organized under its root folder. This is what onboarding's Library step creates." />
       <GlassPanel className="p-6 space-y-5">
         <LibraryTypeManager />
       </GlassPanel>
 
-      <SectionHeading id="defaults" title="Defaults" description="How new shows are added and how file collisions are handled." />
+      <SectionHeading id="defaults" settingId="general.defaults" title="Defaults" description="How new shows are added and how file collisions are handled." />
       <GlassPanel className="p-6 space-y-5">
-        <FieldRow label="Default Provider" description="Metadata provider used when adding shows">
+        <FieldRow settingId="general.default-provider" label="Default Provider" description="Metadata provider used when adding shows">
           <Select
             value={config.defaultProvider || "tmdb"}
             onValueChange={v => saveConfig({ defaultProvider: v })}
@@ -127,7 +111,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="On Collision" description="What to do when a file already exists at the destination">
+        <FieldRow settingId="general.on-collision" label="On Collision" description="What to do when a file already exists at the destination">
           <Select
             value={config.onCollision || "skip"}
             onValueChange={v => saveConfig({ onCollision: v })}
@@ -142,13 +126,14 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="Dry Run" description="Log actions without actually moving files">
+        <FieldRow settingId="general.dry-run" label="Dry Run" description="Log actions without actually moving files">
           <Switch
             checked={!!config.dryRun}
             onCheckedChange={v => saveConfig({ dryRun: v })}
           />
         </FieldRow>
         <FieldRow
+          settingId="general.fallback-timezone"
           label="Fallback Timezone"
           description="Used when a show's origin country doesn't pin airtimes down — defaults to America/New_York (Sonarr-compatible)"
         >
@@ -170,7 +155,7 @@ export function GeneralSettings({ scrollToSection, onReRunWizard }: {
 
       {onReRunWizard && (
         <>
-          <SectionHeading id="setup" title="Setup" description="Re-run the onboarding wizard to reconfigure from scratch." />
+          <SectionHeading id="setup" settingId="general.setup" title="Setup" description="Re-run the onboarding wizard to reconfigure from scratch." />
           <GlassPanel className="p-6">
             <button onClick={onReRunWizard} className="rounded-md text-sm text-signal hover:underline outline-none focus-visible:ring-2 focus-visible:ring-signal/70">Re-run setup wizard</button>
           </GlassPanel>
