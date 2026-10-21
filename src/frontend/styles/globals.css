@@ -264,3 +264,25 @@ button[data-glass]:hover::before {
     ),
     #101216;
 }
+
+/* Settings search: brief highlight on the row a result lands on. Outline +
+   outer halo only (no background), so glass panels keep their fill. */
+.setting-flash {
+  border-radius: 0.625rem;
+  outline: 2px solid transparent;
+  outline-offset: 6px;
+  animation: setting-flash 1.7s ease-out;
+}
+@keyframes setting-flash {
+  0%, 40% {
+    outline-color: color-mix(in oklab, var(--signal) 85%, transparent);
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--signal) 12%, transparent);
+  }
+  100% {
+    outline-color: transparent;
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .setting-flash { animation-duration: 1.2s; animation-timing-function: steps(1, end); }
+}
