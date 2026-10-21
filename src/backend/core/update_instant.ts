@@ -29,6 +29,8 @@ export interface InstantDeps {
   /** Kick off the drain → backup → handoff sequence. */
   activate: (releaseId: string, tag: string | null) => { ok: boolean; message: string; done?: Promise<ActivationOutcome> };
   log?: (type: "update" | "error", message: string) => void;
+  /** Why the last activation failed (the activation progress detail), for the panel. */
+  activationError?: () => string | null;
 }
 
 export interface InstantStart {
@@ -114,7 +116,7 @@ async function runInstant(target: InstantTarget, deps: InstantDeps): Promise<Ins
     deps.log?.("update", `Instant update: ${tag ?? res.releaseId} downloaded & verified, activating`);
     const outcome = await (started.done ?? Promise.resolve<ActivationOutcome>("handed-off"));
     if (outcome === "handed-off") return jobs.snapshot().instant; // we're being replaced
-    if (outcome === "failed") return fail("Activation failed, see the update status for details.");
+    if (outcome === "failed") return fail(deps.activationError?.() || "Activation failed, see the update status for details.");
     // postponed / cancelled don't happen for a manual activation, but don't leave the slot held.
     jobs.updateInstant({ step: "done", message: `Activation ${outcome}; ${tag ?? "the release"} is staged.` });
     return jobs.snapshot().instant;

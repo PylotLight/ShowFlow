@@ -3,7 +3,7 @@
 // and the optional auto-activate policy. All of this is app-side only — the
 // supervisor protocol (/admin/activate) is unchanged, so it ships OTA.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { db } from "../db";
 import { triggerActivate, updateJobs } from "./updates_manager";
 import { runBackup, loadRetention, DEFAULT_RETENTION } from "./backup";
@@ -369,4 +369,35 @@ function stagedReleaseId(): string | null {
   } catch {
     return null;
   }
+}
+
+// ---- Instant update (download → verify → activate in one go) -------------
+
+/**
+ * True when `releaseId` is already downloaded + verified into the
+ * supervisor's releases dir as the staged release (and didn't just fail to
+ * activate, in which case a fresh download is the sensible retry).
+ */
+export function isAlreadyStaged(releaseId: string, pendingReleaseId: string | null): boolean {
+  if (!pendingReleaseId || pendingReleaseId !== releaseId) return false;
+  if (failedReleaseId() === releaseId) return false;
+  if (/[/.]/.test(releaseId)) return false;
+  return existsSync(`${DATA_DIR}/releases/${releaseId}/manifest.json`);
+}
+
+/** Starts an instant update of a GitHub release (Settings > Updates "Update now"). */
+export async function startInstantUpdateFor(githubReleaseId: number, tag: string | null, source: "manual" | "auto" = "manual") {
+  const [{ startInstantUpdate, INSTANT_DRAIN_TIMEOUT_MS }, { downloadAndInstall }, watcher] = await Promise.all([
+    import("./update_instant"),
+    import("./updates_manager"),
+    import("./update_watcher"),
+  ]);
+  return startInstantUpdate({ githubReleaseId, tag }, source, {
+    jobs: updateJobs,
+    download: (id) => downloadAndInstall(id, { isStaged: (rid) => isAlreadyStaged(rid, watcher.getPendingUpdate()?.releaseId ?? null) }),
+    recordStaged: (t, rid) => watcher.recordStaged({ tag: t, releaseId: rid }),
+    activate: (rid, t) => startActivation(rid, { tag: t, auto: source === "auto", drainTimeoutMs: INSTANT_DRAIN_TIMEOUT_MS }),
+    activationError: () => (progress?.phase === "failed" ? progress.detail : getLastActivation()?.message ?? null),
+    log: (type, message) => db.logEvent({ type, entityType: "system", entityId: tag ?? undefined, message }),
+  });
 }
