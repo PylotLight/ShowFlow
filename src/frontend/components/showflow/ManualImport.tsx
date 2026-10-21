@@ -1,4 +1,4 @@
-import { CheckIcon, FileIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon, XIcon, SearchIcon, Edit3Icon, TvIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, FileIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon, XIcon, SearchIcon, Edit3Icon, TvIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@frontend/components/ui/button";
@@ -8,6 +8,15 @@ import { Input } from "@frontend/components/ui/input";
 import { Panel } from "@frontend/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frontend/components/ui/select";
 import { cn } from "@frontend/lib/utils";
+import {
+  ConflictDetail,
+  ReasonBadge,
+  ScoreDelta,
+  sideSummary,
+  type ForceImportEffect,
+  type ImportComparison,
+  type ImportReason,
+} from "@frontend/components/showflow/ManualImportConflict";
 
 interface WatchFile {
   filename: string;
@@ -20,7 +29,14 @@ interface WatchFile {
   episodes?: number[];
   existingFile?: string;
   resolved: boolean;
+  held?: boolean;
   error?: string;
+  /** Why the importer left this file here (recorded at decline time, or re-derived). */
+  reason?: ImportReason;
+  /** Incoming vs existing, scored the same way the importer scores them. */
+  comparison?: ImportComparison;
+  /** What Force Import will do to the library. */
+  forceImport?: ForceImportEffect;
 }
 
 interface ActionResult {
@@ -77,6 +93,7 @@ function sniffEpisodeNumbers(filename: string): { season?: number; episodes: num
 export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
   const [files, setFiles] = React.useState<WatchFile[] | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
   const [importResults, setImportResults] = React.useState<ActionResult[] | null>(null);
   const [deleteResults, setDeleteResults] = React.useState<ActionResult[] | null>(null);
@@ -153,6 +170,15 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     } else {
       setSelected(new Set(files.map((f) => f.filename)));
     }
+  };
+
+  const toggleExpanded = (name: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   };
 
   const toggleFile = (name: string) => {
@@ -357,6 +383,196 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
     }
   };
 
+  /** Everything a row needs, shared by the desktop table and the mobile cards. */
+  const buildRow = (f: WatchFile) => {
+    const override = assignedShows[f.filename];
+    const epOverride = episodeOverrides[f.filename];
+    const currentShowTitle = override ? override.title : f.show;
+    const displaySeason = epOverride?.season ?? f.season;
+    const displayEpisodes = epOverride?.episodes ?? f.episodes;
+
+    const assignedShow = assignedShows[f.filename];
+    const assignedShowId = assignedShow?.id ?? f.showId;
+    // Films have no season/episode axis: the backend matcher
+    // labels them kind="movie", and an explicit library pick
+    // is authoritative too (seriesType from /api/shows).
+    const isMovie = assignedShow ? assignedShow.seriesType === 'movie' : f.kind === 'movie';
+    const movieBadge = (
+      <span
+        className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-foreground"
+        title="Movies import as a single file — no season or episode"
+      >
+        Movie
+      </span>
+    );
+    const seasonOptions = assignedShowId && seasonsByShow[assignedShowId]?.length
+      ? seasonsByShow[assignedShowId]
+      : (() => {
+          const maxSeason = Math.max(40, displaySeason ?? 0);
+          return Array.from({ length: maxSeason + 1 }, (_, i) => i); // Specials (0) .. max
+        })();
+
+    const seasonCellContent = isMovie ? movieBadge : (
+      <Select
+        value={displaySeason != null ? String(displaySeason) : undefined}
+        onValueChange={(v) => setSeasonOverride(f.filename, v === "__auto__" ? null : parseInt(v, 10))}
+        disabled={!assignedShowId}
+      >
+        <SelectTrigger
+          size="sm"
+          className={cn(
+            "h-7 text-[11px] px-2 min-w-16",
+            epOverride?.season != null && "border-signal/50 text-signal font-medium",
+          )}
+        >
+          <SelectValue placeholder="—" />
+        </SelectTrigger>
+        <SelectContent>
+          {epOverride?.season != null && (
+            <SelectItem value="__auto__">
+              Auto{f.season != null ? ` (S${f.season})` : ""}
+            </SelectItem>
+          )}
+          {seasonOptions.map((s) => (
+            <SelectItem key={s} value={String(s)}>
+              {s === 0 ? "Specials" : `Season ${s}`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+
+    const episodesCellContent = isMovie ? movieBadge : (
+      <button
+        type="button"
+        onClick={() => openEpisodePicker(f)}
+        className={cn(
+          "rounded px-1.5 py-1 hover:bg-white/5 transition-colors text-left max-w-[120px] truncate",
+          epOverride?.episodes?.length && "text-signal font-medium",
+        )}
+        title="Select episodes"
+      >
+        {displayEpisodes?.length
+          ? displayEpisodes.map((n) => `E${String(n).padStart(2, "0")}`).join(", ")
+          : <span className="text-muted-foreground">—</span>}
+      </button>
+    );
+
+    const showCell = (
+      <>
+      {override ? (
+        <div className="flex items-center gap-1 text-signal font-medium min-w-0">
+          <span className="truncate" title={`Manually assigned to ${override.title}`}>{override.title}</span>
+          <button aria-label="Reset show assignment"
+            type="button"
+            onClick={(e) => clearAssignedShow(f.filename, e)}
+            className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+            title="Reset show assignment"
+          >
+            <XIcon className="size-3" />
+          </button>
+        </div>
+        ) : (
+          <div className="min-w-0">
+            {f.show ? (
+              <span
+                className={cn(
+                  "block truncate cursor-pointer hover:text-signal transition-colors",
+                  !f.resolved && "text-muted-foreground",
+                )}
+                title={f.show}
+                onClick={() => setSelectingFile(f)}
+              >
+                {f.show}
+              </span>
+            ) : (
+              <span
+                className="italic text-muted-foreground cursor-pointer hover:text-signal"
+                onClick={() => setSelectingFile(f)}
+                title="Click to assign a show"
+              >
+                unresolved
+              </span>
+            )}
+          </div>
+        )}
+      </>
+    );
+
+    const overridePill = override || epOverride ? (
+      <span
+        className="rounded bg-signal/10 px-1.5 py-px text-[11px] text-signal font-mono whitespace-nowrap"
+        title={override ? "Manually assigned show" : "Season/episode overridden"}
+      >
+        {override ? "Assigned" : "Modified"}
+      </span>
+    ) : null;
+
+    const statusCell = (
+      <div className="flex flex-wrap items-center gap-1">
+        {f.reason ? (
+          <ReasonBadge reason={f.reason} />
+        ) : f.error ? (
+          <span className="block max-w-[140px] truncate rounded bg-destructive/10 px-1.5 py-px font-mono text-[11px] text-destructive" title={f.error}>
+            {f.error}
+          </span>
+        ) : f.resolved ? (
+          <span className="rounded bg-green-500/10 px-1.5 py-px font-mono text-[11px] text-green-400" title="Matched to library show">Matched</span>
+        ) : (
+          <span className="rounded bg-amber-500/10 px-1.5 py-px font-mono text-[11px] text-amber-400" title="Unresolved - click 'Match Show' to manually assign">Unresolved</span>
+        )}
+        {overridePill}
+      </div>
+    );
+
+    const existingSide = f.comparison?.existing ?? null;
+    const existingCell = f.existingFile || existingSide ? (
+      <div className="min-w-0">
+        <div className="truncate" title={existingSide?.filename ?? f.existingFile}>{existingSide?.filename ?? f.existingFile}</div>
+        {existingSide && (
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span className="truncate">{sideSummary(existingSide)}</span>
+            <ScoreDelta delta={f.comparison?.scoreDelta} />
+          </div>
+        )}
+      </div>
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    );
+
+    const hasDetail = !!(f.reason || f.comparison);
+    const isOpen = expanded.has(f.filename);
+    const expandButton = (
+      <button
+        type="button"
+        onClick={() => toggleExpanded(f.filename)}
+        disabled={!hasDetail}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? "Hide details" : "Show why this file wasn't imported"}
+        title={isOpen ? "Hide details" : "Why wasn't this imported?"}
+        className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground disabled:opacity-30"
+      >
+        <ChevronRightIcon className={cn("size-3.5 transition-transform", isOpen && "rotate-90")} />
+      </button>
+    );
+
+    const matchButton = (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setSelectingFile(f)}
+        className="h-7 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
+      >
+        <Edit3Icon className="size-3" />
+        Match Show
+      </Button>
+    );
+
+    const detail = <ConflictDetail reason={f.reason} comparison={f.comparison} forceImport={f.forceImport} />;
+
+    return { showCell, seasonCellContent, episodesCellContent, statusCell, existingCell, expandButton, matchButton, detail, isOpen, hasDetail, isMovie };
+  };
+
   const filteredLibraryShows = libraryShows.filter((s) =>
     s.title.toLowerCase().includes(showSearchQuery.toLowerCase()),
   );
@@ -368,7 +584,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
           <div>
             <h2 className="font-display text-base font-semibold tracking-wide text-white/90">Manual Import</h2>
             <p className="text-muted-foreground text-xs mt-0.5">
-              All files currently in the watch folder. Force-import to bypass upgrade/duplicate rules, select matches manually for unresolved files, or delete unwanted files.
+              Files the importer left in the watch folder, and why. Expand a row to compare it with the library file. Force Import bypasses the upgrade/duplicate rules; Match Show fixes unresolved files.
             </p>
           </div>
           <Button
@@ -458,7 +674,8 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* Desktop / tablet: table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-white/5 text-muted-foreground">
@@ -470,6 +687,7 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                         className="rounded border-white/20 bg-white/5"
                       />
                     </th>
+                    <th className="w-6 px-0 py-2" aria-label="Details" />
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">File</th>
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">Show</th>
                     <th className="px-2 py-2 text-left font-mono font-medium uppercase tracking-wider">Season</th>
@@ -481,182 +699,123 @@ export function ManualImport({ onRefresh }: { onRefresh?: () => void }) {
                 </thead>
                 <tbody>
                   {files.map((f) => {
-                    const override = assignedShows[f.filename];
-                    const epOverride = episodeOverrides[f.filename];
-                    const currentShowTitle = override ? override.title : f.show;
-                    const displaySeason = epOverride?.season ?? f.season;
-                    const displayEpisodes = epOverride?.episodes ?? f.episodes;
-
-                    const assignedShow = assignedShows[f.filename];
-                    const assignedShowId = assignedShow?.id ?? f.showId;
-                    // Films have no season/episode axis: the backend matcher
-                    // labels them kind="movie", and an explicit library pick
-                    // is authoritative too (seriesType from /api/shows).
-                    const isMovie = assignedShow ? assignedShow.seriesType === 'movie' : f.kind === 'movie';
-                    const movieBadge = (
-                      <span
-                        className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-1 text-[11px] font-mono uppercase tracking-wide text-muted-foreground"
-                        title="Movies import as a single file — no season or episode"
-                      >
-                        Movie
-                      </span>
-                    );
-                    const seasonOptions = assignedShowId && seasonsByShow[assignedShowId]?.length
-                      ? seasonsByShow[assignedShowId]
-                      : (() => {
-                          const maxSeason = Math.max(40, displaySeason ?? 0);
-                          return Array.from({ length: maxSeason + 1 }, (_, i) => i); // Specials (0) .. max
-                        })();
-
-                    const seasonCellContent = isMovie ? movieBadge : (
-                      <Select
-                        value={displaySeason != null ? String(displaySeason) : undefined}
-                        onValueChange={(v) => setSeasonOverride(f.filename, v === "__auto__" ? null : parseInt(v, 10))}
-                        disabled={!assignedShowId}
-                      >
-                        <SelectTrigger
-                          size="sm"
+                    const r = buildRow(f);
+                    return (
+                      <React.Fragment key={f.filename}>
+                        <tr
                           className={cn(
-                            "h-7 text-[11px] px-2 min-w-16",
-                            epOverride?.season != null && "border-signal/50 text-signal font-medium",
+                            "border-b border-white/5 transition-colors",
+                            r.isOpen && "border-b-0",
+                            selected.has(f.filename) ? "bg-signal/5" : "hover:bg-white/[0.02]",
                           )}
                         >
-                          <SelectValue placeholder="—" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {epOverride?.season != null && (
-                            <SelectItem value="__auto__">
-                              Auto{f.season != null ? ` (S${f.season})` : ""}
-                            </SelectItem>
-                          )}
-                          {seasonOptions.map((s) => (
-                            <SelectItem key={s} value={String(s)}>
-                              {s === 0 ? "Specials" : `Season ${s}`}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    );
-
-                    const episodesCellContent = isMovie ? movieBadge : (
-                      <button
-                        type="button"
-                        onClick={() => openEpisodePicker(f)}
-                        className={cn(
-                          "rounded px-1.5 py-1 hover:bg-white/5 transition-colors text-left max-w-[120px] truncate",
-                          epOverride?.episodes?.length && "text-signal font-medium",
-                        )}
-                        title="Select episodes"
-                      >
-                        {displayEpisodes?.length
-                          ? displayEpisodes.map((n) => `E${String(n).padStart(2, "0")}`).join(", ")
-                          : <span className="text-muted-foreground">—</span>}
-                      </button>
-                    );
-
-                    return (
-                      <tr
-                        key={f.filename}
-                        className={cn(
-                          "border-b border-white/5 transition-colors",
-                          selected.has(f.filename) ? "bg-signal/5" : "hover:bg-white/[0.02]",
-                        )}
-                      >
-                        <td className="px-2 py-2.5">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(f.filename)}
-                            onChange={() => toggleFile(f.filename)}
-                            className="rounded border-white/20 bg-white/5"
-                          />
-                        </td>
-                        <td className="px-2 py-2.5 font-mono text-foreground/85 max-w-[200px] truncate" title={f.filename}>
-                          {f.filename}
-                        </td>
-                        <td className="px-2 py-2.5 text-foreground/70 max-w-[180px]">
-                          {override ? (
-                            <div className="flex items-center gap-1 text-signal font-medium min-w-0">
-                              <span className="truncate" title={`Manually assigned to ${override.title}`}>{override.title}</span>
-                              <button aria-label="Reset show assignment"
-                                type="button"
-                                onClick={(e) => clearAssignedShow(f.filename, e)}
-                                className="text-muted-foreground hover:text-destructive transition-colors ml-1"
-                                title="Reset show assignment"
-                              >
-                                <XIcon className="size-3" />
-                              </button>
-                            </div>
-                            ) : (
-                              <div className="min-w-0">
-                                {f.show ? (
-                                  <span
-                                    className={cn(
-                                      "block truncate cursor-pointer hover:text-signal transition-colors",
-                                      !f.resolved && "text-muted-foreground",
-                                    )}
-                                    title={f.show}
-                                    onClick={() => setSelectingFile(f)}
-                                  >
-                                    {f.show}
-                                  </span>
-                                ) : (
-                                  <span
-                                    className="italic text-muted-foreground cursor-pointer hover:text-signal"
-                                    onClick={() => setSelectingFile(f)}
-                                    title="Click to assign a show"
-                                  >
-                                    unresolved
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                        </td>
-                        <td className="px-2 py-2.5 text-foreground/70">
-                          {seasonCellContent}
-                        </td>
-                        <td className="px-2 py-2.5 text-foreground/70">
-                          {episodesCellContent}
-                        </td>
-                        <td className="px-2 py-2.5 text-foreground/70 max-w-[160px] truncate" title={f.existingFile}>
-                          {f.existingFile || <span className="text-muted-foreground">—</span>}
-                        </td>
-                        <td className="px-2 py-2.5 max-w-[140px]">
-                          {override || epOverride ? (
-                            <span
-                              className="rounded bg-signal/10 px-1.5 py-px text-[11px] text-signal font-mono"
-                              title={override ? "Manually assigned show" : "Season/episode overridden"}
+                          <td className="px-2 py-2.5">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(f.filename)}
+                              onChange={() => toggleFile(f.filename)}
+                              className="rounded border-white/20 bg-white/5"
+                            />
+                          </td>
+                          <td className="px-0 py-2.5">{r.expandButton}</td>
+                          <td className="px-2 py-2.5 font-mono text-foreground/85 max-w-[200px] truncate" title={f.filename}>
+                            {f.filename}
+                          </td>
+                          <td className="px-2 py-2.5 text-foreground/70 max-w-[180px]">{r.showCell}</td>
+                          <td className="px-2 py-2.5 text-foreground/70">{r.seasonCellContent}</td>
+                          <td className="px-2 py-2.5 text-foreground/70">{r.episodesCellContent}</td>
+                          <td className="px-2 py-2.5 text-foreground/70 max-w-[220px]">{r.existingCell}</td>
+                          <td className="px-2 py-2.5 max-w-[180px]">
+                            <button
+                              type="button"
+                              onClick={() => r.hasDetail && toggleExpanded(f.filename)}
+                              className="text-left"
+                              title={f.reason?.detail ?? f.error}
                             >
-                              {override ? "Assigned" : "Modified"}
-                            </span>
-                          ) : f.resolved ? (
-                            <span className="rounded bg-green-500/10 px-1.5 py-px text-[11px] text-green-400 font-mono" title="Matched to library show">Resolved</span>
-                          ) : f.error ? (
-                            <span
-                              className="block rounded bg-destructive/10 px-1.5 py-px text-[11px] text-destructive font-mono truncate"
-                              title={f.error}
-                            >
-                              {f.error}
-                            </span>
-                          ) : (
-                            <span className="rounded bg-amber-500/10 px-1.5 py-px text-[11px] text-amber-400 font-mono" title="Unresolved - click 'Match Show' to manually assign">Unresolved</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-2.5 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectingFile(f)}
-                            className="h-7 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
-                          >
-                            <Edit3Icon className="size-3" />
-                            Match Show
-                          </Button>
-                        </td>
-                      </tr>
+                              {r.statusCell}
+                            </button>
+                          </td>
+                          <td className="px-2 py-2.5 text-right">{r.matchButton}</td>
+                        </tr>
+                        {r.isOpen && (
+                          <tr className={cn("border-b border-white/5", selected.has(f.filename) && "bg-signal/5")}>
+                            <td />
+                            <td colSpan={8} className="px-2 pb-4 pt-1">{r.detail}</td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Phones / mini window: cards */}
+            <div className="md:hidden space-y-2">
+              <label className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={files.length > 0 && selected.size === files.length}
+                  onChange={toggleAll}
+                  className="rounded border-white/20 bg-white/5"
+                />
+                Select all
+              </label>
+              {files.map((f) => {
+                const r = buildRow(f);
+                return (
+                  <div
+                    key={f.filename}
+                    className={cn(
+                      "rounded-lg border border-white/5 p-3 space-y-2 text-xs",
+                      selected.has(f.filename) ? "bg-signal/5" : "bg-white/[0.015]",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(f.filename)}
+                        onChange={() => toggleFile(f.filename)}
+                        className="mt-0.5 rounded border-white/20 bg-white/5"
+                        aria-label={`Select ${f.filename}`}
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="break-all font-mono text-[11px] text-foreground/85">{f.filename}</div>
+                        <div className="text-foreground/70">{r.showCell}</div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {r.statusCell}
+                      {!r.isMovie && <div className="flex items-center gap-1">{r.seasonCellContent}{r.episodesCellContent}</div>}
+                    </div>
+                    {f.reason && !r.isOpen && (
+                      <p className="line-clamp-2 break-words text-[11px] text-muted-foreground">{f.reason.detail}</p>
+                    )}
+                    {(f.existingFile || f.comparison?.existing) && !r.isOpen && (
+                      <div className="text-[11px] text-foreground/60">
+                        <span className="text-muted-foreground">Existing: </span>
+                        {r.existingCell}
+                      </div>
+                    )}
+                    {r.isOpen && <div className="pt-1">{r.detail}</div>}
+                    <div className="flex items-center justify-between gap-2">
+                      {r.hasDetail ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleExpanded(f.filename)}
+                          className="h-7 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
+                          aria-expanded={r.isOpen}
+                        >
+                          <ChevronRightIcon className={cn("size-3 transition-transform", r.isOpen && "rotate-90")} />
+                          {r.isOpen ? "Hide details" : "Compare"}
+                        </Button>
+                      ) : <span />}
+                      {r.matchButton}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5">

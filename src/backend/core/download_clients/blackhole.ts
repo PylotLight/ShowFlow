@@ -24,6 +24,9 @@ import type { DownloadClient } from './types';
 import { isSampleFile } from '../sample_filter';
 import { FileReplacement } from './safe_replace';
 import { markReleaseFailed } from '../release_failures';
+import { recordImportReason, clearImportReason, clearAllImportReasons, pruneImportReasons, type ManualImportReasonCode } from '../manual_import_reasons';
+import { explainWatchEntry, upgradeReason, cutoffStatus, splitReplaceKept, type WatchEntryExplanation } from '../manual_import_explain';
+import type { UpgradeExplanation } from '../quality_engine';
 
 /**
  * Suffixes that mark a file as an in-progress download artifact — ours
@@ -236,6 +239,7 @@ export class BlackholeClient implements DownloadClient {
   }
 
   releaseManualHold(fullPath: string) {
+    clearImportReason(fullPath);
     const paths = this.readManualHolds();
     if (paths.includes(fullPath)) {
       this.writeManualHolds(paths.filter(p => p !== fullPath));
@@ -245,6 +249,7 @@ export class BlackholeClient implements DownloadClient {
 
   clearManualHolds(): number {
     const count = this.readManualHolds().length;
+    clearAllImportReasons();
     db.removeSetting(BlackholeClient.MANUAL_HOLDS_KEY);
     return count;
   }
@@ -418,12 +423,29 @@ export class BlackholeClient implements DownloadClient {
     return this.watchFolder;
   }
 
+  /** Record why the importer left `fullPath` in the watch folder (shown on Manual Import). */
+  private declineReason(fullPath: string, code: ManualImportReasonCode, message: string, extra: { incomingScore?: number; existingScore?: number; existingFilename?: string } = {}) {
+    let size: number | null = null;
+    try { size = Bun.file(fullPath).size; } catch {}
+    recordImportReason(fullPath, { code, message, size, ...extra });
+  }
+
+  /** Record a not-an-upgrade style decline with both scores. */
+  private declineUpgrade(fullPath: string, expl: UpgradeExplanation, profileId: string, existingFilename: string, extraNote = '') {
+    const u = upgradeReason(expl, expl.verdict === 'upgrades_off' ? null : cutoffStatus(profileId, expl.existing), existingFilename);
+    this.declineReason(fullPath, u.code, u.detail + extraNote, {
+      incomingScore: expl.newcomer.totalScore,
+      existingScore: expl.existing.totalScore,
+      existingFilename,
+    });
+  }
+
   getProcessingFiles(): string[] {
     const active = Array.from(this.processingQueue).map(p => path.basename(p));
     return [...active, ...this.pendingQueue];
   }
 
-  async listWatchFolderFiles(): Promise<{
+  async listWatchFolderFiles(): Promise<({
     filename: string;
     fullPath: string;
     show?: string;
@@ -435,11 +457,11 @@ export class BlackholeClient implements DownloadClient {
     resolved: boolean;
     held?: boolean;
     error?: string;
-  }[]> {
+  } & Partial<WatchEntryExplanation>)[]> {
     const folder = this.watchFolder;
     if (!folder) return [];
 
-    const results: {
+    const results: ({
       filename: string;
       fullPath: string;
       show?: string;
@@ -451,7 +473,7 @@ export class BlackholeClient implements DownloadClient {
       resolved: boolean;
       held?: boolean;
       error?: string;
-    }[] = [];
+    } & Partial<WatchEntryExplanation>)[] = [];
 
     try {
       const files = await readdir(folder);
@@ -529,6 +551,19 @@ export class BlackholeClient implements DownloadClient {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[${this.name}] Error listing watch folder:`, message);
     }
+
+    // Why each file is still here + incoming vs existing comparison. One
+    // probe budget per listing keeps a big folder from stalling the endpoint;
+    // probes are cached by path/size/mtime so the next listing is cheap.
+    const budget = { left: 25 };
+    for (const entry of results) {
+      try {
+        Object.assign(entry, await explainWatchEntry(entry, budget));
+      } catch (e) {
+        debugLog('Manual import explain failed', { filename: entry.filename, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    pruneImportReasons(new Set(results.map((r) => r.fullPath)));
 
     return results;
   }
@@ -636,6 +671,7 @@ export class BlackholeClient implements DownloadClient {
     const show = db.getShow(showId);
     if (!show) {
       debugLog(`Movie import: show ${showId} vanished, holding ${filename}`);
+      this.declineReason(fullPath, 'UNMATCHED', `The matched movie (${showId}) no longer exists in the library. Use Match Show to pick one.`);
       if (opts?.force) throw new Error(`Movie show ${showId} no longer exists in the library.`);
       this.holdForManual(fullPath);
       return;
@@ -652,6 +688,7 @@ export class BlackholeClient implements DownloadClient {
       console.error(`[${this.name}] ${message}`);
       db.logEvent({ type: 'error', entityType: 'file', message });
       db.logPipelineEvent({ showId, stage: 'FAILED', eventType: 'import_failed', message, releaseTitle: filename });
+      this.declineReason(fullPath, 'NO_ROOT_FOLDER', `No root folder is configured for movie "${show.title}". Assign a show profile with a root folder.`);
       if (opts?.force) throw new Error(message);
       this.holdForManual(fullPath);
       return;
@@ -684,10 +721,9 @@ export class BlackholeClient implements DownloadClient {
         } else if (existing.file_path && (await Bun.file(existing.file_path).exists())) {
           existingProbe = await probeMediaFile(existing.file_path);
         }
-        const isUpgrade = existingProbe
-          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId, existing.release_title || existing.original_name)
-          : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
-        if (!isUpgrade) {
+        const expl = qualityEngine.explainUpgrade(existingProbe, existingFilename, filename, profileId, existing.release_title || existing.original_name);
+        if (!expl.isUpgrade) {
+          this.declineUpgrade(fullPath, expl, profileId, existingFilename);
           console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}. Skipping. File remains in watch folder for manual review.`);
           db.logEvent({ type: 'skip', entityType: 'file', message: `${filename} is not an upgrade over existing ${existingFilename}. Skipping.` });
           db.logPipelineEvent({
@@ -721,6 +757,7 @@ export class BlackholeClient implements DownloadClient {
     if (replacement === null) {
       const message = `Destination already exists for movie "${show.title}" (${finalPath}). Nothing imported.`;
       console.warn(`[${this.name}] ${message}`);
+      this.declineReason(fullPath, 'COLLISION', `A file already exists at the destination (${finalPath}) and the collision setting is "skip". Force Import, or change On collision in settings.`);
       if (opts?.force) throw new Error(message);
       this.holdForManual(fullPath);
       return;
@@ -827,6 +864,7 @@ export class BlackholeClient implements DownloadClient {
       const stable = await this.waitForStableFile(fullPath);
       if (!stable) {
         db.logEvent({ type: 'error', entityType: 'file', message: `File ${filename} failed to stabilize for processing` });
+        this.declineReason(fullPath, 'IMPORT_ERROR', 'The file kept changing size for 5 minutes, so it was treated as still downloading and skipped.');
         return;
       }
 
@@ -843,6 +881,7 @@ export class BlackholeClient implements DownloadClient {
         } else {
           console.log(`[${this.name}] Skipping duplicate: ${filename}`);
           db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
+          this.declineReason(fullPath, 'DUPLICATE', 'This exact file (same content hash) was already imported before, so it was skipped. Delete it, or Force Import to import it again.');
           return;
         }
       }
@@ -959,6 +998,7 @@ export class BlackholeClient implements DownloadClient {
     // When handleFile is invoked via the manual force-import route, swallow
     // this error and the UI reports success despite the file remaining in
     // the watch folder. Throw so forceImportFile can return a failed result.
+    this.declineReason(fullPath, !parsed?.show && !matchedAttempt ? 'PARSE_FAILED' : 'UNMATCHED', errorMessage);
     if (opts?.force) {
       throw new Error(errorMessage);
     }
@@ -1042,6 +1082,7 @@ export class BlackholeClient implements DownloadClient {
             entityType: 'file',
             message,
           });
+          this.declineReason(fullPath, 'NO_PROFILE', `"${show.title}" isn't in the library and no show root-folder profiles are configured, so there's nowhere to put it. Create a show profile in settings.`);
           if (!opts?.force) this.holdForManual(fullPath);
           return;
         }
@@ -1059,6 +1100,7 @@ export class BlackholeClient implements DownloadClient {
 
           console.error(`[${this.name}] ${message}`);
           db.logEvent({ type: 'error', entityType: 'file', message });
+          this.declineReason(fullPath, 'NO_PROFILE', message);
           if (!opts?.force) this.holdForManual(fullPath);
           return;
         }
@@ -1106,6 +1148,7 @@ export class BlackholeClient implements DownloadClient {
             releaseTitle: filename,
           });
         }
+        this.declineReason(fullPath, 'NO_ROOT_FOLDER', `No root folder is configured for "${show.title}". Assign a show profile with a root folder.`);
         if (!opts?.force) this.holdForManual(fullPath);
         return;
       }
@@ -1125,6 +1168,10 @@ export class BlackholeClient implements DownloadClient {
       const plan = await this.planEpisodeReplacement(showId, episodes, filename, !!opts?.force);
       if (plan.notUpgrade) {
         const { ep: blockEp, existingFilename, via } = plan.notUpgrade;
+        this.declineUpgrade(
+          fullPath, plan.notUpgrade.expl, plan.notUpgrade.profileId, existingFilename,
+          episodes.length > 1 ? ` (Blocked by S${String(blockEp.season).padStart(2, '0')}E${String(blockEp.episode).padStart(2, '0')}: a multi-episode file must beat every episode it covers.)` : '',
+        );
         console.log(`[${this.name}] New file ${filename} is not an upgrade over ${existingFilename}${via ? ` (${via})` : ''}. Skipping. File remains in watch folder for manual review.`);
         db.logEvent({
           type: 'skip',
@@ -1187,6 +1234,7 @@ export class BlackholeClient implements DownloadClient {
         // Destination already exists and onCollision=skip — the file stays in
         // the watch folder. Hold it for manual import so the rescan doesn't
         // keep re-queuing and re-logging the same mistake.
+        this.declineReason(fullPath, 'COLLISION', `A file already exists at the destination (${finalPath}) and the collision setting is "skip". Force Import, or change On collision in settings.`);
         if (!opts?.force) this.holdForManual(fullPath);
         return;
       }
@@ -1292,6 +1340,7 @@ export class BlackholeClient implements DownloadClient {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`[${this.name}] Error processing ${filename}:`, e);
       db.logEvent({ type: 'error', entityType: 'file', message: `Error processing ${filename}: ${message}` });
+      this.declineReason(fullPath, 'IMPORT_ERROR', `Import failed: ${message}`);
       // A release-caused import failure fails (and blocklists) the grab so
       // the episode is re-searched right away. Infrastructure errors (disk
       // permissions, a full volume, DB) are not the release's fault: the file
@@ -1371,7 +1420,7 @@ export class BlackholeClient implements DownloadClient {
     filename: string,
     force: boolean,
   ): Promise<{
-    notUpgrade?: { ep: { season: number; episode: number }; existingFilename: string; via: string };
+    notUpgrade?: { ep: { season: number; episode: number }; existingFilename: string; via: string; expl: UpgradeExplanation; profileId: string };
     replace: string[];
     kept: string[];
     existingNames: string[];
@@ -1403,29 +1452,19 @@ export class BlackholeClient implements DownloadClient {
           existingProbe = await probeMediaFile(filePath);
           if (existingProbe) via = 'probed-on-disk';
         }
-        const isUpgrade = existingProbe
-          ? qualityEngine.shouldUpgradeWithMedia(existingProbe, existingFilename, filename, profileId, row?.release_title || row?.original_name)
-          : qualityEngine.shouldUpgrade(existingFilename, filename, profileId);
-        if (!isUpgrade) {
+        const expl = qualityEngine.explainUpgrade(existingProbe, existingFilename, filename, profileId, row?.release_title || row?.original_name);
+        if (!expl.isUpgrade) {
           // Upgrades off in the profile = imports never replace (shouldUpgrade* return false).
-          if (!qualityEngine.upgradesAllowed(profileId)) via = UPGRADES_OFF;
+          if (!expl.upgradesAllowed) via = UPGRADES_OFF;
           return {
-            notUpgrade: { ep, existingFilename, via: via === UPGRADES_OFF ? via : via ? `${via} ${existingProbe?.video?.height ?? ''}p` : '' },
+            notUpgrade: { ep, existingFilename, via: via === UPGRADES_OFF ? via : via ? `${via} ${existingProbe?.video?.height ?? ''}p` : '', expl, profileId },
             replace: [], kept: [], existingNames: [],
           };
         }
       }
     }
 
-    const replace: string[] = [];
-    const kept: string[] = [];
-    for (const filePath of byPath.keys()) {
-      const holders = db.db.query(
-        `SELECT season_number, episode_number FROM episodes WHERE show_id = ? AND file_path = ?`,
-      ).all(showId, filePath) as Array<{ season_number: number; episode_number: number }>;
-      const allCovered = holders.every(h => covered.has(`${h.season_number}:${h.episode_number}`));
-      (allCovered ? replace : kept).push(filePath);
-    }
+    const { replace, kept } = splitReplaceKept(showId, covered, [...byPath.keys()]);
     return { replace, kept, existingNames: [...byPath.keys()].map(p => path.basename(p)) };
   }
 
