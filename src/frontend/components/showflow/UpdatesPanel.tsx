@@ -6,6 +6,7 @@ import { Button } from "@frontend/components/ui/button";
 import { Switch } from "@frontend/components/ui/switch";
 import { usePolling } from "@frontend/lib/usePolling";
 import { reconnectDelayMs, pendingPollMs, applyEstimateLabel } from "@frontend/lib/updateTiming";
+import { updateFetch, resolveRecovery, type RecoveryTarget } from "@frontend/lib/updateFetch";
 
 interface PendingUpdate {
   tag: string;
@@ -112,6 +113,32 @@ export function UpdatesPanel() {
     setAwaitingHandoffState(id);
   }
   const watchTimerRef = React.useRef<any>(null);
+  /** Latest /pending payload, readable from fetch callbacks without stale closures. */
+  const infoRef = React.useRef<UpdateInfo>({});
+  infoRef.current = info;
+  const activeTagRef = React.useRef<string | null>(null);
+  activeTagRef.current = activeUpdateTag;
+  const currentStepRef = React.useRef(1);
+  currentStepRef.current = currentStep;
+  /** Set while a manual "Update to" install request is in flight. */
+  const installingTagRef = React.useRef<string | null>(null);
+  /** Target of the running reconnect poll, so a second trigger doesn't start a parallel one. */
+  const reconnectTargetRef = React.useRef<RecoveryTarget | null>(null);
+  /** Quiet retries of fetchAll() while ShowFlow restarts, before we show an error. */
+  const fetchAllRetryRef = React.useRef<{ timer: any; n: number }>({ timer: null, n: 0 });
+
+  /**
+   * The update in flight right now (if any), for deciding whether a dropped
+   * connection / 503 means "ShowFlow is restarting to apply it".
+   */
+  function inFlightTarget(): RecoveryTarget | null {
+    const a = infoRef.current.activation;
+    if (awaitingRef.current) return { releaseId: awaitingRef.current, tag: activeTagRef.current };
+    if (installingTagRef.current) return { releaseId: null, tag: installingTagRef.current };
+    if (a && a.phase !== "failed") return { releaseId: a.releaseId, tag: a.tag };
+    if (activeTagRef.current && currentStepRef.current >= 2) return { releaseId: null, tag: activeTagRef.current };
+    return null;
+  }
 
   function headers(): Record<string, string> {
     return { Authorization: `Bearer ${token ?? tokenRef.current}` };
@@ -143,11 +170,31 @@ export function UpdatesPanel() {
     if (!quiet) setLoading(true);
     setErr(null);
     pageRef.current = 1;
+    if (fetchAllRetryRef.current.timer) { clearTimeout(fetchAllRetryRef.current.timer); fetchAllRetryRef.current.timer = null; }
     Promise.all([
-      fetch("/api/admin/updates/status", { headers: headers() }).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-      fetch("/api/admin/updates/available?page=1", { headers: headers() }).then(r => r.ok ? r.json() : { releases: [], hasMore: false }),
+      updateFetch<any>("/api/admin/updates/status", { headers: headers() }),
+      updateFetch<any>("/api/admin/updates/available?page=1", { headers: headers() }),
     ])
-      .then(([s, a]) => { 
+      .then(([sr, ar]) => {
+        if (sr.kind === "restarting" || ar.kind === "restarting") {
+          // ShowFlow is mid-restart (an update handing off, or a pod restart).
+          // Not an error: follow the update if one is in flight, otherwise
+          // retry quietly and only complain if it never comes back.
+          const target = inFlightTarget();
+          if (target) { startReconnectPoll(target); return; }
+          const n = ++fetchAllRetryRef.current.n;
+          if (n <= 10) {
+            fetchAllRetryRef.current.timer = setTimeout(() => fetchAll(true), Math.min(1_000 * n, 5_000));
+          } else {
+            fetchAllRetryRef.current.n = 0;
+            setErr("HTTP 503: ShowFlow didn't come back after restarting");
+          }
+          return;
+        }
+        fetchAllRetryRef.current.n = 0;
+        if (sr.kind === "error") { setErr(`HTTP ${sr.status}: ${sr.message}`); return; }
+        const s = sr.data;
+        const a = ar.kind === "ok" ? ar.data : { releases: [], hasMore: false };
         setStatus(s); 
         const rels: ReleaseItem[] = a.releases ?? [];
         setReleases(rels); 
@@ -192,9 +239,10 @@ export function UpdatesPanel() {
     setErr(null);
     const next = pageRef.current + 1;
     try {
-      const res = await fetch(`/api/admin/updates/available?page=${next}`, { headers: headers() });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const a = await res.json();
+      const r = await updateFetch<any>(`/api/admin/updates/available?page=${next}`, { headers: headers() });
+      if (r.kind === "restarting") return; // ShowFlow is restarting; "Load more" again once it's back
+      if (r.kind === "error") throw new Error(`Server returned ${r.status}: ${r.message}`);
+      const a = r.data;
       setReleases(prev => [...prev, ...(a.releases ?? [])]);
       setHasMore(a.hasMore ?? false);
       pageRef.current = next;
@@ -207,20 +255,25 @@ export function UpdatesPanel() {
 
   // ---- Background watcher: fetch staged state, force a check, toggle mode ----
   function fetchPending() {
-    return fetch("/api/admin/updates/pending", { headers: headers() })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => {
-        if (!d) return;
-        setPending(d.pending ?? null);
-        if (typeof d.autoDownload === "boolean") setAutoDownload(d.autoDownload);
-        setInfo(d as UpdateInfo);
+    return updateFetch<any>("/api/admin/updates/pending", { headers: headers() })
+      .then(r => {
+        if (r.kind === "ok") {
+          const d = r.data;
+          if (!d) return;
+          setPending(d.pending ?? null);
+          if (typeof d.autoDownload === "boolean") setAutoDownload(d.autoDownload);
+          setInfo(d as UpdateInfo);
+          return;
+        }
+        // A 503 / dropped connection while an update is in flight (our own
+        // activation, an auto-activate, or an install racing one) means the
+        // supervisor is restarting ShowFlow: follow it with the reconnect poll.
+        if (r.kind === "restarting") {
+          const target = inFlightTarget();
+          if (target) startReconnectPoll(target);
+        }
       })
-      // A failed fetch while we're waiting on a handoff means the supervisor
-      // is stopping this process — switch to the /internal/ready reconnect poll.
-      .catch(() => {
-        const target = awaitingRef.current;
-        if (target) { setAwaitingHandoff(null); startReconnectPoll(target); }
-      });
+      .catch(() => {});
   }
 
   // Live progress: poll /pending every 1.5s while something is moving
@@ -245,7 +298,7 @@ export function UpdatesPanel() {
       setStepMessage(`${ACTIVATION_PHASE_LABEL[a.phase] ?? a.phase}: ${a.detail}`);
       if (a.phase === "handing-off") {
         setAwaitingHandoff(null);
-        startReconnectPoll(awaitingHandoff);
+        startReconnectPoll({ releaseId: awaitingHandoff, tag: a.tag ?? activeTagRef.current });
       }
     }
   }, [info, awaitingHandoff]);
@@ -281,13 +334,21 @@ export function UpdatesPanel() {
   // either way, so we call it on mount, on "Check now", and on the visible poll.
   function runCheck(opts: { force?: boolean; note?: boolean } = {}) {
     setChecking(true);
-    return fetch("/api/admin/updates/check", {
+    return updateFetch<any>("/api/admin/updates/check", {
       method: "POST",
       headers: { ...headers(), "content-type": "application/json" },
       body: JSON.stringify({ force: opts.force !== false }),
     })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(r => {
+        if (r.kind === "restarting") {
+          if (opts.note) setCheckNote("ShowFlow is restarting, check again in a moment.");
+          return null;
+        }
+        if (r.kind === "error") throw new Error(`${r.status}: ${r.message}`);
+        return r.data;
+      })
       .then((res: any) => {
+        if (!res) return;
         setPending(res.pending ?? null);
         if (opts.note) {
           if (res.status === "staged") setCheckNote(`Checked — ${res.latestTag} is staged and ready to activate.`);
@@ -319,13 +380,30 @@ export function UpdatesPanel() {
   }
 
   React.useEffect(() => {
-    fetch("/api/admin/token")
-      .then(r => r.json())
-      .then(d => { tokenRef.current = d.token; setToken(d.token); fetchAll(); fetchPending(); })
-      .catch(e => setErr(String(e)))
-      .finally(() => setLoading(false));
+    let tokenTimer: any = null;
+    let cancelled = false;
+    // The panel can mount while ShowFlow is restarting (e.g. a reload right
+    // after an update): retry the token quietly instead of a JSON SyntaxError.
+    const loadToken = (n: number) => {
+      updateFetch<{ token: string }>("/api/admin/token")
+        .then(r => {
+          if (cancelled) return;
+          if (r.kind === "ok") {
+            tokenRef.current = r.data.token; setToken(r.data.token); fetchAll(); fetchPending();
+            return;
+          }
+          if (r.kind === "restarting" && n < 15) { tokenTimer = setTimeout(() => loadToken(n + 1), Math.min(500 * (n + 1), 3_000)); return; }
+          setErr(r.kind === "error" ? `HTTP ${r.status}: ${r.message}` : `HTTP ${r.status ?? 503}: ShowFlow isn't responding`);
+          setLoading(false);
+        })
+        .catch(e => { if (!cancelled) { setErr(String(e)); setLoading(false); } });
+    };
+    loadToken(0);
 
     return () => {
+      cancelled = true;
+      if (tokenTimer) clearTimeout(tokenTimer);
+      if (fetchAllRetryRef.current.timer) clearTimeout(fetchAllRetryRef.current.timer);
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (watchTimerRef.current) clearInterval(watchTimerRef.current);
@@ -357,15 +435,38 @@ export function UpdatesPanel() {
   // The SW offline.html only intercepts *navigation* requests (manual refreshes).
   // After activation the SPA is still loaded in memory, so we must poll here
   // and trigger window.location.reload() ourselves once the new release is live.
-  function startReconnectPoll(pendingReleaseId: string) {
+  //
+  // Also the landing spot for any 503 / dropped connection while an update is
+  // in flight: it waits ShowFlow out, then asks the server what actually
+  // happened (resolveRecovery) instead of assuming the step that was showing
+  // failed. Running version == target -> step 4 success + reload.
+  function startReconnectPoll(target: RecoveryTarget) {
+    // Already following this restart: just fill in what we know about the target.
+    if (reconnectTargetRef.current) {
+      const cur = reconnectTargetRef.current;
+      reconnectTargetRef.current = { releaseId: cur.releaseId ?? target.releaseId, tag: cur.tag ?? target.tag };
+      return;
+    }
+    reconnectTargetRef.current = target;
+    if (target.tag && !activeTagRef.current) setActiveUpdateTag(target.tag);
+    setAwaitingHandoff(null);
+    setErr(null);
     setCurrentStep(4);
     setStepStatus("running");
     setReconnectAttempt(0);
+    const label = target.tag ?? target.releaseId?.slice(0, 12) ?? "the update";
+    setStepMessage(`ShowFlow is restarting to apply ${label}, reconnecting…`);
 
     let attempt = 0;
     const MAX_ATTEMPTS = 60;
 
+    function stop() {
+      reconnectTargetRef.current = null;
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+    }
+
     function giveUp(message: string) {
+      stop();
       setStepStatus("error");
       setStepMessage(message);
       setErr(message);
@@ -373,77 +474,95 @@ export function UpdatesPanel() {
     }
 
     function done() {
+      stop();
+      setErr(null);
+      setCurrentStep(4);
       setStepStatus("success");
       setStepMessage("Update applied! Reloading page…");
       try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
       setTimeout(() => window.location.reload(), 400);
     }
 
-    const backoffDelay = (n: number) => reconnectDelayMs(n);
+    const again = (delay = reconnectDelayMs(attempt)) => { reconnectTimerRef.current = setTimeout(poll, delay); };
 
-    function poll() {
+    async function poll() {
+      const t = reconnectTargetRef.current;
+      if (!t) return;
       attempt++;
       if (attempt > MAX_ATTEMPTS) {
-        giveUp(`Gave up waiting for release ${pendingReleaseId.slice(0, 12)} after ${MAX_ATTEMPTS} checks — check the supervisor status below.`);
+        giveUp(`Gave up waiting for ${label} after ${MAX_ATTEMPTS} checks, check the supervisor status below.`);
         return;
       }
       setReconnectAttempt(attempt);
-      setStepMessage(`Waiting for new app process… (attempt ${attempt})`);
 
-      fetch("/internal/ready", { cache: "no-store" })
-        .then(res => {
-          if (!res.ok) throw new Error(`not ready: ${res.status}`);
-          return res.json();
-        })
-        .then(body => {
-          const releaseId = body?.releaseId;
-          if (!pendingReleaseId || releaseId === pendingReleaseId) {
-            done(); // new release is live
-            return;
-          }
-          // The binary's own stamp can be wrong (v0.1.81 reported "main" and
-          // the pre-bump commit), so the supervisor's active release dir is
-          // the source of truth: same sha + stable = the update is done.
-          fetch("/api/admin/updates/status", { headers: headers() })
-            .then(r => (r.ok ? r.json() : null))
-            .then((st: { activeReleaseId?: string | null; phase?: string } | null) => {
-              if (st && st.activeReleaseId === pendingReleaseId && st.phase === "stable") done();
-              else checkAttempt();
-            })
-            .catch(() => checkAttempt());
-        })
-        .catch(() => {
-          // Server not ready yet
-          setStepMessage(`Waiting for server startup… (attempt ${attempt})`);
-          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
-        });
-    }
+      const ready = await updateFetch<{ ready?: boolean; releaseId?: string; version?: string }>("/internal/ready", { cache: "no-store" }).catch(() => null);
+      if (!ready || ready.kind !== "ok" || !ready.data?.ready) {
+        setStepMessage(`ShowFlow is restarting to apply ${label}, waiting for it to come back… (attempt ${attempt})`);
+        again();
+        return;
+      }
 
-    function checkAttempt() {
-      // Server responded but it's still the old (or rolled-back) release.
-      // Ask it what happened to the attempt — after a failed readiness
-      // gate the supervisor relaunches lastKnownGood, whose boot records
-      // the rollback. Without this the panel polled forever.
-      fetch("/api/admin/updates/pending", { headers: headers() })
-        .then(r => (r.ok ? r.json() : null))
-        .then((d: UpdateInfo | null) => {
-          const last = d?.lastActivation;
-          if (last && last.releaseId === pendingReleaseId && (last.outcome === "rolled-back" || last.outcome === "failed")) {
-            setStepStatus("error");
-            setStepMessage(last.message ?? "Activation failed — rolled back to the previous release.");
-            setErr(last.message ?? "Activation failed — rolled back to the previous release.");
-            if (d) setInfo(d);
-            try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
-            return;
-          }
+      const [st, pd] = await Promise.all([
+        updateFetch<any>("/api/admin/updates/status", { headers: headers() }).catch(() => null),
+        updateFetch<any>("/api/admin/updates/pending", { headers: headers() }).catch(() => null),
+      ]);
+      const pendingBody = pd?.kind === "ok" ? pd.data : null;
+      if (pendingBody) {
+        setInfo(pendingBody as UpdateInfo);
+        setPending(pendingBody.pending ?? null);
+      }
+      const state = resolveRecovery(t, {
+        ready: ready.data,
+        status: st?.kind === "ok" ? st.data : null,
+        pending: pendingBody,
+      });
+
+      switch (state.kind) {
+        case "applied":
+          done();
+          return;
+        case "failed":
+          stop();
+          setStepStatus("error");
+          setStepMessage(state.message);
+          setErr(state.message);
+          try { localStorage.removeItem("showflow:pendingReleaseId"); } catch {}
+          return;
+        case "activating":
+          // Old process is still draining / backing up before the handoff.
+          attempt = Math.max(0, attempt - 1); // progress, not a miss
+          setCurrentStep(3);
+          setStepStatus("running");
+          setStepMessage(`${ACTIVATION_PHASE_LABEL[state.phase] ?? state.phase}: ${state.detail}`);
+          again(1_000);
+          return;
+        case "downloading":
+          attempt = Math.max(0, attempt - 1);
+          setCurrentStep(2);
+          setStepStatus("running");
+          setStepMessage(state.phase === "verifying" ? "Supervisor is verifying the download…" : "Downloading the release…");
+          again(1_500);
+          return;
+        case "staged":
+          // Downloaded + verified but not activated (auto-activate off, or
+          // waiting for idle). Same end state as a finished "Update to".
+          stop();
+          setCurrentStep(2);
+          setStepStatus("success");
+          setStepMessage("Release downloaded and verified by supervisor! Ready for activation.");
+          setInstalledReleaseId(state.releaseId);
+          if (t.tag) setInstalledTag(t.tag);
+          fetchAll(true);
+          return;
+        case "waiting":
           setStepMessage(`Server is up but still switching release… (attempt ${attempt}/${MAX_ATTEMPTS})`);
-          reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt));
-        })
-        .catch(() => { reconnectTimerRef.current = setTimeout(poll, backoffDelay(attempt)); });
+          again();
+          return;
+      }
     }
 
     // First poll after a short delay to give the supervisor time to SIGTERM
-    reconnectTimerRef.current = setTimeout(poll, backoffDelay(0));
+    reconnectTimerRef.current = setTimeout(poll, reconnectDelayMs(0));
   }
 
   function startWatchBuild(tagName: string) {
@@ -469,20 +588,29 @@ export function UpdatesPanel() {
     // Real progress comes from the /pending poll (info.download) while this
     // request is in flight.
 
+    installingTagRef.current = tagName;
     try {
-      const res = await fetch("/api/admin/updates/install", {
+      const r = await updateFetch<{ ok?: boolean; message?: string; releaseId?: string }>("/api/admin/updates/install", {
         method: "POST",
         headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ githubReleaseId }),
       });
+      if (r.kind === "restarting") {
+        // The connection dropped / the supervisor 503'd mid-install. That's
+        // ShowFlow restarting (typically auto-activate applying the release
+        // the background watcher just staged), not a failed download: wait it
+        // out and ask the server what happened.
+        startReconnectPoll({ releaseId: null, tag: tagName });
+        return;
+      }
       setDownloadProgress(100);
-
-      const data = await res.json();
-      if (!data.ok) { 
+      const data = r.data;
+      if (r.kind === "error" || !data?.ok) {
+        const message = data?.message || (r.kind === "error" ? r.message : "") || "Install failed";
         setStepStatus("error");
-        setStepMessage(data.message || "Install failed");
-        setErr(data.message || "Install failed"); 
-        return; 
+        setStepMessage(message);
+        setErr(message);
+        return;
       }
       
       setStepStatus("success");
@@ -497,7 +625,7 @@ export function UpdatesPanel() {
       setStepMessage(String(e));
       setErr(String(e)); 
     }
-    finally { setActionLoading(null); }
+    finally { installingTagRef.current = null; setActionLoading(null); }
   }
 
   async function doActivate(releaseId: string, tagName?: string) {
@@ -511,12 +639,17 @@ export function UpdatesPanel() {
     try {
       const { markPendingRelease, clearPendingRelease } = await import("@frontend/register-sw");
       markPendingRelease(releaseId);
-      const res = await fetch("/api/admin/updates/activate", {
+      const r = await updateFetch<{ ok?: boolean; accepted?: boolean; timedOut?: boolean; message?: string }>("/api/admin/updates/activate", {
         method: "POST",
         headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ releaseId, tag: tagName }),
       });
-      const data = await res.json();
+      if (r.kind === "restarting") {
+        // Connection dropped = supervisor is quiescing (killing this process).
+        startReconnectPoll({ releaseId, tag: tagName ?? null });
+        return;
+      }
+      const data = r.data ?? { ok: false, message: r.kind === "error" ? r.message : undefined };
       if (data.accepted) {
         // Backend now drains running jobs, backs up if the release migrates
         // the DB, then hands off. Follow it via the /pending poll; the
@@ -528,7 +661,7 @@ export function UpdatesPanel() {
       }
       if (data.timedOut) {
         // Older backend contract: activation already in progress.
-        startReconnectPoll(releaseId);
+        startReconnectPoll({ releaseId, tag: tagName ?? null });
         return;
       }
       if (!data.ok) {
@@ -540,7 +673,7 @@ export function UpdatesPanel() {
     } catch {
       // Connection dropped = supervisor is quiescing (killing this process).
       // Activation is proceeding — poll from the SPA to detect the new release.
-      startReconnectPoll(releaseId);
+      startReconnectPoll({ releaseId, tag: tagName ?? null });
     }
     finally { setActionLoading(null); }
   }

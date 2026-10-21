@@ -134,13 +134,31 @@ export function closeDebugBridge(ws: any, code: number, reason: string): void {
   }
 }
 
-export function unavailableResponse(): Response {
-  return new Response("Service Unavailable", {
-    status: 503,
-    headers: {
-      "Retry-After": "2",
-      "Cache-Control": "no-store",
-      "Content-Type": "text/plain; charset=utf-8",
+/**
+ * 503 while no release is stable (stop-start handoff, restore) or when the
+ * upstream app dropped the connection mid-request (it was SIGTERMed by an
+ * activation). Always JSON with `restarting: true` so the SPA's update panel
+ * can tell "ShowFlow is swapping builds, keep polling" apart from a real API
+ * failure. It used to be a plain-text "Service Unavailable" body, which the
+ * panel fed to res.json() and reported as
+ * `SyntaxError: Unexpected token 'S', "Service Unavailable" is not valid JSON`,
+ * marking a successful update as a failed download.
+ */
+export function unavailableResponse(phase?: string | null): Response {
+  return new Response(
+    JSON.stringify({
+      error: "Service Unavailable",
+      message: "ShowFlow is restarting, retry shortly.",
+      restarting: true,
+      phase: phase ?? null,
+    }),
+    {
+      status: 503,
+      headers: {
+        "Retry-After": "2",
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+      },
     },
-  });
+  );
 }
