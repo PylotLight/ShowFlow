@@ -31,6 +31,7 @@ Configured via environment variables or the settings UI:
 | `TVDB_API_KEY` | TV metadata (TheTVDB) |
 | `TVDB_PIN` | TVDB API PIN (if required) |
 | `http_proxy` / `https_proxy` / `all_proxy` / `no_proxy` | HTTP proxy configuration |
+| `FEEDBACK_URL` | Shared feedback gateway base URL (e.g. `https://feedback-gateway.<account>.workers.dev`); when set, feedback is filed through it and no GitHub token is needed here |
 
 ## Architecture
 
