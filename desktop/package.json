@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^26.6.6",
-    "electron": "45.2.3",
+    "electron": "46.0.0-alpha.7",
     "electron-builder": "^26.18.0"
   },
   "build": {
