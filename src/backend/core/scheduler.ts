@@ -10,6 +10,7 @@ import { runRssSyncCycle } from './rss_sync';
 import { JellyfinSync } from '../providers/jellyfin/sync';
 import { pollSystemHealth } from './pipeline/health_poller';
 import type { DownloadManager } from './download_manager';
+import { isLocalView } from './local_view';
 
 export type TaskName = 
   | 'sync-shows' 
@@ -514,6 +515,7 @@ export class Scheduler {
    * Start the scheduler
    */
   start() {
+    if (isLocalView()) return;
     this.initializeTasks();
     // Check every minute — the first run happens after the first interval
     // (60 seconds), not synchronously at boot, so heavy tasks (scan-library,

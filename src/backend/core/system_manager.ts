@@ -2,6 +2,7 @@ import { LibraryScanner } from '../core/library_scanner';
 import { DownloadManager } from '../core/download_manager';
 import { BlackholeClient } from './download_clients/blackhole';
 import { db, type Config } from '../db';
+import { isLocalView } from './local_view';
 
 export class SystemManager {
   private config: Config;
@@ -69,6 +70,7 @@ export class SystemManager {
   }
 
   async startWatcher() {
+    if (isLocalView()) throw new Error('Local view: the download watcher is disabled.');
     this.refreshConfig();
     if (this.watcher) {
       throw new Error('Watcher is already running.');
