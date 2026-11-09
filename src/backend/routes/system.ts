@@ -5,6 +5,7 @@ import type { SystemManager } from "../core/system_manager";
 import { backgroundJobs } from "../core/background_jobs";
 import { json, errorResponse } from "./_shared";
 import { getCurrentRelease } from "../core/current_release";
+import { isLocalView } from "../core/local_view";
 
 const BUILD_COMMIT = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : "development";
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "development";
@@ -81,6 +82,7 @@ export function systemRoutes(scheduler: Scheduler, systemManager: SystemManager,
             releaseId: BUILD_COMMIT,
             version: (await getCurrentRelease().catch(() => null))?.display ?? BUILD_VERSION,
             testMode: TEST_MODE,
+            localView: isLocalView(),
           });
         } catch (err) {
           return errorResponse(err, 500);

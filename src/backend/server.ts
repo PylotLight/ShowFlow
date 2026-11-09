@@ -77,10 +77,15 @@ import { blocklistRoutes } from "./routes/blocklist";
 import { wantedRoutes } from "./routes/wanted";
 import { connectRoutes } from "./routes/connect";
 import { startConnect, stopConnect } from "./core/connect";
+import { isLocalView, applyLocalViewGuard } from "./core/local_view";
 import { loadConfig, invalidateConfigCache, ADMIN_TOKEN } from "./routes/_shared";
 import type { RouteReq } from "./routes/_shared";
 
 // ---- Server lifecycle state ------------------------------------------------
+
+// SHOWFLOW_LOCAL_VIEW=1: read-only browse of a restored DB (desktop app).
+// See core/local_view.ts for exactly what it switches off.
+const LOCAL_VIEW = isLocalView();
 
 const debugWsClients = new Set<WebSocket>();
 let shuttingDown = false;
@@ -239,7 +244,14 @@ const scheduler = new Scheduler(config, { getDownloadManager: () => systemManage
 // Merge lazy routes (which need scheduler/systemManager) into routeDefinitions
 Object.assign(routeDefinitions, lazyRoutes());
 
+if (LOCAL_VIEW) {
+  applyLocalViewGuard(routeDefinitions);
+  console.log("🔒 Local view: read-only, no scheduler / downloads / imports / updates");
+}
+
 const server = serve({
+  // Local view is a laptop-only browse: never listen beyond loopback.
+  ...(LOCAL_VIEW ? { hostname: "127.0.0.1" } : {}),
   routes: wrapRouteHandlers(routeDefinitions),
   maxRequestBodySize: 1024 * 1024 * 1024,
   websocket: {
@@ -264,10 +276,12 @@ const server = serve({
   },
 });
 
-scheduler.start();
+if (!LOCAL_VIEW) {
+  scheduler.start();
 
-// External notifications + Jellyfin/Plex refresh-after-import (Settings > Connect).
-startConnect();
+  // External notifications + Jellyfin/Plex refresh-after-import (Settings > Connect).
+  startConnect();
+}
 
 // Auto-start the download watcher when a blackhole watch folder is
 // configured. Without this, /api/manual-import/* and the Queue page's "watch
@@ -275,11 +289,13 @@ startConnect();
 // until the user manually clicked Start. BlackholeClient.start() is
 // fault-tolerant — a missing/unwritable folder logs an event instead of
 // throwing — so this can never take the server down.
-try {
-  await systemManager.startWatcher();
-  console.log("🚀 Download watcher auto-started");
-} catch (err) {
-  console.error("Failed to auto-start download watcher:", err instanceof Error ? err.message : err);
+if (!LOCAL_VIEW) {
+  try {
+    await systemManager.startWatcher();
+    console.log("🚀 Download watcher auto-started");
+  } catch (err) {
+    console.error("Failed to auto-start download watcher:", err instanceof Error ? err.message : err);
+  }
 }
 
 console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, version ${BUILD_VERSION})`);
@@ -289,7 +305,7 @@ console.log(`🚀 Server running at ${server.url} (release ${BUILD_COMMIT}, vers
 // (removes the notification + the panel's "ready to activate" card). Then kick
 // one deferred check off the critical path — the scheduler runs the same cycle
 // every 15 min thereafter, and the settings panel can force one on demand.
-try {
+if (!LOCAL_VIEW) try {
   const { reconcilePendingOnBoot, runWatchCycle } = await import("./core/update_watcher");
   const { reconcileActivationOnBoot, setBusyProbe } = await import("./core/update_activation");
   const { collectBusy } = await import("./core/update_policy");
@@ -315,7 +331,7 @@ try {
 
 // Artwork blobs -> files on disk (core/image_migration.ts). Resumable and
 // batched; deferred so it never sits on the boot / readiness path.
-setTimeout(() => {
+if (!LOCAL_VIEW) setTimeout(() => {
   import("./core/image_migration")
     .then(({ runImageMigration }) => runImageMigration(db))
     .then((r) => {

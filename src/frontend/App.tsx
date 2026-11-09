@@ -120,6 +120,21 @@ export function App() {
     })();
   }, [wizardKey]);
 
+  // SHOWFLOW_LOCAL_VIEW (desktop app browsing a restored backup): show a
+  // read-only badge; the server refuses every mutating call anyway.
+  const [localView, setLocalView] = React.useState(false);
+  React.useEffect(() => {
+    fetch("/api/system/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (s?.localView) {
+          setLocalView(true);
+          setWizardState('closed');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [backdropUrl, setBackdropUrl] = React.useState("");
   const [headerActionsEl, setHeaderActionsEl] = React.useState<HTMLDivElement | null>(null);
 
@@ -238,6 +253,14 @@ export function App() {
           <h1 className="min-w-0 flex-1 truncate font-display text-xl font-bold tracking-tight text-white sm:text-2xl md:flex-none md:shrink-0">
             {PAGE_LABELS[activeNav]}
           </h1>
+          {localView && (
+            <span
+              title="Local view of a backup: read-only, nothing downloads, imports or syncs"
+              className="shrink-0 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 font-mono text-[11px] uppercase tracking-wide text-amber-300"
+            >
+              Local view · read-only
+            </span>
+          )}
 
           {/* Page actions slot. On phones it sits inline in the title bar
               (pages render icon-only actions there); a page that needs a
