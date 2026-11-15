@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix: per-episode and season release search came back empty for shows with punctuation in the title** (e.g. `Dexter: Resurrection`, `Grey's Anatomy`, `Law & Order`) while Indexer Search found plenty. The title matcher kept the colon/apostrophe as part of the word (`dexter:`), which never appears in release names, so every result was filtered out. The same bug stopped RSS sync and auto-grab from picking up those shows, and hit movie matching too. Show and release titles are now compared with punctuation stripped.
 
 ## [v0.1.91] - 2026-10-21
 - **No more Cutoff unmet card on the Dashboard.** The list now lives where the cutoff is set: Settings → Quality → a profile's Upgrades section has a collapsed **Episodes below this cutoff** view (loaded only when opened) showing what's still being upgraded, what's been given up on and why.
