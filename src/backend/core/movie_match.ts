@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { normalizeTitleForMatch } from './title_norm';
 import { db } from '../db';
 import { normalizeShowTitle } from '../db/shows';
 
@@ -97,8 +98,8 @@ export function findMovieShow(title: string, year?: number | null): MovieShowHit
  * rejects (remake protection). No S/E identifier exists for movies.
  */
 export function isRelevantMovieMatch(releaseTitle: string, movieTitle: string, year?: number | null): boolean {
-  const norm = releaseTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
-  const showNorm = movieTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
+  const norm = normalizeTitleForMatch(releaseTitle);
+  const showNorm = normalizeTitleForMatch(movieTitle);
   const words = showNorm.split(/\s+/).filter(w => !STOPWORDS.has(w) && w.length > 1);
   if (words.length === 0) return false;
   const matched = words.filter(w => norm.includes(w)).length;
