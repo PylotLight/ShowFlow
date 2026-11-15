@@ -37,3 +37,8 @@ test('isRelevantMovieMatch gates on title words + conflicting year', () => {
   // Wrong film rejects.
   expect(isRelevantMovieMatch('Dune.Part.Two.2024.1080p', 'Oppenheimer', 2023)).toBe(false);
 });
+
+test('isRelevantMovieMatch ignores punctuation in the movie title', () => {
+  expect(isRelevantMovieMatch('Mission.Impossible.Dead.Reckoning.2023.2160p.WEB-DL', 'Mission: Impossible - Dead Reckoning', 2023)).toBe(true);
+  expect(isRelevantMovieMatch('Schindlers.List.1993.1080p.BluRay', "Schindler's List", 1993)).toBe(true);
+});

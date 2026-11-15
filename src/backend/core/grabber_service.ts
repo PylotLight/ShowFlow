@@ -1,4 +1,5 @@
 import { db, type Config, ProwlarrConfigSchema } from '../db';
+import { normalizeTitleForMatch } from './title_norm';
 import path from 'node:path';
 import { IndexerFactory } from '../providers/indexers/factory';
 import type { Indexer, IndexerResult } from '../providers/indexers/types';
@@ -130,8 +131,7 @@ function seasonIdentifier(season: number): RegExp {
 }
 
 export function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number, opts?: { absolute?: boolean }): boolean {
-  const lower = title.toLowerCase();
-  const norm = lower.replace(/[._\s-]+/g, ' ');
+  const norm = normalizeTitleForMatch(title);
   // A trailing "(YYYY)" suffix (TVDB-style disambiguation, e.g.
   // "Dark Matter (2024)") is metadata, not title: release names carry the
   // bare year or none at all, so requiring the parenthesized token drops
@@ -140,7 +140,7 @@ export function isRelevantMatch(title: string, showTitle: string, season: number
   const yearMatch = /\b(19\d{2}|20\d{2})\b/.exec(showTitle);
   const showYear = yearMatch ? yearMatch[1] : null;
   const bareTitle = showYear ? showTitle.replace(/\(\d{4}\)/g, '') : showTitle;
-  const showNorm = bareTitle.toLowerCase().replace(/[._\s-]+/g, ' ');
+  const showNorm = normalizeTitleForMatch(bareTitle);
 
   // Extract significant words from the show title (no stopwords, no single chars)
   const showWords = showNorm.split(/\s+/).filter(w => !STOPWORDS.has(w) && w.length > 1);

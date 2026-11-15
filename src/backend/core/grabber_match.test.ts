@@ -47,3 +47,18 @@ test('TVDB year suffix does not sink year-suffixed shows', () => {
   // Season scope behaves the same.
   expect(isRelevantMatch('Dark.Matter.2024.S02.2160p', 'Dark Matter (2024)', 2)).toBe(true);
 });
+
+test('punctuation in the show title does not sink matches', () => {
+  // "Dexter: Resurrection" used to split into "dexter:" + "resurrection",
+  // and "dexter:" never appears in a dotted release name, so every
+  // per-episode search, RSS match and auto grab came back empty.
+  expect(isRelevantMatch('Dexter.Resurrection.S02E01.2160p.ATVP.WEB-DL.DV.HDR10+.DDP5.1.Atmos.H265.MP4-BTM', 'Dexter: Resurrection', 2, 1)).toBe(true);
+  expect(isRelevantMatch('Dexter Resurrection (2025) S02E01 720p hevc x265 [WD-13].mkv', 'Dexter: Resurrection', 2, 1)).toBe(true);
+  expect(isRelevantMatch('Dexter.Resurrection.S02.2160p', 'Dexter: Resurrection', 2)).toBe(true);
+  expect(isRelevantMatch('Dexter.Resurrection.S02E02.2160p', 'Dexter: Resurrection', 2, 1)).toBe(false);
+  expect(isRelevantMatch("Greys.Anatomy.S21E01.1080p", "Grey's Anatomy", 21, 1)).toBe(true);
+  expect(isRelevantMatch('Marvels.Agents.of.S.H.I.E.L.D.S07E01.1080p', "Marvel's Agents of S.H.I.E.L.D.", 7, 1)).toBe(true);
+  expect(isRelevantMatch('Law.and.Order.S24E01.1080p', 'Law & Order', 24, 1)).toBe(true);
+  expect(isRelevantMatch('Whats.Up.Doc.S01E01.1080p', 'What\u2019s Up, Doc?', 1, 1)).toBe(true);
+  expect(isRelevantMatch('Some.Other.Show.S02E01.1080p', 'Dexter: Resurrection', 2, 1)).toBe(false);
+});
