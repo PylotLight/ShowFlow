@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.92] - 2026-11-15
 - **Fix: per-episode and season release search came back empty for shows with punctuation in the title** (e.g. `Dexter: Resurrection`, `Grey's Anatomy`, `Law & Order`) while Indexer Search found plenty. The title matcher kept the colon/apostrophe as part of the word (`dexter:`), which never appears in release names, so every result was filtered out. The same bug stopped RSS sync and auto-grab from picking up those shows, and hit movie matching too. Show and release titles are now compared with punctuation stripped.
 
 ## [v0.1.91] - 2026-10-21
