@@ -6,6 +6,8 @@
  * naming UI surfaces (issues-tracking.md #14).
  */
 
+import { resolutionFromDimensions } from './resolution';
+
 export type MultiEpisodeStyle = 'extend' | 'scene' | 'office' | 'repeat';
 export type ColonReplacement = 'smart' | 'space' | 'dash' | 'delete';
 
@@ -20,6 +22,8 @@ export interface NamingEpisode {
 export interface NamingMedia {
   /** Display height in px (e.g. 1080, 2160). */
   height?: number | null;
+  /** Display width in px; letterboxed scope encodes need it (3840x1600 is 2160p). */
+  width?: number | null;
   /** Video codec string from the probe (e.g. 'h264', 'hevc', 'av1'). */
   codec?: string | null;
   hdr?: boolean | null;
@@ -171,13 +175,9 @@ export function parseQualityTokens(filename: string): QualityTokens {
 
 function resolveResolution(media: NamingMedia | null | undefined, filenameTokens: QualityTokens): string {
   if (filenameTokens.resolution) return filenameTokens.resolution;
-  const h = media?.height;
-  if (h && h >= 2000) return '2160p';
-  if (h && h >= 1200) return '1080p';
-  if (h && h >= 700) return '720p';
-  if (h && h >= 500) return '576p';
-  if (h) return '480p';
-  return 'HD';
+  const res = resolutionFromDimensions(media?.height, media?.width);
+  if (res == null) return 'HD';
+  return res === 4320 ? '2160p' : `${res}p`;
 }
 
 function resolveSource(media: NamingMedia | null | undefined, filenameTokens: QualityTokens): string {

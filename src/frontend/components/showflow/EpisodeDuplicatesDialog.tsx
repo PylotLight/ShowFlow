@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, X, FolderArchive } from "lucide-react";
 import * as React from "react";
+import { formatResolution } from "@frontend/lib/airtime";
 
 interface EpisodeDupFile {
   path: string;
@@ -48,7 +49,7 @@ function mediaLabel(f: EpisodeDupFile): string {
   const m = f.media;
   if (!m) return "";
   const parts: string[] = [];
-  if (m.videoHeight) parts.push(`${m.videoHeight}p`);
+  if (m.videoHeight) parts.push(formatResolution(m.videoHeight, m.videoWidth));
   if (m.videoCodec) parts.push(m.videoCodec.toUpperCase());
   if (m.hdr) parts.push("HDR");
   if (m.audioCodec) parts.push(m.audioCodec.toUpperCase());
