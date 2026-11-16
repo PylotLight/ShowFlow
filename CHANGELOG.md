@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.94] - 2026-11-16
 - **Fix: Update now could sit on "Downloading 46.9 MB / 52.3 MB…" after the update had already applied.** A small release can download, verify and hand off between two progress polls, and the new build answers with no update job and no activation in flight, so the stepper had nothing to move on and waited forever (a refresh showed the new version). The panel now reads the activation record the new build keeps, so it sees the update landed (or rolled back) and goes to Refresh and reloads. If the server knows nothing about the update for a few polls, it falls back to the reconnect check, which compares the running version.
 
 ## [v0.1.93] - 2026-11-16
