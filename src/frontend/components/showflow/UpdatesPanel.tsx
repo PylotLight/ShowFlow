@@ -142,6 +142,8 @@ export function UpdatesPanel() {
     instantTagRef.current = tag;
     setInstantTagState(tag);
   }
+  /** Consecutive /pending polls that said nothing about the instant update we're following. */
+  const instantWaitRef = React.useRef(0);
   const instantMode = info.mode === "instant";
   /** Target of the running reconnect poll, so a second trigger doesn't start a parallel one. */
   const reconnectTargetRef = React.useRef<RecoveryTarget | null>(null);
@@ -310,7 +312,8 @@ export function UpdatesPanel() {
   // activate (step 3, then the handoff effect below takes over) → reconnect.
   React.useEffect(() => {
     if (!instantTag) return;
-    const view = instantStepView(instantTag, info.job?.instant ?? null, info.activation ?? null);
+    const view = instantStepView(instantTag, info.job?.instant ?? null, info.activation ?? null, info.lastActivation ?? null);
+    if (view.kind !== "waiting") instantWaitRef.current = 0;
     switch (view.kind) {
       case "download":
         setCurrentStep(2);
@@ -340,8 +343,25 @@ export function UpdatesPanel() {
         setStepMessage(view.message);
         fetchAll(true);
         return;
-      case "waiting":
+      case "applied":
+        // Already running the new build: let the reconnect poll confirm it
+        // against /internal/ready + status and reload the page.
+        setInstantTag(null);
+        startReconnectPoll({ releaseId: info.lastActivation?.releaseId ?? null, tag: instantTag });
         return;
+      case "waiting": {
+        // No job, no activation, no record for this tag: the server we're
+        // talking to doesn't know about the update (e.g. a restart with no
+        // record yet). After a few polls stop guessing and ask
+        // the reconnect poll, which checks the running version.
+        if (info.job?.instant) { instantWaitRef.current = 0; return; }
+        if (++instantWaitRef.current >= 4) {
+          instantWaitRef.current = 0;
+          setInstantTag(null);
+          startReconnectPoll({ releaseId: null, tag: instantTag });
+        }
+        return;
+      }
     }
   }, [info, instantTag]);
 
