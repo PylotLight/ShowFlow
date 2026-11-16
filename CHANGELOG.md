@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.93] - 2026-11-16
 - **Fix: letterboxed 4K files were treated as 1080p.** Scope releases are cropped (a 4K episode is 3840x1600, a 1080p one 1920x800), and resolution was worked out from the frame height, so they read as 1080p/720p. That made Manual Import show a 2160p WEB-DL as `1080p` and score the same file already in the library as `Remux-1080p` (the probe disagreed with the release name, so the name's source was ignored), and it could block or misjudge upgrades. Resolution now counts width too (3200+ wide is 2160p, 1800+ is 1080p, 1200+ is 720p) everywhere it's read from a probe: import scoring, Manual Import comparison, episode badges, the duplicates dialog and the naming fallback. The probe-only "Remux" guess also needs 45 Mbps at 2160p now, since 4K WEB-DLs routinely run 20-30 Mbps.
 - **Fix**: a Manual Import row skipped as a Duplicate (same content hash already imported) no longer says "Under the current profile this would now import". Duplicates are skipped whatever the profile says.
 
