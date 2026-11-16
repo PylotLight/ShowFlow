@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { resolutionFromDimensions } from './resolution';
 import type { ReasonCode } from './pipeline/reason_codes';
 import type { MediaProbeInfo } from './media_probe';
 import { isSampleFile } from './sample_filter';
@@ -201,14 +202,8 @@ export class QualityEngine {
 /** Synthetic release name carrying what a probe can see (resolution, codec, HDR, audio). */
 export function syntheticNameFromProbe(probe: Pick<MediaProbeInfo, 'video' | 'audio' | 'overallBitrate' | 'fileSize'>): string {
   const tags: string[] = [];
-  const width = probe.video?.width ?? null;
-  const height = probe.video?.height ?? null;
-  const px = width != null && height != null ? width * height : null;
-  if (px != null && px >= 7680 * 4320 * 0.9) tags.push('4320p');
-  else if ((px != null && px >= 3840 * 2160 * 0.8) || (height ?? 0) >= 2000) tags.push('2160p');
-  else if ((px != null && px >= 1920 * 1080 * 0.8) || (height ?? 0) >= 1000) tags.push('1080p');
-  else if ((height ?? 0) >= 700) tags.push('720p');
-  else if ((height ?? 0) > 0) tags.push('480p');
+  const res = resolutionFromDimensions(probe.video?.height, probe.video?.width);
+  if (res != null) tags.push(`${res === 576 ? 480 : res}p`);
 
   const codec = (probe.video?.codec ?? '').toLowerCase();
   if (/265|hevc|h265|hvc1|hev1/.test(codec)) tags.push('H.265');
@@ -223,9 +218,11 @@ export function syntheticNameFromProbe(probe: Pick<MediaProbeInfo, 'video' | 'au
   if (/flac/.test(audio)) tags.push('FLAC');
   if (/atmos/.test(audio)) tags.push('Atmos');
 
-  // HDR + heavily encoded content signals a remux/BD-grade release.
+  // HDR + heavily encoded content signals a remux/BD-grade release. 4K
+  // WEB-DLs routinely run 15-30 Mbps, so the bar scales with resolution.
   const mbps = (probe.overallBitrate ?? 0) / 1_000_000;
-  if (probe.video?.hdr && mbps >= 20) tags.push('Remux');
+  const remuxMbps = (res ?? 0) >= 2160 ? 45 : 20;
+  if (probe.video?.hdr && mbps >= remuxMbps) tags.push('Remux');
   return `Synthetic Release ${tags.join(' ')}`.trim();
 }
 

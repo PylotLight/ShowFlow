@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolutionFromDimensions } from './resolution';
 import { stat } from 'node:fs/promises';
 import { db } from '../db';
 import type { EpisodeFileRow } from '../db/episode_files';
@@ -211,12 +212,7 @@ export function audioFromProbe(probe: Pick<MediaProbeInfo, 'audio'> | null, rele
 
 function heightToResolution(h: number | null | undefined, w?: number | null): number | null {
   if (!h) return null;
-  const px = w ? w * h : null;
-  if ((px != null && px >= 3840 * 2160 * 0.8) || h >= 2000) return 2160;
-  if ((px != null && px >= 1920 * 1080 * 0.8) || h >= 1000) return 1080;
-  if (h >= 700) return 720;
-  if (h >= 540) return 576;
-  return 480;
+  return resolutionFromDimensions(h, w);
 }
 
 /**
@@ -619,7 +615,10 @@ export async function explainWatchEntry(entry: WatchEntryInput, budget: { left: 
   }
 
   let reason = recordedReason ?? derived;
-  if (recordedReason && recordedReason.code !== derived.code && (derived.code === 'UPGRADE_WAITING' || derived.code === 'NEW_WAITING')) {
+  // A duplicate (same content hash already imported) or a sample is skipped
+  // whatever the profile says, so "would now import" never applies to it.
+  const profileIndependent = recordedReason?.code === 'DUPLICATE' || recordedReason?.code === 'SAMPLE';
+  if (recordedReason && !profileIndependent && recordedReason.code !== derived.code && (derived.code === 'UPGRADE_WAITING' || derived.code === 'NEW_WAITING')) {
     reason = { ...recordedReason, note: 'Under the current profile this would now import. Rescan the watch folder to retry, or Force Import.' };
   }
   return { reason, comparison, forceImport };

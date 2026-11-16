@@ -79,11 +79,14 @@ export function parseStoredDateTime(iso: string): Date | null {
  *  1080 -> "1080p", 960 -> "1080p" for the cropped variant). */
 export function formatResolution(height: number | null | undefined, width?: number | null): string {
   if (!height) return "";
-  const px = width != null ? width * height : null;
-  if (px != null && px >= 7680 * 4320 * 0.9) return "8K";
-  if ((px != null && px >= 3840 * 2160 * 0.8) || height >= 2000) return "2160p";
-  if ((px != null && px >= 1920 * 1080 * 0.8) || height >= 1000) return "1080p";
-  if (height >= 700) return "720p";
+  // Width counts too: scope releases are letterboxed (3840x1600 is 4K,
+  // 1920x800 is 1080p). Same thresholds as backend core/resolution.ts.
+  const w = width ?? 0;
+  const px = w ? w * height : 0;
+  if (px >= 7680 * 4320 * 0.9 || w >= 7000 || height >= 4000) return "8K";
+  if (px >= 3840 * 2160 * 0.8 || w >= 3200 || height >= 2000) return "2160p";
+  if (px >= 1920 * 1080 * 0.8 || w >= 1800 || height >= 1000) return "1080p";
+  if (w >= 1200 || height >= 700) return "720p";
   if (height >= 400) return "480p";
   return `${height}p`;
 }
