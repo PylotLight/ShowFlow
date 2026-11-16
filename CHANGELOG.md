@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- **Fix: Update now could sit on "Downloading 46.9 MB / 52.3 MB…" after the update had already applied.** A small release can download, verify and hand off between two progress polls, and the new build answers with no update job and no activation in flight, so the stepper had nothing to move on and waited forever (a refresh showed the new version). The panel now reads the activation record the new build keeps, so it sees the update landed (or rolled back) and goes to Refresh and reloads. If the server knows nothing about the update for a few polls, it falls back to the reconnect check, which compares the running version.
 
 ## [v0.1.93] - 2026-11-16
 - **Fix: letterboxed 4K files were treated as 1080p.** Scope releases are cropped (a 4K episode is 3840x1600, a 1080p one 1920x800), and resolution was worked out from the frame height, so they read as 1080p/720p. That made Manual Import show a 2160p WEB-DL as `1080p` and score the same file already in the library as `Remux-1080p` (the probe disagreed with the release name, so the name's source was ignored), and it could block or misjudge upgrades. Resolution now counts width too (3200+ wide is 2160p, 1800+ is 1080p, 1200+ is 720p) everywhere it's read from a probe: import scoring, Manual Import comparison, episode badges, the duplicates dialog and the naming fallback. The probe-only "Remux" guess also needs 45 Mbps at 2160p now, since 4K WEB-DLs routinely run 20-30 Mbps.

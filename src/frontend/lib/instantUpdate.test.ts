@@ -30,4 +30,24 @@ describe("instantStepView", () => {
   test("done when it's already the running release", () => {
     expect(instantStepView("v0.1.90", job({ step: "done", message: "Already running v0.1.90" }), null)).toEqual({ kind: "done", message: "Already running v0.1.90" });
   });
+
+  test("applied when the restart landed between polls (only the activation record is left)", () => {
+    const last = { releaseId: "sha", tag: "v0.1.93", outcome: "activated" as const };
+    expect(instantStepView("v0.1.93", null, null, last)).toEqual({ kind: "applied" });
+    expect(instantStepView("0.1.93", null, null, last).kind).toBe("applied");
+  });
+
+  test("a rolled-back record for this tag is a failure", () => {
+    const last = { releaseId: "sha", tag: "v0.1.93", outcome: "rolled-back" as const, message: "health check failed" };
+    expect(instantStepView("v0.1.93", null, null, last)).toEqual({ kind: "failed", message: "health check failed" });
+  });
+
+  test("a live job for the tag wins over an older activation record", () => {
+    const last = { releaseId: "old", tag: "v0.1.93", outcome: "rolled-back" as const };
+    expect(instantStepView("v0.1.93", job({ tag: "v0.1.93" }), null, last).kind).toBe("download");
+  });
+
+  test("another release's activation record doesn't count", () => {
+    expect(instantStepView("v0.1.93", null, null, { releaseId: "x", tag: "v0.1.92", outcome: "activated" }).kind).toBe("waiting");
+  });
 });
