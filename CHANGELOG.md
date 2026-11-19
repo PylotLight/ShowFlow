@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.95] - 2026-11-19
 - **Fix: a revival or remake kept downloading the same episodes forever and never got them.** Release names that carry the year in brackets (`Scrubs (2026) S02E04 …`) lost the `(2026)` in the filename parser, so the importer matched the original same-named series, and the revival's episodes stayed missing. Auto-grab then re-downloaded them, the import was refused as a duplicate of the wrong-show file, and 12 hours later it did it again. The parser now keeps the bracketed year, local show matching prefers the show whose year matches (original `Scrubs` 2001 vs `Scrubs (2026)`), provider matching does the same, and release matching rejects a release whose year conflicts with the show's stored year, so the original series no longer grabs revival episodes. Files without a year match exactly as before.
 - **Fix**: a content hash imported into a *different* show no longer counts as a duplicate. Dedupe is now per destination show: the same bytes imported into the wrong show (the case above) can be imported into the right one, and a genuine re-drop of a file already in the same show is still skipped and held on Manual Import with its Duplicate reason.
 
