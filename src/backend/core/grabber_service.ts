@@ -130,15 +130,21 @@ function seasonIdentifier(season: number): RegExp {
   return new RegExp(`(?:s0*${n}(?:e\\d|[^a-z0-9]|$)|season\\s+0*${n}\\b|(?:^|[^a-z0-9])0*${n}x\\d)`, 'i');
 }
 
-export function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number, opts?: { absolute?: boolean }): boolean {
+export function isRelevantMatch(title: string, showTitle: string, season: number, episode?: number, opts?: { absolute?: boolean; showYear?: number | null }): boolean {
   const norm = normalizeTitleForMatch(title);
   // A trailing "(YYYY)" suffix (TVDB-style disambiguation, e.g.
   // "Dark Matter (2024)") is metadata, not title: release names carry the
   // bare year or none at all, so requiring the parenthesized token drops
   // every legitimate match. Match on the bare words instead, but reject
   // when the release carries a *conflicting* year (remake protection).
-  const yearMatch = /\b(19\d{2}|20\d{2})\b/.exec(showTitle);
-  const showYear = yearMatch ? yearMatch[1] : null;
+  //
+  // The library row's own year is authoritative when supplied: the original
+  // "Scrubs" (2001) has no year suffix in its title, so without this a
+  // "Scrubs (2026) ..." revival release would look like a match for it.
+  const titleYear = /\b(19\d{2}|20\d{2})\b/.exec(showTitle);
+  const showYear = opts?.showYear != null
+    ? String(opts.showYear)
+    : (titleYear ? titleYear[1] : null);
   const bareTitle = showYear ? showTitle.replace(/\(\d{4}\)/g, '') : showTitle;
   const showNorm = normalizeTitleForMatch(bareTitle);
 
@@ -437,7 +443,7 @@ export class GrabberService {
     }
 
     const beforeFilter = allReleases.length;
-    const matchOpts = { absolute: seriesType !== 'standard' };
+    const matchOpts = { absolute: seriesType !== 'standard', showYear: show.year ?? null };
     // When mapped, accept either the scene numbering (what releases use)
     // or the provider numbering (some indexers mirror TVDB). Season packs
     // accept any scene season mapping to the provider season.

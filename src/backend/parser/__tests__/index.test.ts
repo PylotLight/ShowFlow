@@ -136,6 +136,28 @@ describe('FilenameParser', () => {
     expect(result?.season).toBe(0);
     expect(result?.episodes).toContain(7);
   });
+
+  test('keeps a parenthesized show year as metadata', () => {
+    const result = parser.parse('Scrubs (2026) S02E04 - My Chief - 2160p HDR Ai Upscale -Mesc.mkv');
+    expect(result?.show).toBe('Scrubs');
+    expect(result?.year).toBe(2026);
+    expect(result?.season).toBe(2);
+    expect(result?.episodes).toContain(4);
+  });
+
+  test('does not invent a year for a dotted year token', () => {
+    // "Scrubs.2026.S02E01" keeps 2026 in the show name (which already
+    // disambiguates it), so there is no separate year field to add.
+    const result = parser.parse('Scrubs.2026.S02E01.1080p.WEB.h264-ETHEL[EZTVx.to].mkv');
+    expect(result?.show).toBe('Scrubs 2026');
+    expect(result?.year).toBeUndefined();
+  });
+
+  test('ignores a year that appears only in the episode title', () => {
+    const result = parser.parse('The Show S01E01 - The 2026 Problem 1080p.mkv');
+    expect(result?.show).toBe('The Show');
+    expect(result?.year).toBeUndefined();
+  });
 });
 
 describe('cleanReleaseName', () => {

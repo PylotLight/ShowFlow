@@ -184,6 +184,30 @@ test("legacy path-only holds stay sticky", () => {
   expect(client.isHeldForManual(fullPath)).toBe(false);
 });
 
+test("the same content already imported into a DIFFERENT show is not a duplicate", async () => {
+  // A mis-import (a revival matched the original series) used to poison the
+  // content-hash dedupe: the hash was recorded against the wrong show, so
+  // every later attempt to put the file in the right show was skipped and
+  // the episode stayed missing. Dedupe is now per destination show.
+  const name = "Outcome.Show.S01E01.1080p.WEB-DL.x264-XSHOW.mkv";
+  drop(name);
+  const fullPath = path.join(watchRoot, name);
+  const hash = await hashFileForDedupe(fullPath);
+  const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), "showflow-bhio-other-"));
+  db.logProcessedFile(hash, "/elsewhere/" + name, path.join(otherRoot, "Season 01", "Some Other Show - S01E01.mkv"));
+
+  const client = makeClient();
+  const imported = await (client as any).handleFile(watchRoot, name);
+
+  expect(imported).toBe(true);
+  expect(fs.existsSync(fullPath)).toBe(false);
+  expect(client.isHeldForManual(fullPath)).toBe(false);
+  expect(getImportReason(fullPath)).toBeNull();
+  const landed = db.getEpisode(showId, 1, 1)?.file_path ?? "";
+  expect(landed.startsWith(path.join(libraryRoot, "Season 01"))).toBe(true);
+  fs.rmSync(otherRoot, { recursive: true, force: true });
+}, 30_000);
+
 // ---- 2. force-import failures propagate -----------------------------------
 
 test("force import that fails at the DB step reports the error and keeps the library file", async () => {

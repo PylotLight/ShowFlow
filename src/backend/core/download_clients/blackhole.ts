@@ -285,6 +285,34 @@ export class BlackholeClient implements DownloadClient {
     debugLog('Held watch-folder file for manual import', { fullPath, ...(sig ?? {}) });
   }
 
+  /**
+   * Whether `hash` was already imported *into this show*. Deduping by content
+   * hash alone made a mis-import permanent: the same release landed in the
+   * wrong show (e.g. a revival matched the original series), and every later
+   * attempt to put it in the right show was skipped as a duplicate, so the
+   * episode stayed missing and auto-grab re-downloaded it forever.
+   *
+   * A processed row with no recorded destination is still treated as a
+   * duplicate (it predates destination tracking, so there is nothing to
+   * compare).
+   */
+  private isDuplicateForShow(hash: string, rootFolder: string): boolean {
+    const previous = db.getProcessedFile(hash);
+    if (!previous) return false;
+    if (!previous.final_path) return true;
+    const rel = path.relative(rootFolder, previous.final_path);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  }
+
+  /** Sticky duplicate skip: the hold stops the 3-minute rescan re-hashing it. */
+  private declineDuplicate(fullPath: string, filename: string): false {
+    console.log(`[${this.name}] Skipping duplicate: ${filename}`);
+    db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
+    this.declineReason(fullPath, 'DUPLICATE', 'This exact file (same content hash) was already imported into this show, so it was skipped. Delete it, or Force Import to import it again.');
+    this.holdForManual(fullPath);
+    return false;
+  }
+
   releaseManualHold(fullPath: string) {
     clearImportReason(fullPath);
     const holds = this.readManualHolds();
@@ -752,6 +780,13 @@ export class BlackholeClient implements DownloadClient {
     const ext = path.extname(filename) || '.mkv';
     const finalPath = path.join(rootFolder, base, `${base}${ext}`);
 
+    if (!opts?.force) {
+      if (this.isDuplicateForShow(hash, rootFolder)) return this.declineDuplicate(fullPath, filename);
+      if (db.isProcessed(hash)) {
+        console.log(`[${this.name}] Importing ${filename} for "${show.title}": the same content was imported into a different show before.`);
+      }
+    }
+
     if (this.config.dryRun) {
       console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);
       db.logEvent({ type: 'dryrun', entityType: 'file', message: `[dry-run] Would import ${filename} for movie "${show.title}"` });
@@ -947,23 +982,15 @@ export class BlackholeClient implements DownloadClient {
       const hash = await this.hashFile(fullPath);
       BlackholeClient.mem('after hash ' + filename.slice(0, 30));
       maybeForcedGc();
-      if (db.isProcessed(hash)) {
-        if (opts?.force) {
-          // The processed_files row is only rewritten (upsert) inside the
-          // import transaction, so a failed force import keeps the old
-          // dedupe record instead of losing it up front.
-          console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
-        } else {
-          console.log(`[${this.name}] Skipping duplicate: ${filename}`);
-          db.logEvent({ type: 'skip', entityType: 'file', message: `Skipped duplicate: ${filename}` });
-          this.declineReason(fullPath, 'DUPLICATE', 'This exact file (same content hash) was already imported before, so it was skipped. Delete it, or Force Import to import it again.');
-          // Sticky: without a hold the 3-minute safety rescan re-queues and
-          // re-hashes the whole file forever. The hold is keyed by
-          // size+mtime, so a different file under this name is re-checked.
-          this.holdForManual(fullPath);
-          return false;
-        }
+      if (opts?.force && db.isProcessed(hash)) {
+        // The processed_files row is only rewritten (upsert) inside the
+        // import transaction, so a failed force import keeps the old dedupe
+        // record instead of losing it up front.
+        console.log(`[${this.name}] Force-importing ${filename} (overriding duplicate check).`);
       }
+      // A non-forced duplicate is judged later, once the destination show is
+      // known: the same bytes imported into a *different* show are not a
+      // duplicate (that is how a mis-import gets corrected).
 
       // ---- Movie fast-path (#33) -------------------------------------
       // The oracle is episode-only: a film filename resolves to nothing and
@@ -1232,6 +1259,13 @@ export class BlackholeClient implements DownloadClient {
         return false;
       }
       const finalPath = path.join(rootFolder, result.proposedPath);
+
+      if (!opts?.force) {
+        if (this.isDuplicateForShow(hash, rootFolder)) return this.declineDuplicate(fullPath, filename);
+        if (db.isProcessed(hash)) {
+          console.log(`[${this.name}] Importing ${filename} for "${show.title}": the same content was imported into a different show before.`);
+        }
+      }
 
       if (this.config.dryRun) {
         console.log(`[${this.name}] [dry-run] Would move ${filename} -> ${finalPath}`);

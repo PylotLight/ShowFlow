@@ -362,7 +362,7 @@ describe('runAutoGrabCycle', () => {
   test('upgrade slice: capped, misses back off, disabled by setting', async () => {
     const db = seedSeason({ lastAirDaysAgo: 30, missing: [] });
     const pool = [1, 2, 3, 4, 5].map(n => ({
-      showId: 's', showTitle: 'Pack Show', seriesType: null, profile: null, libraryTypeId: null,
+      showId: 's', showTitle: 'Pack Show', showYear: null, seriesType: null, profile: null, libraryTypeId: null,
       season: 1, episode: n, filePath: `/m/e${n}.mkv`, profileId: 'standard', profileName: 'Standard',
       cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore: 20_000, lastSearchedAt: null,
       upgradeMisses: 0, cutoffKey: 'standard|WEBDL-1080p|', airDate: null, givenUp: null,

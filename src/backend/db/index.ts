@@ -355,6 +355,7 @@ export class DatabaseManager {
 
   logProcessedFile(hash: string, original: string, final: string) { return system.logProcessedFile(this, hash, original, final); }
   isProcessed(hash: string) { return system.isProcessed(this, hash); }
+  getProcessedFile(hash: string) { return system.getProcessedFile(this, hash); }
   removeProcessedFile(hash: string) { return system.removeProcessedFile(this, hash); }
 
   // ---- Grabbed releases (series -> release -> episode tracking) -----------

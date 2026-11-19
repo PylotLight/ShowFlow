@@ -141,6 +141,7 @@ export interface CandidateEpisode {
 export interface CandidateShow {
   id: string;
   title: string;
+  year?: number | null;
   seriesType: string;
   profileId: string;
   /** library_types.indexers restriction; null = every enabled indexer. */
@@ -157,9 +158,9 @@ const parser = new FilenameParser();
  * absolute-number matching for absolute series (e.g. "[Group] Show - 012").
  */
 export function matchReleaseToShow(title: string, show: CandidateShow): CandidateEpisode[] {
-  const opts = { absolute: show.seriesType !== 'standard' };
+  const opts = { absolute: show.seriesType !== 'standard', showYear: show.year ?? null };
   // Cheap title gate first: absolute mode returns the title-words check only.
-  if (!isRelevantMatch(title, show.title, 0, undefined, { absolute: true })) return [];
+  if (!isRelevantMatch(title, show.title, 0, undefined, { absolute: true, showYear: show.year ?? null })) return [];
 
   let absNumbers: number[] | null = null;
   if (show.seriesType === 'absolute') {
@@ -198,6 +199,7 @@ function buildCandidateShows(dbm: DatabaseManager, rows: (RssCandidateEpisode & 
       show = {
         id: row.show_id,
         title: row.show_title,
+        year: row.show_year ?? null,
         seriesType,
         profileId: libraryType?.quality_profile_id ?? dbm.resolveProfileId(row.profile) ?? '',
         allowedIndexers: allowed,
@@ -358,7 +360,7 @@ export async function runRssSyncCycle(
         // that shows up on a feed is still taken.
         : listCutoffUnmetEpisodes(dbm, { nowMs, cooldownIso, applyBackoff: false, includeGivenUp: true });
       upgradeRows = pool.map(u => ({
-        show_id: u.showId, show_title: u.showTitle, series_type: u.seriesType, profile: u.profile,
+        show_id: u.showId, show_title: u.showTitle, show_year: u.showYear, series_type: u.seriesType, profile: u.profile,
         library_type_id: u.libraryTypeId, season_number: u.season, episode_number: u.episode,
         air_date: null, air_time: null, expected_release_at: null, release_delay_minutes: null,
         existing_score: u.existingScore,
@@ -387,7 +389,7 @@ export async function runRssSyncCycle(
         const seasons = [...new Set(show.episodes.filter(e => e.existingScore == null && e.sceneSeason == null).map(e => e.season))];
         for (const season of seasons) {
           if (!isSeasonPackTitle(release.title, season)) continue;
-          if (!isRelevantMatch(release.title, show.title, season)) continue;
+          if (!isRelevantMatch(release.title, show.title, season, undefined, { showYear: show.year ?? null })) continue;
           const key = `${show.id}::${season}`;
           if (!seasonOk.has(key)) seasonOk.set(key, packableSeason(dbm, show, season, minMissing, nowMs, nowIso));
           const episodes = seasonOk.get(key);

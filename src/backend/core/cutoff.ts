@@ -275,6 +275,8 @@ export function upgradeGiveUpReason(
 export interface CutoffUnmetEpisode {
   showId: string;
   showTitle: string;
+  /** Release year, for telling same-titled shows apart when matching feeds. */
+  showYear: number | null;
   seriesType: string | null;
   profile: string | null;
   libraryTypeId: string | null;
@@ -346,6 +348,7 @@ export function listCutoffUnmetEpisodes(
     out.push({
       showId: row.show_id,
       showTitle: row.show_title,
+      showYear: row.show_year ?? null,
       seriesType: row.series_type,
       profile: row.profile,
       libraryTypeId: row.library_type_id,

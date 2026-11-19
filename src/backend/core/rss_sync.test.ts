@@ -335,7 +335,7 @@ describe('runRssSyncCycle: season packs + cutoff upgrades', () => {
   test('cutoff-unmet episode is grabbed only for a strictly better, new release', async () => {
     const db = seed();
     const upgrade = (existingScore: number) => [{
-      showId: 'due', showTitle: 'Due Show', seriesType: 'standard', profile: null, libraryTypeId: null,
+      showId: 'due', showTitle: 'Due Show', showYear: null, seriesType: 'standard', profile: null, libraryTypeId: null,
       season: 1, episode: 2, filePath: '/media/due/e2.mkv', profileId: 'standard', profileName: 'Standard',
       cutoffName: 'WEBDL-1080p', currentQuality: '720p', existingScore, lastSearchedAt: null,
       upgradeMisses: 0, cutoffKey: 'standard|WEBDL-1080p|', airDate: null, givenUp: null,

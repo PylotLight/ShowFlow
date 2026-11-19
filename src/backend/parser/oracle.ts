@@ -143,7 +143,7 @@ export class Oracle {
       parsed,
     });
 
-    const localCandidate = this.findLocalShow(parsed.show);
+    const localCandidate = this.findLocalShow(parsed.show, parsed.year);
 
     if (localCandidate) {
       debugLog('Resolved show from local database before provider lookup', {
@@ -213,7 +213,7 @@ export class Oracle {
     this.lastSearchResults = searchResults;
     this.lastProviderAttempts = [];
 
-    let matchedShow = this.matchProviderShow(parsed.show, searchResults);
+    let matchedShow = this.matchProviderShow(parsed.show, searchResults, parsed.year);
 
     this.lastProviderAttempts.push({
       provider: preferredProvider,
@@ -259,7 +259,7 @@ export class Oracle {
         });
 
 
-        const fallbackMatch = this.matchProviderShow(parsed.show, fallbackResults);
+        const fallbackMatch = this.matchProviderShow(parsed.show, fallbackResults, parsed.year);
         this.lastProviderAttempts[
           this.lastProviderAttempts.length - 1
         ]!.matchedTitle = fallbackMatch?.title ?? null;
@@ -364,8 +364,14 @@ export class Oracle {
   /**
    * Exact local-title match is indexed and always attempted first.
    * Fuzzy local matching is a fallback only; it refuses close alternatives.
+   *
+   * `year` disambiguates same-titled shows ("Scrubs" 2001 vs
+   * "Scrubs (2026)"). The parser strips a parenthesized year from the show
+   * name, so without this a release named "Scrubs (2026) S02E04" resolves to
+   * whichever same-titled show sorts first — the original series — and the
+   * revival's episode never gets a file.
    */
-  private findLocalShow(parsedTitle: string): LocalShowCandidate | null {
+  private findLocalShow(parsedTitle: string, year?: number | null): LocalShowCandidate | null {
     const normalized = normalizeTitle(parsedTitle);
 
     const exactRows = db.findShowsByNormalizedTitle(
@@ -378,6 +384,7 @@ export class Oracle {
       exactCandidates,
       normalized,
       true,
+      year,
     );
 
     if (exact) {
@@ -391,7 +398,15 @@ export class Oracle {
       return null;
     }
 
-    const fuse = new Fuse(fuzzyCandidates, {
+    // A year-bearing release should only fuzzy-match the same-year remake.
+    // If nothing carries that year, keep today's full candidate set rather
+    // than guessing from bad metadata.
+    const yearMatched = year != null
+      ? fuzzyCandidates.filter(candidate => candidate.show.year === year)
+      : [];
+    const pool = yearMatched.length > 0 ? yearMatched : fuzzyCandidates;
+
+    const fuse = new Fuse(pool, {
       keys: ['titles'],
       includeScore: true,
       threshold: 0.32,
@@ -486,6 +501,7 @@ export class Oracle {
     candidates: LocalShowCandidate[],
     normalizedQuery: string,
     requireExact: boolean,
+    year?: number | null,
   ): LocalShowCandidate | null {
     const matching = candidates.filter(candidate => {
       return candidate.titles.some(title => {
@@ -498,7 +514,16 @@ export class Oracle {
       return null;
     }
 
-    const sorted = [...matching].sort((a, b) => {
+    // Same-titled shows (a remake or revival) are common: when the release
+    // names a year, prefer the candidate whose year matches. Fall back to
+    // the full exact set when no candidate carries that year, so a wrong or
+    // missing year in the release never blocks an otherwise exact match.
+    const yearMatched = year != null
+      ? matching.filter(candidate => candidate.show.year === year)
+      : [];
+    const pool = yearMatched.length > 0 ? yearMatched : matching;
+
+    const sorted = [...pool].sort((a, b) => {
       if (a.isPrimary !== b.isPrimary) {
         return a.isPrimary ? -1 : 1;
       }
@@ -509,9 +534,11 @@ export class Oracle {
     if (sorted.length > 1) {
       debugLog('Multiple exact local title matches found', {
         normalizedQuery,
+        year,
         matches: sorted.map(candidate => ({
           localShowId: candidate.localShowId,
           title: candidate.show.title,
+          year: candidate.show.year,
           providerType: candidate.providerType,
           providerId: candidate.providerId,
         })),
@@ -553,6 +580,7 @@ export class Oracle {
   private matchProviderShow(
     parsedTitle: string,
     results: Show[],
+    year?: number | null,
   ): Show | null {
     const normalizedQuery = normalizeTitle(parsedTitle);
 
@@ -565,14 +593,20 @@ export class Oracle {
       })
     );
 
-    const exact = results.find(show =>
+    const exactMatches = results.filter(show =>
       this.getProviderTitles(show).some(
         title => normalizeTitle(title) === normalizedQuery,
       ),
     );
 
-    if (exact) {
-      return exact;
+    // A release that names a year ("Scrubs (2026)") should pick the same-year
+    // show when several provider results share the title. No year, or no
+    // candidate with that year, keeps the first exact result.
+    if (exactMatches.length > 0) {
+      const yearMatch = year != null
+        ? exactMatches.find(show => show.year === year)
+        : undefined;
+      return yearMatch ?? exactMatches[0]!;
     }
 
     const candidates = results.map(show => ({
@@ -592,15 +626,22 @@ export class Oracle {
     const matches = fuse.search(normalizedQuery);
     if (matches.length === 0) return null;
 
-    // Apply a score boost (bonus) for library shows (lower score is better in Fuse)
+    // Apply a score boost (bonus) for library shows (lower score is better in
+    // Fuse), and for the candidate whose year the release names. The year
+    // boost is larger than the library boost: a year is explicit evidence of
+    // which same-titled show this is.
     const scoredMatches = matches.map(m => {
       const isLib = m.item.isLibrary;
       const rawScore = m.score ?? 1.0;
-      // Boost library shows by subtracting 0.15 from their Fuse score
-      const adjustedScore = isLib ? Math.max(0, rawScore - 0.15) : rawScore;
+      const yearMatch = year != null && m.item.show.year === year;
+      const adjustedScore = Math.max(
+        0,
+        rawScore - (isLib ? 0.15 : 0) - (yearMatch ? 0.2 : 0),
+      );
       return {
         ...m,
         adjustedScore,
+        yearMatch,
       };
     });
 
@@ -615,6 +656,7 @@ export class Oracle {
 
     if (
       second != null &&
+      !best.yearMatch &&
       Math.abs(second.adjustedScore - best.adjustedScore) < 0.04
     ) {
       debugLog('Ambiguous provider result; refusing automatic selection', {
@@ -1120,7 +1162,7 @@ export class Oracle {
     parsed.show = this.cleanParsedTitle(parsed.show);
     debugLog('List-resolve: parsed filename', { filename, parsed });
 
-    const localCandidate = this.findLocalShow(parsed.show);
+    const localCandidate = this.findLocalShow(parsed.show, parsed.year);
     if (!localCandidate) {
       debugLog('List-resolve: no local match; returning unresolved', {
         parsedTitle: parsed.show,

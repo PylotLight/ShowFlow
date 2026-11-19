@@ -24,6 +24,21 @@ export function isProcessed(self: DatabaseManager, hash: string): boolean {
   return !!row;
 }
 
+export function getProcessedFile(self: DatabaseManager, hash: string): {
+  file_hash: string;
+  original_path: string | null;
+  final_path: string | null;
+} | null {
+  return self.drizz.select({
+    file_hash: schema.processedFiles.file_hash,
+    original_path: schema.processedFiles.original_path,
+    final_path: schema.processedFiles.final_path,
+  })
+    .from(schema.processedFiles)
+    .where(eq(schema.processedFiles.file_hash, hash))
+    .get() ?? null;
+}
+
 export function removeProcessedFile(self: DatabaseManager, hash: string) {
   self.drizz.delete(schema.processedFiles).where(eq(schema.processedFiles.file_hash, hash)).run();
 }

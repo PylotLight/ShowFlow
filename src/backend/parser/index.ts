@@ -1,5 +1,11 @@
 export interface ParsedFilename {
   show: string;
+  /**
+   * A parenthesized year in the title, e.g. "Scrubs (2026) S02E04". Kept
+   * separately from `show` so resolution can tell same-titled shows apart
+   * ("Scrubs" 2001 vs "Scrubs (2026)") without poisoning the search title.
+   */
+  year?: number;
   season?: number;
   episodes?: number[];
   absoluteNumbers?: number[];
@@ -48,6 +54,7 @@ export class FilenameParser {
 
   parse(filename: string): ParsedFilename | null {
     const baseName = this.removeExtension(filename);
+    const year = this.extractShowYear(baseName);
     const normalized = this.normalizeReleaseName(baseName);
 
     for (const pattern of this.patterns) {
@@ -62,6 +69,7 @@ export class FilenameParser {
 
       return {
         show,
+        year,
         season,
         episodes,
       };
@@ -84,12 +92,33 @@ export class FilenameParser {
 
     return {
       show,
+      year,
       absoluteNumbers,
     };
   }
 
   private removeExtension(filename: string): string {
     return filename.replace(/\.[^.\\/]+$/, '');
+  }
+
+  /**
+   * A parenthesized 4-digit year is TVDB/TMDB-style show disambiguation
+   * ("Scrubs (2026)"), not part of the searchable title. The normalized
+   * release name drops bracketed tags, so capture it first. Only the part
+   * before the first season/episode marker counts, so a year in an episode
+   * title ("Show S01E01 - The 2026 Problem") is not mistaken for the show
+   * year.
+   */
+  private extractShowYear(input: string): number | undefined {
+    const marker = input.search(
+      /[.\s_-](?:S\d{1,2}[.\s_-]*E\d|\d{1,2}x\d|Season[.\s_-]+\d)/i,
+    );
+    const head = marker === -1 ? input : input.slice(0, marker);
+    const match = /\((\d{4})\)/.exec(head);
+    if (!match) return undefined;
+
+    const year = Number.parseInt(match[1]!, 10);
+    return year >= 1900 && year <= 2100 ? year : undefined;
   }
 
   private normalizeReleaseName(input: string): string {

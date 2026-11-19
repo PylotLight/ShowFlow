@@ -360,7 +360,9 @@ describe("Manual Import explanations", () => {
   test("duplicate content hash is recorded as DUPLICATE", async () => {
     const name = drop("Explain.Show.S01E01.1080p.WEB-DL.H.264-DUP.mkv");
     const full = path.join(watchRoot, name);
-    db.logProcessedFile(await hashFileForDedupe(full), full, "/somewhere/else.mkv");
+    // Duplicate means "already imported into THIS show": the recorded
+    // destination is inside the show's folder.
+    db.logProcessedFile(await hashFileForDedupe(full), full, path.join(libraryRoot, "Season 01", "Explain Show - S01E01.mkv"));
     const client = makeClient([1]);
     await (client as any).handleFile(watchRoot, name);
     expect(fs.existsSync(full)).toBe(true);

@@ -48,6 +48,19 @@ test('TVDB year suffix does not sink year-suffixed shows', () => {
   expect(isRelevantMatch('Dark.Matter.2024.S02.2160p', 'Dark Matter (2024)', 2)).toBe(true);
 });
 
+test('stored show year separates same-titled shows without a title suffix', () => {
+  // The original "Scrubs" row has year 2001 but no "(2001)" in its title.
+  // Without the stored year a 2026 revival release looks like a match.
+  expect(isRelevantMatch(
+    'Scrubs (2026) S02E04 - My Chief - 2160p HDR Ai Upscale -Mesc',
+    'Scrubs', 2, 4, { showYear: 2001 })).toBe(false);
+  expect(isRelevantMatch(
+    'Scrubs (2026) S02E04 - My Chief - 2160p HDR Ai Upscale -Mesc',
+    'Scrubs (2026)', 2, 4, { showYear: 2026 })).toBe(true);
+  // No year in the release still matches either show.
+  expect(isRelevantMatch('Scrubs S02E04 1080p', 'Scrubs', 2, 4, { showYear: 2001 })).toBe(true);
+});
+
 test('punctuation in the show title does not sink matches', () => {
   // "Dexter: Resurrection" used to split into "dexter:" + "resurrection",
   // and "dexter:" never appears in a dotted release name, so every

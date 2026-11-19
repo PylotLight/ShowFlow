@@ -18,6 +18,7 @@ const RSS_WHERE = (Object.keys(GRAB_GATES) as (keyof typeof GRAB_GATES)[])
 export interface RssCandidateEpisode {
   show_id: string;
   show_title: string;
+  show_year: number | null;
   series_type: string | null;
   profile: string | null;
   library_type_id: string | null;
@@ -46,6 +47,7 @@ export function listRssCandidateEpisodes(
     SELECT
       e.show_id,
       s.title                AS show_title,
+      s.year                 AS show_year,
       s.series_type,
       s.profile,
       s.library_type_id,
